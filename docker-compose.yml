@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  attendance-pro:
+    build: .
+    container_name: attendance_pro_v10
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000

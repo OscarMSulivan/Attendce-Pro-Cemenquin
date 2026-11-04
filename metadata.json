@@ -1,0 +1,6 @@
+{
+  "name": "AttendancePRO - Control de Asistencia y Nómina",
+  "description": "Portal integral de Recursos Humanos, Nóminas y Supervisores. Gestión multirrol con semáforo de liberación de nóminas, solicitud y aprobación de vacaciones/incidencias, y suplencias de supervisores.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

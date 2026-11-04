@@ -1,0 +1,2921 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Attendance Pro 2.0 | Sistema Avanzado de Asistencia</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['IBM Plex Mono', 'ui-monospace', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      /* Paleta corporativa — Consola de Control de Accesos */
+      --canvas: #0A0E1A;
+      --surface: #10151F;
+      --surface-2: #151B28;
+      --surface-3: #1B2230;
+      --border: #232B3B;
+      --border-strong: #313B50;
+      --text-primary: #E8EBF2;
+      --text-secondary: #8D97AC;
+      --text-muted: #5B6577;
+
+      --accent: #3159C4;
+      --accent-hover: #3F6BDB;
+      --gold: #B8912E;
+      --gold-soft: rgba(184, 145, 46, 0.14);
+
+      --success: #1E8F63;
+      --warning: #B37F1E;
+      --danger: #C13F3A;
+
+      /* alias de compatibilidad con nombres previos */
+      --primary: var(--accent);
+      --secondary: var(--gold);
+      --dark-bg: var(--canvas);
+      --card-bg: var(--surface);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--canvas);
+      background-image: radial-gradient(1200px 600px at 50% -10%, rgba(49,89,196,0.08), transparent 60%);
+      color: var(--text-primary);
+      scroll-behavior: smooth;
+      min-height: 100vh;
+    }
+
+    .font-mono, .mono-data { font-family: 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: -0.01em; }
+
+    .glass-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    }
+
+    .glass-card:hover {
+      border-color: var(--border-strong);
+    }
+
+    .row-error {
+      background: rgba(193, 63, 58, 0.08) !important;
+      border-left: 3px solid var(--danger);
+    }
+
+    .row-warning {
+      background: rgba(179, 127, 30, 0.10) !important;
+      border-left: 3px solid var(--warning);
+    }
+
+    .row-success {
+      background: rgba(30, 143, 99, 0.06) !important;
+      border-left: 3px solid var(--success);
+    }
+
+    .employee-container {
+      margin-bottom: 2rem;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      page-break-after: always;
+      transition: border-color 0.2s ease;
+    }
+
+    .employee-container:hover {
+      border-color: var(--border-strong);
+    }
+
+    .input-file-ready {
+      border: 1px solid var(--success) !important;
+      background: rgba(30, 143, 99, 0.08);
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .animate-slide-in {
+      animation: fadeUp 0.35s ease-out;
+    }
+
+    .stat-card { position: relative; }
+
+    .progress-bar {
+      height: 3px;
+      background: var(--surface-3);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.4s ease;
+      position: relative;
+    }
+
+    .theme-toggle {
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 100;
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+
+    body.light-mode {
+      --canvas: #F3F5F9;
+      --surface: #FFFFFF;
+      --surface-2: #F2F4F8;
+      --surface-3: #E8ECF3;
+      --border: #E2E6EF;
+      --border-strong: #C9D1E0;
+      --text-primary: #10151F;
+      --text-secondary: #4C5670;
+      --text-muted: #8992A8;
+      background: var(--canvas);
+      background-image: none;
+      color: var(--text-primary);
+    }
+
+    body.light-mode .glass-card {
+      background: var(--surface);
+      border-color: var(--border);
+      box-shadow: 0 1px 3px rgba(16,21,31,0.06);
+    }
+
+    body.light-mode .employee-container {
+      border-color: var(--border);
+    }
+
+    .tooltip { position: relative; }
+
+    .tooltip::before {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%) translateY(-6px);
+      padding: 6px 10px;
+      background: var(--surface-3);
+      color: var(--text-primary);
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+      z-index: 1000;
+    }
+
+    .tooltip:hover::before { opacity: 1; }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid transparent;
+    }
+
+    .badge-success { background: rgba(30,143,99,0.14); color: #4CC291; border-color: rgba(30,143,99,0.35); }
+    .badge-warning { background: rgba(179,127,30,0.16); color: #E3B04B; border-color: rgba(179,127,30,0.4); }
+    .badge-danger  { background: rgba(193,63,58,0.16); color: #ED847E; border-color: rgba(193,63,58,0.4); }
+    .badge-info    { background: rgba(49,89,196,0.16); color: #83A0EE; border-color: rgba(49,89,196,0.4); }
+    .badge-orange  { background: var(--gold-soft); color: var(--gold); border-color: rgba(184,145,46,0.4); }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white; color: black; }
+      .employee-container { border: 1px solid #ccc; margin-bottom: 50px; }
+      .glass-card { background: white; border: 1px solid #ccc; }
+    }
+
+    .loading-spinner {
+      border: 2px solid var(--border);
+      border-radius: 50%;
+      border-top: 2px solid var(--accent);
+      width: 16px;
+      height: 16px;
+      animation: spin 0.8s linear infinite;
+      display: inline-block;
+      margin-right: 8px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .notification {
+      position: fixed;
+      top: 72px;
+      right: 18px;
+      padding: 14px 18px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      border: 1px solid var(--border-strong);
+      border-left: 3px solid var(--accent);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+      transform: translateX(420px);
+      transition: transform 0.3s ease;
+      z-index: 1000;
+      max-width: 350px;
+    }
+
+    .notification.show {
+      transform: translateX(0);
+    }
+
+    .chart-container {
+      position: relative;
+      height: 280px;
+      margin-top: 16px;
+    }
+
+    /* Estilos empresariales para tablas tipo bitácora */
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+
+    table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--surface-2);
+      z-index: 10;
+      padding: 10px 12px;
+      text-align: left;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 10.5px;
+      letter-spacing: 0.07em;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border-strong);
+    }
+
+    table tbody tr {
+      transition: background-color 0.15s ease;
+    }
+
+    table tbody tr:hover {
+      background: var(--surface-3) !important;
+    }
+
+    table tbody td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    /* Credencial / insignia — elemento distintivo del sistema */
+    .id-badge {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      flex-shrink: 0;
+      background: linear-gradient(155deg, var(--gold), #7A5F17);
+      color: #171205;
+      font-weight: 800;
+      font-size: 14px;
+      clip-path: polygon(50% 0%, 100% 22%, 100% 78%, 50% 100%, 0% 78%, 0% 22%);
+    }
+
+    .step-badge {
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 800;
+      color: #171205;
+      background: var(--gold);
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      flex-shrink: 0;
+    }
+
+    /* Botones de selección de archivo */
+    #fileEmpleados::file-selector-button,
+    #fileEmpleados::-webkit-file-upload-button {
+      background: var(--accent); cursor: pointer;
+    }
+    #fileEventos::file-selector-button,
+    #fileEventos::-webkit-file-upload-button {
+      background: var(--surface-3); cursor: pointer;
+    }
+    #fileVacaciones::file-selector-button,
+    #fileVacaciones::-webkit-file-upload-button {
+      background: var(--gold); color: #171205 !important; cursor: pointer;
+    }
+
+    #btnHorarios:hover, #btnAsignar:hover:not(:disabled), #btnChecadasCrudas:hover:not(:disabled) {
+      border-color: var(--gold) !important;
+    }
+
+    /* Modal genérico */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(5, 8, 15, 0.7);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px;
+      overflow-y: auto;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      max-width: 720px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-body { padding: 20px; max-height: 65vh; overflow-y: auto; }
+    .field-label {
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted); display: block; margin-bottom: 4px;
+    }
+    .field-input {
+      width: 100%; padding: 8px 10px; border-radius: 6px; font-size: 13px;
+      background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);
+      outline: none;
+    }
+    .horario-card {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px;
+    }
+
+    .dia-chip {
+      display: flex; align-items: center; justify-content: center;
+      padding: 8px 0; border-radius: 6px; font-size: 10.5px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--border-strong);
+      color: var(--text-muted); transition: all 0.15s ease; user-select: none;
+    }
+    .dia-chip:hover { border-color: var(--gold); }
+    .dia-chip.active {
+      background: var(--gold); border-color: var(--gold); color: #171205;
+    }
+    .dia-detalle-row {
+      display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+    }
+
+    /* Animación de carga */
+    .skeleton {
+      background: linear-gradient(90deg,
+        rgba(255,255,255,0.04) 25%,
+        rgba(255,255,255,0.08) 50%,
+        rgba(255,255,255,0.04) 75%
+      );
+      background-size: 200% 100%;
+      animation: loading 1.5s infinite;
+    }
+
+    @keyframes loading {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+
+  <!-- Botón de tema -->
+  <div class="theme-toggle no-print" onclick="toggleTheme()" data-tooltip="Cambiar tema">
+    <svg id="themeIcon" class="w-5 h-5" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+      <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>
+    </svg>
+  </div>
+
+  <!-- Navbar corporativo -->
+  <nav class="border-b sticky top-0 z-50 no-print" style="background: var(--surface); border-color: var(--border);">
+    <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="id-badge">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-lg font-extrabold tracking-tight" style="color: var(--text-primary)">Attendance<span style="color: var(--gold)">PRO</span></span>
+          </div>
+          <span class="text-[10px] font-semibold uppercase tracking-widest block" style="color: var(--text-muted)">Control de Accesos y Asistencia</span>
+        </div>
+      </div>
+      <div class="flex items-center gap-4">
+        <div id="statusMsg" class="flex items-center text-[10px] font-mono uppercase tracking-widest px-4 py-2 rounded" style="color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border);">
+          <span class="w-1.5 h-1.5 rounded-full mr-2" style="background: var(--success);"></span>
+          Esperando archivos...
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    
+    <!-- Panel de Estadísticas -->
+    <div id="statsPanel" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8 hidden no-print">
+      <div class="stat-card glass-card p-5 animate-slide-in" style="border-top: 2px solid var(--accent);">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-muted)">Horas Totales</p>
+          <svg class="w-4 h-4" style="color: var(--accent)" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <h2 id="statHoras" class="text-3xl font-bold font-mono mb-2" style="color: var(--text-primary)">0.00</h2>
+        <div class="progress-bar">
+          <div id="progressHoras" class="progress-fill" style="width: 0%"></div>
+        </div>
+        <p class="text-xs mt-2" style="color: var(--text-secondary)">H. Extras: <span id="statHorasExtra" class="font-semibold font-mono" style="color: var(--gold)">0.00</span></p>
+      </div>
+      
+      <div class="stat-card glass-card p-5 animate-slide-in" style="border-top: 2px solid var(--danger); animation-delay: 0.05s">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-muted)">Faltas / Incompletos</p>
+          <svg class="w-4 h-4" style="color: var(--danger)" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <h2 id="statFaltas" class="text-3xl font-bold font-mono mb-2" style="color: var(--danger)">0</h2>
+        <div class="progress-bar">
+          <div id="progressFaltas" class="progress-fill" style="width: 0%; background: var(--danger)"></div>
+        </div>
+        <p class="text-xs mt-2" style="color: var(--text-secondary)">Tasa: <span id="tasaFaltas" class="font-semibold font-mono">0%</span></p>
+      </div>
+      
+      <div class="stat-card glass-card p-5 animate-slide-in" style="border-top: 2px solid var(--gold); animation-delay: 0.1s">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-muted)">Incidencias / Vac</p>
+          <svg class="w-4 h-4" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
+            <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm9.707 5.707a1 1 0 00-1.414-1.414L9 12.586l-1.293-1.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <h2 id="statVac" class="text-3xl font-bold font-mono mb-2" style="color: var(--gold)">0</h2>
+        <div class="progress-bar">
+          <div id="progressVac" class="progress-fill" style="width: 0%; background: var(--gold)"></div>
+        </div>
+        <p class="text-xs mt-2" style="color: var(--text-secondary)">Aprobadas: <span id="vacAprobadas" class="font-semibold font-mono" style="color: var(--success)">0</span></p>
+      </div>
+      
+      <div class="stat-card glass-card p-5 animate-slide-in" style="border-top: 2px solid var(--warning); animation-delay: 0.15s">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[10px] font-bold uppercase tracking-widest" style="color: var(--text-muted)">Alertas Jornada</p>
+          <svg class="w-4 h-4" style="color: var(--warning)" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <h2 id="statRet" class="text-3xl font-bold font-mono mb-2" style="color: var(--warning)">0</h2>
+        <div class="progress-bar">
+          <div id="progressRet" class="progress-fill" style="width: 0%; background: var(--warning)"></div>
+        </div>
+        <p class="text-xs mt-2" style="color: var(--text-secondary)">Retardos: <span id="totalRetardos" class="font-semibold font-mono" style="color: var(--warning)">0</span> | Excesivos: <span id="totalRetardosExcesivos" class="font-semibold font-mono" style="color: var(--danger)">0</span></p>
+      </div>
+    </div>
+
+    <!-- Resumen Ejecutivo -->
+    <div id="executiveSummary" class="glass-card p-6 mb-8 hidden no-print animate-slide-in">
+      <h3 class="text-xs font-bold mb-4 flex items-center gap-2 uppercase tracking-widest" style="color: var(--text-secondary)">
+        <svg class="w-4 h-4" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"></path>
+        </svg>
+        Resumen Ejecutivo del Periodo
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="chart-container">
+          <canvas id="incidenciasChart"></canvas>
+        </div>
+        <div class="chart-container">
+          <canvas id="horasChart"></canvas>
+        </div>
+      </div>
+      <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="p-4 rounded-md" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <p class="text-[10px] uppercase tracking-widest mb-1" style="color: var(--text-muted)">Promedio Hrs/Empleado</p>
+          <p id="promedioHoras" class="text-2xl font-bold font-mono" style="color: var(--accent-hover)">0.00</p>
+        </div>
+        <div class="p-4 rounded-md" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <p class="text-[10px] uppercase tracking-widest mb-1" style="color: var(--text-muted)">Asistencia Perfecta</p>
+          <p id="asistenciaPerfecta" class="text-2xl font-bold font-mono" style="color: var(--success)">0</p>
+        </div>
+        <div class="p-4 rounded-md" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <p class="text-[10px] uppercase tracking-widest mb-1" style="color: var(--text-muted)">Tasa de Cumplimiento</p>
+          <p id="tasaCumplimiento" class="text-2xl font-bold font-mono" style="color: var(--gold)">0%</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel de Control -->
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8 no-print">
+      <div class="lg:col-span-3 glass-card p-6">
+        <h3 class="text-xs font-bold mb-4 flex items-center justify-between uppercase tracking-widest" style="color: var(--text-secondary)">
+          <span class="flex items-center gap-2">
+            <svg class="w-4 h-4" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+            </svg>
+            Carga de Archivos
+          </span>
+          <span class="flex items-center gap-2 normal-case tracking-normal">
+            <button id="btnHorarios" type="button" class="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded transition-all" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);">
+              <svg class="w-3.5 h-3.5" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
+              </svg>
+              Horarios
+            </button>
+            <button id="btnAsignar" type="button" disabled class="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded transition-all disabled:opacity-40" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);">
+              <svg class="w-3.5 h-3.5" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"></path>
+              </svg>
+              Asignar a Empleados
+            </button>
+            <button id="btnChecadasCrudas" type="button" disabled class="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded transition-all disabled:opacity-40" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);">
+              <svg class="w-3.5 h-3.5" style="color: var(--gold)" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1.447.894L10 15.118l-4.553 1.776A1 1 0 014 16V4zm2 0v10.566l3.553-1.386a1 1 0 01.894 0L14 14.566V4H6z" clip-rule="evenodd"></path>
+              </svg>
+              Checadas Crudas
+            </button>
+          </span>
+        </h3>
+        
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div class="group">
+            <label class="text-[10px] font-bold uppercase mb-2 block flex items-center gap-2" style="color: var(--text-muted)">
+              <span class="step-badge">1</span>
+              Base de Empleados (CSV o Excel)
+            </label>
+            <div class="relative">
+              <input type="file" id="fileEmpleados" accept=".csv,.xlsx,.xls" class="block w-full text-xs cursor-pointer transition-all file:mr-2 file:py-2 file:px-4 file:rounded file:border-0 file:font-semibold file:text-white" style="color: var(--text-secondary)" onfocus="this.style.outline='none'">
+              <div id="empleadosStatus" class="text-xs mt-2 hidden" style="color: var(--text-muted)"></div>
+              <div id="empleadosGuardadosBanner" class="hidden mt-2 p-2 rounded text-[10px] flex items-center justify-between gap-2" style="background: var(--gold-soft); border: 1px solid rgba(184,145,46,0.4); color: var(--text-primary);">
+                <span id="empleadosGuardadosTexto" class="leading-tight"></span>
+                <div class="flex gap-1 flex-shrink-0">
+                  <button type="button" onclick="usarEmpleadosGuardados()" class="font-bold uppercase tracking-wide px-2 py-1 rounded" style="background: var(--gold); color:#171205;">Usar</button>
+                  <button type="button" onclick="descartarEmpleadosGuardados()" class="font-bold uppercase tracking-wide px-2 py-1 rounded" style="background: var(--surface-3); color: var(--text-muted); border: 1px solid var(--border-strong);">Borrar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div>
+            <label class="text-[10px] font-bold uppercase mb-2 block flex items-center gap-2" style="color: var(--text-muted)">
+              <span class="step-badge">2</span>
+              Eventos Checador (Excel)
+            </label>
+            <div class="relative">
+              <input type="file" id="fileEventos" accept=".xlsx,.xls" disabled class="block w-full text-xs cursor-pointer transition-all file:mr-2 file:py-2 file:px-4 file:rounded file:border-0 file:font-semibold file:text-white disabled:opacity-40" style="color: var(--text-secondary)">
+              <div id="eventosStatus" class="text-xs mt-2 hidden" style="color: var(--text-muted)"></div>
+            </div>
+          </div>
+          
+          <div>
+            <label class="text-[10px] font-bold uppercase mb-2 block flex items-center gap-2" style="color: var(--text-muted)">
+              <span class="step-badge">3</span>
+              Vacaciones / FINJ
+            </label>
+            <div class="relative">
+              <input type="file" id="fileVacaciones" accept=".csv,.xlsx" disabled class="block w-full text-xs cursor-pointer transition-all file:mr-2 file:py-2 file:px-4 file:rounded file:border-0 file:font-semibold file:text-white disabled:opacity-40" style="color: var(--text-secondary)">
+              <div id="vacacionesStatus" class="text-xs mt-2 hidden" style="color: var(--text-muted)"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-md" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <div>
+            <label class="text-[10px] font-bold uppercase block mb-2 flex items-center gap-2" style="color: var(--text-muted)">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"></path>
+              </svg>
+              Periodo de Nómina
+            </label>
+            <select id="periodoSemana" class="w-full rounded p-2 text-sm outline-none transition-all" style="background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-primary);"></select>
+          </div>
+          
+          <div>
+            <label class="text-[10px] font-bold uppercase block mb-2 flex items-center gap-2" style="color: var(--text-muted)">
+              <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"></path>
+              </svg>
+              Filtrar por Supervisor
+            </label>
+            <select id="jefeFilter" disabled class="w-full rounded p-2 text-sm outline-none transition-all" style="background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-primary);"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="glass-card p-6 flex flex-col gap-3 justify-center">
+        <div class="space-y-1">
+          <label class="text-[10px] font-bold uppercase block flex items-center gap-2" style="color: var(--text-muted)">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path>
+              <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path>
+            </svg>
+            Correo Destino
+          </label>
+          <input type="email" id="emailDestino" placeholder="nomina@empresa.com" class="w-full rounded p-2 text-sm outline-none transition-all" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);">
+        </div>
+        
+        <button id="btnGenerar" class="w-full font-bold py-3 rounded text-sm transition-all flex items-center justify-center gap-2" style="background: var(--accent); color: white;" onmouseover="this.style.background='var(--accent-hover)'" onmouseout="this.style.background='var(--accent)'">
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+          </svg>
+          Generar Reporte
+        </button>
+        
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnExport" disabled class="font-bold py-2 rounded text-[10px] uppercase tracking-wider disabled:opacity-30 transition-all flex items-center justify-center gap-1" style="background: var(--success); color: white;">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"></path>
+            </svg>
+            Excel
+          </button>
+          <button id="btnCorreo" disabled class="font-bold py-2 rounded text-[10px] uppercase tracking-wider disabled:opacity-30 transition-all flex items-center justify-center gap-1" style="background: var(--gold); color: #171205;">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path>
+              <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path>
+            </svg>
+            Correo
+          </button>
+        </div>
+        
+        <button id="btnPrint" disabled class="font-bold py-2 rounded text-[10px] uppercase tracking-wider disabled:opacity-30 transition-all flex items-center justify-center gap-1" style="background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-strong);">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M5 4v3H4a2 2 0 00-2 2v3a2 2 0 002 2h1v2a2 2 0 002 2h6a2 2 0 002-2v-2h1a2 2 0 002-2V9a2 2 0 00-2-2h-1V4a2 2 0 00-2-2H7a2 2 0 00-2 2zm8 0H7v3h6V4zm0 8H7v4h6v-4z" clip-rule="evenodd"></path>
+          </svg>
+          Imprimir
+        </button>
+      </div>
+    </div>
+
+    <!-- Búsqueda -->
+    <div id="searchBox" class="mb-6 hidden no-print">
+      <div class="glass-card p-4">
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4" style="color: var(--text-muted)" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"></path>
+          </svg>
+          <input type="text" id="inputSearch" placeholder="Buscar empleado por nombre, ID o supervisor..." class="w-full rounded pl-10 pr-4 py-3 text-sm outline-none transition-all" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);">
+        </div>
+        <div id="searchResults" class="mt-2 text-xs" style="color: var(--text-muted)"></div>
+      </div>
+    </div>
+
+    <!-- Contenedor de Reportes -->
+    <div id="reportContainer" class="space-y-8">
+      <div class="text-center py-20 no-print border border-dashed glass-card" style="border-color: var(--border-strong);">
+        <div class="id-badge mx-auto mb-4" style="width: 56px; height: 56px;">
+          <svg class="w-7 h-7" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+          </svg>
+        </div>
+        <p class="text-base font-semibold" style="color: var(--text-primary)">Panel de Control Listo</p>
+        <p class="text-sm mt-2" style="color: var(--text-secondary)">Carga los archivos CSV/Excel para comenzar la auditoría.</p>
+        <div class="mt-6 flex items-center justify-center gap-3 flex-wrap">
+          <span class="badge badge-info">CSV o Excel para Empleados</span>
+          <span class="badge badge-success">Excel para Eventos</span>
+          <span class="badge badge-orange">CSV para Vacaciones</span>
+        </div>
+        <div class="mt-4">
+          <p class="text-xs" style="color: var(--text-muted)">Usa Excel de empleados para habilitar validación de horarios</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Notificación flotante -->
+  <div id="notification" class="notification">
+    <div class="flex items-center gap-3">
+      <div id="notifIcon"></div>
+      <div>
+        <p id="notifTitle" class="font-bold text-sm" style="color: var(--text-primary)"></p>
+        <p id="notifMsg" class="text-xs" style="color: var(--text-secondary)"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Gestión de Horarios -->
+  <div id="modalHorarios" class="modal-overlay no-print">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="text-sm font-bold flex items-center gap-2" style="color: var(--text-primary)">
+          <span class="id-badge" style="width:28px;height:28px;">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path></svg>
+          </span>
+          Horarios Programados
+        </h3>
+        <button onclick="cerrarModalHorarios()" class="p-1 rounded transition-all" style="color: var(--text-muted)">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="flex items-center justify-between gap-2 mb-4 p-2.5 rounded-md" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <p class="text-[10px]" style="color: var(--text-muted)">Respalda tus horarios y asignaciones en un archivo por si el navegador borra los datos.</p>
+          <div class="flex gap-1.5 flex-shrink-0">
+            <button type="button" onclick="exportarRespaldo()" class="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1.5 rounded" style="background: var(--surface-3); color: var(--text-primary); border: 1px solid var(--border-strong);">⬇ Exportar</button>
+            <button type="button" onclick="document.getElementById('inputImportarRespaldo').click()" class="text-[10px] font-bold uppercase tracking-wide px-2.5 py-1.5 rounded" style="background: var(--gold); color: #171205;">⬆ Importar</button>
+            <input type="file" id="inputImportarRespaldo" accept=".json" class="hidden" onchange="importarRespaldo(this.files[0])">
+          </div>
+        </div>
+        <div id="listaHorarios" class="space-y-3 mb-5"></div>
+
+        <div class="pt-4" style="border-top: 1px solid var(--border);">
+          <p class="text-xs font-bold uppercase tracking-widest mb-3" style="color: var(--text-muted)" id="formHorarioTitulo">Nuevo Horario</p>
+          <input type="hidden" id="horarioEditando" value="">
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="field-label">Código</label>
+              <input type="text" id="hCodigo" placeholder="Ej. PRODT1" class="field-input" maxlength="12">
+            </div>
+            <div>
+              <label class="field-label">Nombre descriptivo</label>
+              <input type="text" id="hNombre" placeholder="Ej. Producción Turno 1" class="field-input">
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <p class="field-label mb-2">Días laborados (clic para activar/desactivar)</p>
+              <div class="grid grid-cols-7 gap-1.5" id="diasSelector"></div>
+              <p class="text-[10px] mt-1.5" style="color: var(--text-muted)">Los días no marcados se tomarán como <strong>Descanso</strong> automáticamente al generar el reporte.</p>
+            </div>
+
+            <div class="p-3 rounded-md" style="background: var(--surface-3);">
+              <p class="text-[10px] font-bold uppercase tracking-widest mb-2" style="color: var(--gold)">Plantilla rápida — aplica a los días marcados arriba</p>
+              <div class="grid grid-cols-4 gap-3 items-end">
+                <div><label class="field-label">Entrada</label><input type="time" id="hPlantillaEntrada" class="field-input" value="08:00"></div>
+                <div><label class="field-label">Salida</label><input type="time" id="hPlantillaSalida" class="field-input" value="17:00"></div>
+                <div><label class="field-label">Comida (min)</label><input type="number" id="hPlantillaComida" class="field-input" value="60" min="0" step="5"></div>
+                <button type="button" onclick="aplicarPlantillaADias()" class="text-[10px] font-bold uppercase tracking-wide rounded py-2.5" style="background: var(--accent); color: white;">Aplicar</button>
+              </div>
+            </div>
+
+            <div>
+              <p class="field-label mb-2">Detalle por día (puedes ajustar días individuales, ej. Sábado)</p>
+              <div id="diasDetalle" class="space-y-2"></div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 mt-4">
+            <button onclick="guardarHorarioForm()" class="flex-1 font-bold py-2.5 rounded text-xs uppercase tracking-wider transition-all" style="background: var(--accent); color: white;">Guardar Horario</button>
+            <button id="btnCancelarEdicion" onclick="resetFormHorario()" class="hidden px-4 py-2.5 rounded text-xs uppercase tracking-wider transition-all" style="background: var(--surface-3); color: var(--text-secondary); border: 1px solid var(--border-strong);">Cancelar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Asignar Horarios a Empleados -->
+  <div id="modalAsignar" class="modal-overlay no-print">
+    <div class="modal-box" style="max-width: 680px;">
+      <div class="modal-header">
+        <h3 class="text-sm font-bold flex items-center gap-2" style="color: var(--text-primary)">
+          <span class="id-badge" style="width:28px;height:28px;">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"></path></svg>
+          </span>
+          Asignar Horarios a Empleados
+        </h3>
+        <button onclick="cerrarModalAsignar()" class="p-1 rounded transition-all" style="color: var(--text-muted)">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- Filtros -->
+        <p class="field-label mb-1">Filtrar lista</p>
+        <div class="p-3 rounded-md mb-3 grid grid-cols-1 md:grid-cols-3 gap-2" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <select id="filtroSupervisorAsignar" class="field-input" onchange="renderListaAsignacion()"><option value="">Todos los supervisores</option></select>
+          <select id="filtroHorarioAsignar" class="field-input" onchange="renderListaAsignacion()"><option value="">Todos los horarios</option></select>
+          <input type="text" id="buscarAsignar" placeholder="Buscar por nombre o ID…" class="field-input" oninput="renderListaAsignacion()">
+        </div>
+
+        <!-- Acción masiva sobre seleccionados -->
+        <p class="field-label mb-1">Aplicar a los empleados marcados abajo</p>
+        <div class="p-3 rounded-md mb-4 flex flex-col md:flex-row items-stretch md:items-center gap-2" style="background: var(--gold-soft); border: 1px solid rgba(184,145,46,0.4);">
+          <select id="bulkHorario" class="field-input flex-1">
+            <option value="">Selecciona horario…</option>
+            <option value="__NINGUNO__">Sin horario</option>
+          </select>
+          <button onclick="aplicarAHorarioSeleccionados()" class="text-xs font-bold uppercase tracking-wider rounded px-4 py-2 transition-all flex-shrink-0" style="background: var(--gold); color: #171205;">
+            Aplicar a <span id="contadorSeleccion">0</span> seleccionado(s)
+          </button>
+        </div>
+
+        <div class="flex items-center justify-between mb-2">
+          <label class="flex items-center gap-2 text-[11px] font-semibold" style="color: var(--text-secondary)">
+            <input type="checkbox" id="chkTodosAsignar" onchange="toggleSeleccionTodos(this.checked)">
+            Seleccionar todos los visibles
+          </label>
+          <span id="totalVisiblesAsignar" class="text-[10px]" style="color: var(--text-muted)"></span>
+        </div>
+        <div id="listaAsignacion" class="space-y-1.5"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Checadas Crudas (auditoría) -->
+  <div id="modalChecadasCrudas" class="modal-overlay no-print">
+    <div class="modal-box" style="max-width: 760px;">
+      <div class="modal-header">
+        <h3 class="text-sm font-bold flex items-center gap-2" style="color: var(--text-primary)">
+          <span class="id-badge" style="width:28px;height:28px;">
+            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1.447.894L10 15.118l-4.553 1.776A1 1 0 014 16V4zm2 0v10.566l3.553-1.386a1 1 0 01.894 0L14 14.566V4H6z" clip-rule="evenodd"></path></svg>
+          </span>
+          Checadas Crudas del Checador
+        </h3>
+        <button onclick="cerrarModalChecadasCrudas()" class="p-1 rounded transition-all" style="color: var(--text-muted)">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="text-[11px] mb-3" style="color: var(--text-muted)">Muestra TODAS las checadas que registró el checador para el empleado, tal como llegaron en el Excel — útil para revisar días con más de una entrada o salida del mismo tipo.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+          <select id="crudaEmpleadoSelect" class="field-input" onchange="renderChecadasCrudas()">
+            <option value="">Selecciona un empleado…</option>
+          </select>
+          <input type="text" id="crudaBuscarEmpleado" placeholder="Buscar por nombre o ID…" class="field-input" oninput="filtrarSelectEmpleadoCrudas()">
+        </div>
+        <div id="listaChecadasCrudas" class="space-y-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== CONFIGURACIÓN GLOBAL ====================
+    let empleadosDB = {}, eventosDB = {}, vacacionesDB = {}, exportRows = [];
+    let incidenciasChart, horasChart;
+    const festivos2026 = {
+      "2026-01-01":"Año Nuevo","2026-02-02":"Constitución","2026-03-16":"Natalicio Juárez",
+      "2026-05-01":"Trabajo","2026-09-16":"Independencia","2026-11-16":"Revolución","2026-12-25":"Navidad"
+    };
+    const opcionesIncidencia = [
+      "", "Asistencia", "Vacaciones", "Descanso", "Festivo", "RST",
+      "Permiso sin Goce", "Permiso con goce", "Incapacidad",
+      "Ingreso de Empleado", "Pase Medico", "Checado sin Gafete"
+    ];
+
+    // ==================== CONFIGURACIÓN DE HORARIOS ====================
+    // Tolerancia: 29 minutos antes, 14 minutos después
+    const TOLERANCIA_ANTES = 29;
+    const TOLERANCIA_DESPUES = 14;
+    
+    const HORARIOS_POR_DEFECTO = {
+      "ADMO": {
+        nombre: "Administrativo",
+        dias: {
+          0: null,
+          1: { entrada: "08:00", salida: "17:00", comida: 60 },
+          2: { entrada: "08:00", salida: "17:00", comida: 60 },
+          3: { entrada: "08:00", salida: "17:00", comida: 60 },
+          4: { entrada: "08:00", salida: "17:00", comida: 60 },
+          5: { entrada: "08:00", salida: "17:00", comida: 60 },
+          6: { entrada: "08:00", salida: "13:00", comida: 0 }
+        }
+      },
+      "ADMOT2": {
+        nombre: "Administrativo Turno 2",
+        dias: {
+          0: null,
+          1: { entrada: "09:00", salida: "18:00", comida: 60 },
+          2: { entrada: "09:00", salida: "18:00", comida: 60 },
+          3: { entrada: "09:00", salida: "18:00", comida: 60 },
+          4: { entrada: "09:00", salida: "18:00", comida: 60 },
+          5: { entrada: "09:00", salida: "18:00", comida: 60 },
+          6: { entrada: "08:00", salida: "13:00", comida: 0 }
+        }
+      }
+    };
+    
+    // Convierte horarios guardados en el formato anterior (lunVie/sabado/domingo) al formato nuevo por día
+    function migrarHorarioAFormatoDias(h) {
+      if (h.dias) return h;
+      return {
+        nombre: h.nombre,
+        dias: {
+          0: h.domingo || null,
+          1: h.lunVie || null,
+          2: h.lunVie || null,
+          3: h.lunVie || null,
+          4: h.lunVie || null,
+          5: h.lunVie || null,
+          6: h.sabado || null
+        }
+      };
+    }
+    
+    // Base de datos de horarios (persistida en localStorage, editable desde la UI)
+    let horariosDB = {};
+    // Asignación empleado → código de horario (persistida en localStorage)
+    let asignacionesDB = {};
+    
+    function cargarHorariosYAsignaciones() {
+      try {
+        const h = JSON.parse(localStorage.getItem('attendanceProHorarios') || 'null');
+        horariosDB = h && Object.keys(h).length ? h : JSON.parse(JSON.stringify(HORARIOS_POR_DEFECTO));
+      } catch(e) {
+        horariosDB = JSON.parse(JSON.stringify(HORARIOS_POR_DEFECTO));
+      }
+      
+      // Migrar horarios guardados en el formato anterior (lunVie/sabado/domingo)
+      let huboMigracion = false;
+      Object.keys(horariosDB).forEach(cod => {
+        if (!horariosDB[cod].dias) {
+          horariosDB[cod] = migrarHorarioAFormatoDias(horariosDB[cod]);
+          huboMigracion = true;
+        }
+      });
+      if (huboMigracion) guardarHorarios();
+      
+      try {
+        asignacionesDB = JSON.parse(localStorage.getItem('attendanceProAsignaciones') || '{}');
+      } catch(e) {
+        asignacionesDB = {};
+      }
+    }
+    
+    function guardarHorarios() {
+      localStorage.setItem('attendanceProHorarios', JSON.stringify(horariosDB));
+    }
+    
+    function guardarAsignaciones() {
+      localStorage.setItem('attendanceProAsignaciones', JSON.stringify(asignacionesDB));
+    }
+    
+    // ==================== BASE DE EMPLEADOS PERSISTENTE ====================
+    function guardarEmpleadosDB() {
+      if (!empleadosDB || !Object.keys(empleadosDB).length) return;
+      localStorage.setItem('attendanceProEmpleadosDB', JSON.stringify({
+        empleados: empleadosDB,
+        guardadoEn: new Date().toISOString()
+      }));
+    }
+    
+    function obtenerEmpleadosGuardados() {
+      try {
+        return JSON.parse(localStorage.getItem('attendanceProEmpleadosDB') || 'null');
+      } catch(e) {
+        return null;
+      }
+    }
+    
+    function actualizarBannerEmpleadosGuardados() {
+      const banner = document.getElementById('empleadosGuardadosBanner');
+      const texto = document.getElementById('empleadosGuardadosTexto');
+      const guardado = obtenerEmpleadosGuardados();
+      
+      if (guardado && guardado.empleados && Object.keys(guardado.empleados).length) {
+        const n = Object.keys(guardado.empleados).length;
+        const fecha = new Date(guardado.guardadoEn).toLocaleString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        texto.textContent = `📋 Base guardada: ${n} empleados (actualizada ${fecha})`;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+    
+    function usarEmpleadosGuardados() {
+      const guardado = obtenerEmpleadosGuardados();
+      if (!guardado || !guardado.empleados) return;
+      
+      empleadosDB = guardado.empleados;
+      aplicarAsignacionesAEmpleados();
+      
+      const jefes = [...new Set(Object.values(empleadosDB).map(e => e.jefe))].sort();
+      const jSel = document.getElementById('jefeFilter');
+      jSel.innerHTML = '<option value="">Todos los supervisores</option>';
+      jefes.forEach(j => jSel.add(new Option(j, j)));
+      jSel.disabled = false;
+      
+      document.getElementById('fileEventos').disabled = false;
+      document.getElementById('btnAsignar').disabled = false;
+      
+      const status = document.getElementById('empleadosStatus');
+      status.innerHTML = `✓ ${Object.keys(empleadosDB).length} empleados cargados desde base guardada`;
+      status.classList.remove('hidden');
+      status.classList.add('text-green-400');
+      
+      updateStatus(`Base de empleados cargada desde almacenamiento: ${Object.keys(empleadosDB).length} registros`, 'success');
+      showNotification('Base cargada', 'Se usó la base de empleados guardada con sus horarios asignados. Ya puedes cargar el Excel de checadas.', 'success');
+    }
+    
+    function descartarEmpleadosGuardados() {
+      if (!confirm('¿Eliminar la base de empleados guardada? Esto no afecta a los horarios ni a las asignaciones ya guardadas.')) return;
+      localStorage.removeItem('attendanceProEmpleadosDB');
+      actualizarBannerEmpleadosGuardados();
+      showNotification('Base eliminada', 'Se borró la base de empleados guardada', 'info');
+    }
+    
+    // ==================== RESPALDO: EXPORTAR / IMPORTAR ====================
+    // Descarga un archivo .json con horarios, asignaciones y la base de empleados,
+    // para poder restaurarlos si el navegador borra el almacenamiento local
+    function exportarRespaldo() {
+      const empleadosParaRespaldo = (empleadosDB && Object.keys(empleadosDB).length)
+        ? empleadosDB
+        : ((obtenerEmpleadosGuardados() || {}).empleados || {});
+      
+      const payload = {
+        tipo: 'AttendancePRO_Respaldo',
+        version: 1,
+        exportadoEn: new Date().toISOString(),
+        horarios: horariosDB,
+        asignaciones: asignacionesDB,
+        empleados: empleadosParaRespaldo
+      };
+      
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const fecha = new Date().toISOString().split('T')[0];
+      a.href = url;
+      a.download = `AttendancePRO_Respaldo_${fecha}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showNotification('Respaldo descargado', 'Guarda este archivo en Drive, USB o correo por seguridad', 'success');
+    }
+    
+    function importarRespaldo(file) {
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const payload = JSON.parse(e.target.result);
+          
+          if (!payload || (payload.tipo && payload.tipo !== 'AttendancePRO_Respaldo')) {
+            throw new Error('Archivo no reconocido');
+          }
+          
+          if (payload.horarios && Object.keys(payload.horarios).length) {
+            horariosDB = payload.horarios;
+            guardarHorarios();
+          }
+          
+          if (payload.asignaciones) {
+            asignacionesDB = payload.asignaciones;
+            guardarAsignaciones();
+          }
+          
+          if (payload.empleados && Object.keys(payload.empleados).length) {
+            empleadosDB = payload.empleados;
+            aplicarAsignacionesAEmpleados();
+            guardarEmpleadosDB();
+            actualizarBannerEmpleadosGuardados();
+            
+            const jefes = [...new Set(Object.values(empleadosDB).map(e => e.jefe))].sort();
+            const jSel = document.getElementById('jefeFilter');
+            jSel.innerHTML = '<option value="">Todos los supervisores</option>';
+            jefes.forEach(j => jSel.add(new Option(j, j)));
+            jSel.disabled = false;
+            document.getElementById('fileEventos').disabled = false;
+            document.getElementById('btnAsignar').disabled = false;
+          }
+          
+          renderListaHorarios();
+          document.getElementById('inputImportarRespaldo').value = '';
+          showNotification('Respaldo restaurado', 'Se importaron los horarios, asignaciones y empleados correctamente', 'success');
+        } catch(err) {
+          showNotification('Error', 'El archivo de respaldo no es válido o está dañado', 'error');
+          console.error('Error al importar respaldo:', err);
+        }
+      };
+      reader.readAsText(file);
+    }
+    
+    // Aplica las asignaciones guardadas (tienen prioridad sobre el horario que traiga el Excel)
+    function aplicarAsignacionesAEmpleados() {
+      Object.values(empleadosDB).forEach(emp => {
+        if (asignacionesDB[emp.id] !== undefined) {
+          emp.horario = asignacionesDB[emp.id];
+        }
+      });
+    }
+    
+    // Función para validar si una hora está dentro del rango permitido
+    function validarHoraEntrada(horaReal, horaEsperada, toleranciaAntes = TOLERANCIA_ANTES, toleranciaDespues = TOLERANCIA_DESPUES) {
+      const [hE, mE] = horaEsperada.split(':').map(Number);
+      const [hR, mR] = horaReal.split(':').map(Number);
+      
+      const minutosEsperados = hE * 60 + mE;
+      const minutosReales = hR * 60 + mR;
+      const diferencia = minutosReales - minutosEsperados;
+      
+      // Dentro de tolerancia antes (-29 a 0)
+      if (diferencia >= -toleranciaAntes && diferencia <= 0) {
+        return { valida: true, tipo: 'puntual', minutos: 0 };
+      }
+      
+      // Dentro de tolerancia después (1 a 14)
+      if (diferencia > 0 && diferencia <= toleranciaDespues) {
+        return { valida: true, tipo: 'retardo', minutos: diferencia };
+      }
+      
+      // Más de 14 minutos tarde = FALTA
+      if (diferencia > toleranciaDespues) {
+        return { valida: false, tipo: 'falta', minutos: diferencia };
+      }
+      
+      // Más de 29 minutos antes = Fuera de rango
+      if (diferencia < -toleranciaAntes) {
+        return { valida: true, tipo: 'temprano', minutos: Math.abs(diferencia) };
+      }
+      
+      return { valida: true, tipo: 'puntual', minutos: 0 };
+    }
+    
+    // Función para obtener horario según día
+    function obtenerHorarioDia(codigoHorario, diaSemana) {
+      const config = horariosDB[codigoHorario];
+      if (!config || !config.dias) return null;
+      return config.dias[diaSemana] || null;
+    }
+    
+    // Suma (o resta) días a una fecha en formato ISO (yyyy-mm-dd)
+    function sumarDiasISO(iso, n) {
+      const [y, m, d] = iso.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + n);
+      const yy = dt.getFullYear();
+      const mm = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${yy}-${mm}-${dd}`;
+    }
+    
+    // Calcula la jornada esperada en horas a partir del horario programado, soportando turnos que cruzan medianoche
+    function calcularJornadaEsperadaHrs(horarioProgramado, tiempoComidaHrs, jornadaBase) {
+      if (!horarioProgramado) return jornadaBase;
+      
+      const [hE, mE] = horarioProgramado.entrada.split(':').map(Number);
+      const [hS, mS] = horarioProgramado.salida.split(':').map(Number);
+      let diffMin = (hS * 60 + mS) - (hE * 60 + mE);
+      if (diffMin < 0) diffMin += 1440; // Cruce de medianoche
+      
+      return (diffMin / 60) - tiempoComidaHrs;
+    }
+    
+    // ==================== JERARQUÍA DE EVENTOS DEL CHECADOR ====================
+    // Prioridad de mayor a menor: si existe la de mayor prioridad, se usa esa;
+    // si hay varias checadas con el MISMO código en un día, se elige la más cercana
+    // al horario programado del empleado (o una preferencia razonable si no tiene horario)
+    const ENTRADAS = {
+      'ENT': 1,  // Prioridad más alta
+      'ERT': 2,
+      'EFT': 3,
+      'ENC': 4   // Última opción
+    };
+    
+    const SALIDAS = {
+      'SNT': 1,  // Prioridad más alta
+      'SAT': 2,
+      'SRC': 3,
+      'SNC': 4   // Última opción
+    };
+    
+    // De una lista de horas ("HH:MM") con el mismo código de evento, elige la más cercana
+    // a horaObjetivo (hora programada). Si no hay horaObjetivo, usa 'primera' o 'ultima' cronológicamente.
+    function elegirHoraMasCercana(horas, horaObjetivo, preferenciaSinHorario) {
+      const ordenadas = horas.slice().sort();
+      if (ordenadas.length === 1) return ordenadas[0];
+      
+      if (!horaObjetivo) {
+        return preferenciaSinHorario === 'primera' ? ordenadas[0] : ordenadas[ordenadas.length - 1];
+      }
+      
+      const [hO, mO] = horaObjetivo.split(':').map(Number);
+      const objetivoMin = hO * 60 + mO;
+      
+      let mejor = ordenadas[0];
+      let mejorDiff = Infinity;
+      ordenadas.forEach(h => {
+        const [hh, mm] = h.split(':').map(Number);
+        const diff = Math.abs((hh * 60 + mm) - objetivoMin);
+        if (diff < mejorDiff) { mejorDiff = diff; mejor = h; }
+      });
+      return mejor;
+    }
+    
+    // Consolida eventosDB aplicando jerarquías: si un día tiene varias checadas con el
+    // mismo código (ej. tres SAT), elige la más cercana al horario programado del empleado
+    // ese día de la semana. Se puede volver a ejecutar cada vez que cambian las asignaciones
+    // de horario, para que los reportes queden siempre correctos.
+    function consolidarEventosConHorarios() {
+      for (const id in eventosDB) {
+        const emp = empleadosDB[id];
+        
+        for (const fecha in eventosDB[id]) {
+          const dia = eventosDB[id][fecha];
+          
+          if (dia.isRST) {
+            // Para RST, ordenar todas las horas (comportamiento sin cambios)
+            dia.todas = dia.todas.slice().sort();
+            dia.entradaFinal = dia.todas[0] || null;
+            dia.salidaFinal = dia.todas.length > 1 ? dia.todas[dia.todas.length - 1] : null;
+            continue;
+          }
+          
+          const diaSemana = new Date(fecha + 'T00:00:00').getDay();
+          const horarioProgramado = (emp && emp.horario) ? obtenerHorarioDia(emp.horario, diaSemana) : null;
+          
+          // Seleccionar entrada con mayor prioridad; si hay varias horas para ese código,
+          // la más cercana a la hora de entrada programada
+          let entradaSeleccionada = null;
+          let mejorPrioridadEntrada = 999;
+          
+          for (const codigo in dia.entradas) {
+            if (ENTRADAS[codigo] < mejorPrioridadEntrada) {
+              mejorPrioridadEntrada = ENTRADAS[codigo];
+              entradaSeleccionada = elegirHoraMasCercana(
+                dia.entradas[codigo],
+                horarioProgramado ? horarioProgramado.entrada : null,
+                'primera'
+              );
+            }
+          }
+          
+          // Seleccionar salida con mayor prioridad; si hay varias horas para ese código,
+          // la más cercana a la hora de salida programada
+          let salidaSeleccionada = null;
+          let mejorPrioridadSalida = 999;
+          
+          for (const codigo in dia.salidas) {
+            if (SALIDAS[codigo] < mejorPrioridadSalida) {
+              mejorPrioridadSalida = SALIDAS[codigo];
+              salidaSeleccionada = elegirHoraMasCercana(
+                dia.salidas[codigo],
+                horarioProgramado ? horarioProgramado.salida : null,
+                'ultima'
+              );
+            }
+          }
+          
+          // Construir array final con entrada y salida seleccionadas
+          dia.todas = [];
+          if (entradaSeleccionada) dia.todas.push(entradaSeleccionada);
+          if (salidaSeleccionada) dia.todas.push(salidaSeleccionada);
+          
+          // Guardar por separado para poder emparejar turnos nocturnos (entrada de hoy + salida de mañana)
+          dia.entradaFinal = entradaSeleccionada;
+          dia.salidaFinal = salidaSeleccionada;
+        }
+      }
+    }
+
+    // ==================== UTILIDADES ====================
+    const normID = (id) => id ? parseInt(id.toString().trim(), 10).toString() : "";
+    
+    function updateStatus(msg, type = 'info') {
+      const el = document.getElementById('statusMsg');
+      el.innerHTML = `<span class="w-2 h-2 ${type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500'} rounded-full mr-2 animate-pulse"></span>${msg}`;
+    }
+
+    function showNotification(title, message, type = 'info') {
+      const notif = document.getElementById('notification');
+      const icon = document.getElementById('notifIcon');
+      const titleEl = document.getElementById('notifTitle');
+      const msgEl = document.getElementById('notifMsg');
+      
+      const icons = {
+        success: '<svg class="w-6 h-6 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>',
+        error: '<svg class="w-6 h-6 text-red-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path></svg>',
+        warning: '<svg class="w-6 h-6 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>',
+        info: '<svg class="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>'
+      };
+      
+      icon.innerHTML = icons[type] || icons.info;
+      titleEl.textContent = title;
+      msgEl.textContent = message;
+      
+      notif.classList.add('show');
+      setTimeout(() => notif.classList.remove('show'), 4000);
+    }
+
+    function saveConfig() {
+      const config = {
+        email: document.getElementById('emailDestino').value,
+        theme: document.body.classList.contains('light-mode') ? 'light' : 'dark'
+      };
+      localStorage.setItem('attendanceProConfig', JSON.stringify(config));
+    }
+
+    function loadConfig() {
+      const config = JSON.parse(localStorage.getItem('attendanceProConfig') || '{}');
+      if (config.email) document.getElementById('emailDestino').value = config.email;
+      if (config.theme === 'light') toggleTheme();
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('light-mode');
+      const icon = document.getElementById('themeIcon');
+      if (document.body.classList.contains('light-mode')) {
+        icon.innerHTML = '<path fill-rule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clip-rule="evenodd"></path>';
+      } else {
+        icon.innerHTML = '<path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z"></path>';
+      }
+      saveConfig();
+    }
+
+    // ==================== PROCESAMIENTO DE ARCHIVOS ====================
+
+    // 1. Carga Empleados (Soporta CSV y Excel)
+    document.getElementById('fileEmpleados').onchange = async (e) => {
+      const file = e.target.files[0];
+      const status = document.getElementById('empleadosStatus');
+      const fileName = file.name.toLowerCase();
+      
+      updateStatus('Procesando base de empleados...', 'info');
+      status.innerHTML = '<div class="loading-spinner"></div>Cargando...';
+      status.classList.remove('hidden');
+      
+      try {
+        empleadosDB = {};
+        let count = 0;
+        
+        // Detectar si es Excel o CSV
+        if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+          // ==================== MODO EXCEL (CON HORARIOS) ====================
+          const data = await file.arrayBuffer();
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+          
+          // Buscar la fila de encabezados (contiene "Código")
+          let headerRow = -1;
+          for (let i = 0; i < Math.min(10, rows.length); i++) {
+            if (rows[i][0] && rows[i][0].toString().includes('Código')) {
+              headerRow = i;
+              break;
+            }
+          }
+          
+          if (headerRow === -1) {
+            throw new Error('No se encontraron los encabezados en el archivo Excel');
+          }
+          
+          // Procesar datos (cada empleado ocupa 2 filas)
+          for (let i = headerRow + 1; i < rows.length; i += 2) {
+            const row1 = rows[i];     // Fila con código, nombre, supervisor
+            const row2 = rows[i + 1]; // Fila con horario
+            
+            if (!row1 || !row1[0]) continue;
+            
+            const codigo = row1[0] ? row1[0].toString().trim() : '';
+            const nombre = row1[2] ? row1[2].toString().trim() : '';
+            const supervisor = row1[25] ? row1[25].toString().trim() : '';
+            const horario = row2 && row2[2] ? row2[2].toString().trim() : '';
+            const tipoHorario = row2 && row2[10] ? row2[10].toString().trim() : '';
+            
+            // Extraer solo el número del código (ej: "00393" -> "393")
+            const id = normID(codigo);
+            
+            if (id && nombre && supervisor && !supervisor.includes("SEMANAL")) {
+              empleadosDB[id] = { 
+                id, 
+                nombre, 
+                jefe: supervisor,
+                horario: horario,
+                tipoHorario: tipoHorario
+              };
+              count++;
+            }
+          }
+          
+          showNotification('Excel detectado', 'Modo avanzado: Validación de horarios habilitada', 'success');
+          
+        } else {
+          // ==================== MODO CSV (BÁSICO) ====================
+          await new Promise((resolve, reject) => {
+            Papa.parse(file, { 
+              header: true, 
+              skipEmptyLines: true, 
+              encoding: "ISO-8859-1", 
+              complete: (r) => {
+                try {
+                  r.data.forEach(row => {
+                    const id = normID(row["DatatbReporte_FechaHoraRegistrada"]);
+                    const nombre = (row["Text7"] || "").trim();
+                    const jefe = (row["Text9"] || "").trim();
+                    if(id && nombre && jefe && !jefe.includes("SEMANAL")) {
+                      empleadosDB[id] = { 
+                        id, 
+                        nombre, 
+                        jefe,
+                        horario: '',
+                        tipoHorario: ''
+                      };
+                      count++;
+                    }
+                  });
+                  resolve();
+                } catch(err) {
+                  reject(err);
+                }
+              },
+              error: reject
+            });
+          });
+          
+          showNotification('CSV detectado', 'Modo básico: Sin validación de horarios', 'info');
+        }
+        
+        // Aplicar horarios asignados manualmente (tienen prioridad sobre lo que traiga el archivo)
+        aplicarAsignacionesAEmpleados();
+        
+        // Guardar esta base de empleados para futuras sesiones
+        guardarEmpleadosDB();
+        actualizarBannerEmpleadosGuardados();
+        
+        const jefes = [...new Set(Object.values(empleadosDB).map(e => e.jefe))].sort();
+        const jSel = document.getElementById('jefeFilter');
+        jSel.innerHTML = '<option value="">Todos los supervisores</option>';
+        jefes.forEach(j => jSel.add(new Option(j, j)));
+        
+        jSel.disabled = false; 
+        document.getElementById('fileEventos').disabled = false;
+        document.getElementById('btnAsignar').disabled = false;
+        e.target.classList.add('input-file-ready');
+        
+        status.innerHTML = `✓ ${count} empleados cargados`;
+        status.classList.add('text-green-400');
+        updateStatus(`Base de empleados cargada: ${count} registros`, 'success');
+        showNotification('Éxito', `${count} empleados cargados correctamente`, 'success');
+        
+      } catch(err) {
+        status.innerHTML = `✗ Error: ${err.message}`;
+        status.classList.add('text-red-400');
+        updateStatus('Error al cargar empleados', 'error');
+        showNotification('Error', 'No se pudo procesar el archivo de empleados', 'error');
+        console.error('Error detallado:', err);
+      }
+    };
+
+    // 2. Carga Eventos (Usando Excel - MUCHO MEJOR que CSV)
+    document.getElementById('fileEventos').onchange = async (e) => {
+      const file = e.target.files[0];
+      const status = document.getElementById('eventosStatus');
+      
+      updateStatus('Procesando eventos de checador...', 'info');
+      status.innerHTML = '<div class="loading-spinner"></div>Cargando...';
+      status.classList.remove('hidden');
+      
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+        
+        eventosDB = {}; // Reiniciar base de datos de eventos
+        let count = 0;
+        
+        // Buscar la fila de encabezados (contiene "CodigoEmpleado")
+        let headerRow = -1;
+        for (let i = 0; i < Math.min(10, rows.length); i++) {
+          if (rows[i][0] && rows[i][0].toString().includes('CodigoEmpleado')) {
+            headerRow = i;
+            break;
+          }
+        }
+        
+        if (headerRow === -1) {
+          throw new Error('No se encontraron los encabezados en el archivo Excel');
+        }
+        
+        // Procesar datos desde la fila siguiente a los encabezados
+        for (let i = headerRow + 1; i < rows.length; i++) {
+          const row = rows[i];
+          
+          // Saltar filas vacías
+          if (!row || !row[0]) continue;
+          
+          // Extraer datos de las columnas correctas según la estructura del Excel
+          // [0] = CodigoEmpleado, [3] = NombreLargo, [7] = idEmpleadoRegistrado
+          // [11] = AREA/Supervisor, [15] = FechaHoraRegistrada, [19] = CodigoEvento
+          // [24] = DescripcionEvento, [30] = OrigenDelEvento
+          
+          const codigoEmpleado = row[0] ? row[0].toString().trim() : '';
+          const idEmpleado = row[7] ? row[7].toString().trim() : '';
+          const fechaHoraRaw = row[15] ? row[15].toString().trim() : '';
+          const codigoEvento = row[19] ? row[19].toString().trim() : '';
+          const descripcion = row[24] ? row[24].toString().trim() : '';
+          
+          // Validar que tengamos datos mínimos
+          if (!idEmpleado || !fechaHoraRaw || !codigoEvento) continue;
+          
+          // Normalizar ID
+          const id = normID(idEmpleado);
+          
+          // Determinar si es un evento válido
+          
+          const esEntrada = ENTRADAS.hasOwnProperty(codigoEvento);
+          const esSalida = SALIDAS.hasOwnProperty(codigoEvento);
+          const esRST = codigoEvento === "RST" || descripcion.includes("REGISTRO SIN TURNO");
+          const esDDD = codigoEvento === "DDD" || descripcion.includes("DÍA DE DESCANSO");
+          
+          // Solo procesar entradas, salidas y RST (ignorar DDD)
+          if (!esEntrada && !esSalida && !esRST) continue;
+          
+          // Parsear fecha y hora
+          // Formatos posibles: "05/02/2026 08:02:54 a. m." o "05/02/2026 05:04:00 p. m."
+          let fechaHora = fechaHoraRaw;
+          
+          // Si viene como número de Excel (serial date), convertir
+          if (typeof row[15] === 'number') {
+            const excelDate = XLSX.SSF.parse_date_code(row[15]);
+            fechaHora = `${String(excelDate.d).padStart(2,'0')}/${String(excelDate.m).padStart(2,'0')}/${excelDate.y} ${String(excelDate.H).padStart(2,'0')}:${String(excelDate.M).padStart(2,'0')}:${String(excelDate.S).padStart(2,'0')}`;
+          }
+          
+          // Parsear la fecha: "05/02/2026 08:02:54 a. m."
+          const partes = fechaHora.split(" ");
+          if (partes.length < 2) continue;
+          
+          const fechaPartes = partes[0].split("/");
+          if (fechaPartes.length !== 3) continue;
+          
+          const iso = `${fechaPartes[2]}-${fechaPartes[1]}-${fechaPartes[0]}`;
+          
+          // Extraer hora (HH:MM)
+          let horaStr = partes[1];
+          const ampm = partes.length > 2 ? partes[2] : '';
+          
+          // Convertir a formato 24 horas si es necesario
+          if (ampm && horaStr.includes(':')) {
+            let [h, m] = horaStr.split(':').map(x => parseInt(x));
+            if (ampm.toLowerCase().includes('p') && h !== 12) h += 12;
+            if (ampm.toLowerCase().includes('a') && h === 12) h = 0;
+            horaStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+          } else {
+            horaStr = horaStr.slice(0, 5); // Solo HH:MM
+          }
+          
+          // Guardar en la estructura con jerarquías
+          if (!eventosDB[id]) eventosDB[id] = {};
+          if (!eventosDB[id][iso]) {
+            eventosDB[id][iso] = { 
+              entradas: {},  // {codigo: [horas]}
+              salidas: {},   // {codigo: [horas]}
+              isRST: false,
+              ret: false,
+              todas: []      // Para RST
+            };
+          }
+          
+          // Clasificar el evento
+          if (esRST) {
+            eventosDB[id][iso].isRST = true;
+            eventosDB[id][iso].todas.push(horaStr);
+          } else if (esEntrada) {
+            if (!eventosDB[id][iso].entradas[codigoEvento]) eventosDB[id][iso].entradas[codigoEvento] = [];
+            eventosDB[id][iso].entradas[codigoEvento].push(horaStr);
+            if (codigoEvento === 'ERT') {
+              eventosDB[id][iso].ret = true;
+            }
+          } else if (esSalida) {
+            if (!eventosDB[id][iso].salidas[codigoEvento]) eventosDB[id][iso].salidas[codigoEvento] = [];
+            eventosDB[id][iso].salidas[codigoEvento].push(horaStr);
+          }
+          
+          count++;
+        }
+        
+        // Consolidar aplicando jerarquías: si un mismo código se repite en el día
+        // (ej. varias SAT), se elige la más cercana al horario programado del empleado
+        consolidarEventosConHorarios();
+        
+        document.getElementById('fileVacaciones').disabled = false;
+        document.getElementById('btnChecadasCrudas').disabled = false;
+        e.target.classList.add('input-file-ready');
+        
+        status.innerHTML = `✓ ${count} eventos procesados desde Excel`;
+        status.classList.add('text-green-400');
+        updateStatus(`Eventos cargados desde Excel: ${count} registros`, 'success');
+        showNotification('Éxito', `${count} eventos procesados correctamente desde Excel`, 'success');
+        
+      } catch(err) {
+        status.innerHTML = `✗ Error: ${err.message}`;
+        status.classList.add('text-red-400');
+        updateStatus('Error al cargar eventos', 'error');
+        showNotification('Error', `No se pudo procesar el archivo: ${err.message}`, 'error');
+        console.error('Error detallado:', err);
+      }
+    };
+
+    // 3. Carga Vacaciones
+    document.getElementById('fileVacaciones').onchange = (e) => {
+      const file = e.target.files[0];
+      const status = document.getElementById('vacacionesStatus');
+      
+      updateStatus('Procesando vacaciones e incidencias...', 'info');
+      status.innerHTML = '<div class="loading-spinner"></div>Cargando...';
+      status.classList.remove('hidden');
+      
+      Papa.parse(file, { 
+        header: true, 
+        skipEmptyLines: true, 
+        encoding: "ISO-8859-1", 
+        complete: (r) => {
+          try {
+            let lastId = "";
+            let count = 0;
+            r.data.forEach(row => {
+              const idCol = row["DatatbReporte_CodigoEmpleado"]?.trim();
+              if(idCol && !isNaN(parseInt(idCol))) lastId = normID(idCol);
+              const f = row["DatatbReporte_FechaHoraRegistrada"]?.trim();
+              const desc = (row["DatatbReporte_DescripcionEvento"] || "").trim();
+              if(lastId && f) {
+                const p = f.split("/"), iso = `${p[2]}-${p[1]}-${p[0]}`;
+                if(!vacacionesDB[lastId]) vacacionesDB[lastId] = {};
+                vacacionesDB[lastId][iso] = desc;
+                count++;
+              }
+            });
+            
+            e.target.classList.add('input-file-ready');
+            status.innerHTML = `✓ ${count} periodos registrados`;
+            status.classList.add('text-green-400');
+            updateStatus('Sistema listo para generar reporte', 'success');
+            showNotification('Éxito', 'Todos los archivos cargados. Sistema listo.', 'success');
+            document.getElementById('btnCorreo').disabled = false;
+          } catch(err) {
+            status.innerHTML = `✗ Error: ${err.message}`;
+            status.classList.add('text-red-400');
+            updateStatus('Error al cargar vacaciones', 'error');
+            showNotification('Error', 'No se pudo procesar el archivo de vacaciones', 'error');
+          }
+        }
+      });
+    };
+
+    // ==================== GENERACIÓN DE REPORTE ====================
+    document.getElementById('btnGenerar').onclick = () => {
+      if(!Object.keys(empleadosDB).length) {
+        showNotification('Advertencia', 'Debes cargar la base de empleados primero', 'warning');
+        return;
+      }
+      if(!Object.keys(eventosDB).length) {
+        showNotification('Advertencia', 'Debes cargar los eventos del checador', 'warning');
+        return;
+      }
+      
+      updateStatus('Generando reporte...', 'info');
+      showNotification('Procesando', 'Generando reporte de asistencia...', 'info');
+      
+      setTimeout(generarReporte, 500);
+    };
+
+    function generarReporte() {
+      // ============================================================================
+      // SISTEMA DE ASISTENCIA v2.0 - OPTIMIZADO PARA EXCEL
+      // ============================================================================
+      // ARCHIVOS REQUERIDOS:
+      // 1. Base de Empleados: CSV con columnas DatatbReporte_FechaHoraRegistrada, Text7, Text9
+      //    O EXCEL con horarios programados (modo avanzado)
+      // 2. Eventos Checador: EXCEL (.xlsx) con columnas CodigoEmpleado, NombreLargo, 
+      //    idEmpleadoRegistrado, AREA, FechaHoraRegistrada, CodigoEvento, DescripcionEvento
+      // 3. Vacaciones/FINJ: CSV con columnas DatatbReporte_CodigoEmpleado, 
+      //    DatatbReporte_FechaHoraRegistrada, DatatbReporte_DescripcionEvento
+      //
+      // LÓGICA DE CÁLCULO DE HORAS:
+      // - Jornada base: 8 horas de trabajo + 1 hora de comida = 9 horas totales
+      // - Se descuenta automáticamente 1 hora de comida cuando trabajó más de 6 horas
+      // - Horas extras: Todo lo que exceda las 8 horas (después de descontar comida)
+      // 
+      // INCIDENCIAS:
+      // - NO se detectan faltas automáticamente
+      // - Solo se muestran las checadas reales (entrada/salida)
+      // - Solo se reportan vacaciones/permisos del archivo de vacaciones
+      // - El usuario decide manualmente qué incidencia asignar
+      // - Campo de comentarios disponible para aclaraciones
+      //
+      // CHECADAS HUÉRFANAS (registros impares):
+      // - Se muestran con advertencia "VALIDAR CHECADA EN SISTEMA"
+      // - Se resaltan con borde ámbar pulsante
+      // - No se clasifican automáticamente
+      // ============================================================================
+      
+      const jornadaBase = 8.0; // Jornada estándar (sin contar hora de comida)
+      const container = document.getElementById('reportContainer');
+      const selPeriodo = document.getElementById('periodoSemana');
+      const [inicio, fin] = selPeriodo.value.split('|');
+      const jefeFilter = document.getElementById('jefeFilter').value;
+      
+      if(!inicio || !fin) {
+        showNotification('Error', 'Debes seleccionar un periodo de nómina', 'error');
+        return;
+      }
+      
+      const f1 = inicio, f2 = fin;
+      container.innerHTML = '';
+      exportRows = [];
+      
+      let totalStats = { hrs: 0, extra: 0, faltas: 0, vac: 0, ret: 0, asistenciasPerfectas: 0, totalDias: 0 };
+      let incidenciasCount = {};
+      
+      let curr = new Date(f1 + "T00:00:00"), finDate = new Date(f2 + "T00:00:00"), dates = [];
+      while(curr <= finDate) { 
+        dates.push(new Date(curr).toISOString().split('T')[0]); 
+        curr.setDate(curr.getDate() + 1); 
+      }
+      
+      // Registro temporal (solo para esta generación) de checadas ya usadas como salida
+      // de un turno nocturno del día anterior, para no procesarlas dos veces sin
+      // alterar los datos originales de eventosDB (así se puede regenerar el reporte
+      // las veces que sea necesario con el mismo resultado correcto)
+      let consumidosNocturnos = new Set();
+      
+      let empleados = Object.values(empleadosDB).sort((a,b) => a.nombre.localeCompare(b.nombre));
+      if(jefeFilter) empleados = empleados.filter(e => e.jefe === jefeFilter);
+      
+      empleados.forEach(emp => {
+        const empBox = document.createElement('div');
+        empBox.className = 'employee-container glass-card searchable-item animate-slide-in';
+        empBox.setAttribute('data-name', `${emp.nombre.toLowerCase()} ${emp.id} ${emp.jefe.toLowerCase()}`);
+        
+        let sumNormal = 0, sumExtra = 0;
+        let empIncidencias = { asistencia: 0, falta: 0, retardo: 0 };
+        
+        let empHtml = `
+          <div class="p-4 border-b" style="background: var(--surface-2); border-color: var(--border);">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-base font-bold flex items-center gap-3" style="color: var(--text-primary)">
+                  <span class="id-badge">${emp.nombre.charAt(0)}</span>
+                  ${emp.nombre}
+                  <span class="badge badge-info">#${emp.id}</span>
+                  ${emp.horario ? `<span class="badge badge-orange">${emp.horario}</span>` : ''}
+                </h3>
+                <p class="text-xs mt-1 flex items-center gap-2" style="color: var(--text-secondary)">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z"></path></svg>
+                  Supervisor: <strong style="color: var(--text-primary)">${emp.jefe}</strong>
+                </p>
+              </div>
+              <div class="text-right">
+                <p class="text-[10px] uppercase tracking-widest" style="color: var(--text-muted)">Total Horas</p>
+                <p class="text-2xl font-bold font-mono" style="color: var(--text-primary)"><span id="normal-${emp.id}">0.00</span></p>
+                <p class="text-xs font-mono" style="color: var(--gold)">Extra: <span id="extra-${emp.id}">0.00</span></p>
+              </div>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="text-xs" style="color: var(--text-secondary)">
+                  <th class="p-3 text-left">Fecha</th>
+                  <th class="p-3 text-left">Día</th>
+                  ${emp.horario ? '<th class="p-3 text-center">Horario</th>' : ''}
+                  <th class="p-3 text-left">Entrada</th>
+                  <th class="p-3 text-left">Salida</th>
+                  <th class="p-3 text-center">H. Normal</th>
+                  <th class="p-3 text-center">H. Extra</th>
+                  <th class="p-3 text-left">Incidencia</th>
+                </tr>
+              </thead>
+              <tbody>`;
+        
+        dates.forEach(isoF => {
+          const dayName = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][new Date(isoF+'T00:00:00').getDay()];
+          const ev = eventosDB[emp.id]?.[isoF];
+          const vca = vacacionesDB[emp.id]?.[isoF];
+          
+          let ent = "--:--", sal = "--:--", hNormal = 0, hExtra = 0, inc = "", cls = "", msg = "";
+          let huerfana = false;
+          
+          // ==================== VALIDACIÓN DE HORARIO PROGRAMADO ====================
+          const horarioProgramado = emp.horario ? obtenerHorarioDia(emp.horario, new Date(isoF+'T00:00:00').getDay()) : null;
+          const esNocturno = !!(horarioProgramado && horarioProgramado.cruzaMedianoche);
+          
+          // Si la salida de hoy ya fue usada por el turno nocturno del día anterior,
+          // se descarta para el cálculo de hoy (sin alterar los datos originales)
+          const claveHoy = `${emp.id}|${isoF}`;
+          const salidaHoyYaConsumida = consumidosNocturnos.has(claveHoy);
+          const todasHoy = (ev && salidaHoyYaConsumida && ev.salidaFinal)
+            ? ev.todas.filter(h => h !== ev.salidaFinal)
+            : (ev ? ev.todas : []);
+          
+          // Si el horario de hoy cruza medianoche, la salida se busca en las checadas del día siguiente
+          let evSiguiente = null, isoSiguiente = null, salidaSiguienteConsumida = false;
+          if (esNocturno) {
+            isoSiguiente = sumarDiasISO(isoF, 1);
+            evSiguiente = eventosDB[emp.id]?.[isoSiguiente];
+            salidaSiguienteConsumida = consumidosNocturnos.has(`${emp.id}|${isoSiguiente}`);
+          }
+          
+          const hayChecadaHoy = todasHoy.length > 0;
+          const haySalidaCruzada = esNocturno && evSiguiente && evSiguiente.salidaFinal && !salidaSiguienteConsumida;
+          
+          if (hayChecadaHoy || haySalidaCruzada) {
+            
+            if (ev && ev.isRST) {
+              // RST (Registro Sin Turno): las checadas NO tienen un orden garantizado.
+              // Si el empleado tiene horario asignado, se emparejan contra ese horario
+              // (la más cercana a su hora de entrada = entrada, la más cercana a su
+              // hora de salida = salida), en vez de asumir "primera y última".
+              const horasRST = todasHoy.slice().sort();
+              
+              if (horasRST.length === 0) {
+                ent = "--:--"; sal = "--:--";
+              } else if (horasRST.length === 1) {
+                huerfana = true;
+                msg = "⚠️ VALIDAR CHECADA EN SISTEMA (RST con una sola checada)";
+                ent = horasRST[0];
+                sal = "--:--";
+              } else if (horarioProgramado) {
+                ent = elegirHoraMasCercana(horasRST, horarioProgramado.entrada, 'primera');
+                const candidatasSalida = horasRST.filter(h => h !== ent);
+                sal = candidatasSalida.length
+                  ? elegirHoraMasCercana(candidatasSalida, horarioProgramado.salida, 'ultima')
+                  : "--:--";
+              } else {
+                // Sin horario asignado no hay forma de evaluar el rango: primera/última checada
+                ent = horasRST[0];
+                sal = horasRST[horasRST.length - 1];
+              }
+            } else if (esNocturno) {
+              // TURNO NOCTURNO: entrada de hoy + salida registrada mañana
+              ent = (ev && ev.entradaFinal) ? ev.entradaFinal : "--:--";
+              sal = haySalidaCruzada ? evSiguiente.salidaFinal : "--:--";
+              
+              // Marcar esa checada del día siguiente como "usada" para que no se
+              // vuelva a procesar como checada huérfana propia de ese día
+              if (sal !== "--:--") {
+                consumidosNocturnos.add(`${emp.id}|${isoSiguiente}`);
+              }
+              
+              if ((ent === "--:--") !== (sal === "--:--")) {
+                huerfana = true;
+                msg = "⚠️ VALIDAR CHECADA EN SISTEMA (turno nocturno)";
+              }
+            } else {
+              // Comportamiento normal: entrada y salida del mismo día
+              if (todasHoy.length % 2 !== 0) {
+                huerfana = true;
+                msg = "⚠️ VALIDAR CHECADA EN SISTEMA";
+              }
+              const ordenadas = todasHoy.slice().sort();
+              ent = ordenadas[0] || "--:--";
+              sal = ordenadas.length > 1 ? ordenadas[ordenadas.length - 1] : "--:--";
+            }
+            
+            if (ent !== "--:--" && sal !== "--:--") {
+              let [h1, m1] = ent.split(":").map(Number), [h2, m2] = sal.split(":").map(Number);
+              let d = (h2*60+m2)-(h1*60+m1);
+              if(d < 0) d += 1440; // Cruce de medianoche: sumar 24h
+              
+              // Restar tiempo de comida según horario programado
+              let totalDelDia = d / 60;
+              const tiempoComida = horarioProgramado ? (horarioProgramado.comida / 60) : 1;
+              
+              if(totalDelDia > 6) {
+                totalDelDia -= tiempoComida; // Descontar hora de comida
+              }
+              
+              if (ev && ev.isRST) {
+                // Para RST, calcular horas normales y extras según jornada esperada
+                const jornadaEsperada = calcularJornadaEsperadaHrs(horarioProgramado, tiempoComida, jornadaBase);
+                
+                hNormal = Math.min(totalDelDia, jornadaEsperada);
+                hExtra = Math.max(0, totalDelDia - jornadaEsperada);
+                inc = "Asistencia";
+                cls = "row-success";
+                
+                if (horarioProgramado) {
+                  // Evaluar contra la hora de salida programada: si se quedó más de
+                  // 40 minutos después, se reporta explícitamente como tiempo extra
+                  const [hS, mS] = horarioProgramado.salida.split(':').map(Number);
+                  const [hSal, mSal] = sal.split(':').map(Number);
+                  let diffMin = (hSal*60+mSal) - (hS*60+mS);
+                  if (diffMin < -720) diffMin += 1440; // ajuste si la salida cae ya en la madrugada siguiente
+                  
+                  if (diffMin > 40) {
+                    const hExceso = Math.floor(diffMin / 60), mExceso = diffMin % 60;
+                    const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
+                    msg = `⏰ Jornada excedida: se quedó ${excesoTexto} después de su horario — se reportó como tiempo extra`;
+                  }
+                  // Si no excede los 40 min, se considera dentro de rango: sin alerta
+                } else {
+                  // Sin horario asignado no se puede evaluar el rango automáticamente
+                  msg = "⚡ RST - ESPECIFICAR MOTIVO EN COMENTARIOS";
+                }
+              } else {
+                // Si hay horario programado, calcular basado en él
+                const jornadaEsperada = calcularJornadaEsperadaHrs(horarioProgramado, tiempoComida, jornadaBase);
+                
+                hNormal = Math.min(totalDelDia, jornadaEsperada);
+                hExtra = Math.max(0, totalDelDia - jornadaEsperada);
+                
+                // Marcar como Asistencia si tiene entrada y salida completas (sin alertas)
+                inc = "Asistencia";
+              }
+            } else {
+              // Si es huérfana (tiene entrada pero no salida, o viceversa)
+              if(huerfana) {
+                inc = "Asistencia"; // Aunque esté incompleta, asistió
+                cls = "row-warning";
+                empIncidencias.asistencia++;
+              }
+            }
+          } else {
+            // SIN CHECADAS
+            const dObj = new Date(isoF + "T00:00:00");
+            
+            if(festivos2026[isoF]) { 
+              inc = "Festivo"; 
+              cls = ""; 
+            } else if(emp.horario && horarioProgramado === null) {
+              // El horario asignado indica que este día no se labora → Descanso (no falta)
+              inc = "Descanso";
+              cls = "";
+            }
+            // Si tiene horario asignado y el día SÍ es laborable pero no hay checadas,
+            // o si no tiene horario asignado, se deja en blanco (el usuario decide)
+          }
+          
+          // SOLO aplicar vacaciones/permisos del archivo de vacaciones
+          if(vca) { 
+            inc = vca.includes("VAC") ? "Vacaciones" : vca; 
+            cls = ""; 
+            totalStats.vac++;
+            empIncidencias.asistencia++;
+            msg = ""; // Limpiar mensaje de validación
+          }
+          
+          if(!cls && hNormal > 0) {
+            cls = "row-success";
+            empIncidencias.asistencia++;
+          }
+          
+          sumNormal += hNormal; 
+          sumExtra += hExtra;
+          
+          if(inc) incidenciasCount[inc] = (incidenciasCount[inc] || 0) + 1;
+          totalStats.totalDias++;
+          
+          // Colores dinámicos
+          const colEnt = (ev && ev.ret && !ev.isRST) ? 'text-amber-500 font-bold' : (ent === "--:--" ? 'text-red-500' : 'text-white font-medium');
+          const colHrs = hNormal > 0 ? 'text-emerald-400' : '';
+          const rowWarningClass = huerfana ? 'border-l-4 border-amber-500' : '';
+          
+          // Generar celda de horario si está configurado
+          let horarioCell = '';
+          if (emp.horario && horarioProgramado) {
+            horarioCell = `<td class="p-3 text-center">
+              <span class="badge badge-info text-[9px]">${horarioProgramado.entrada}-${horarioProgramado.salida}${horarioProgramado.cruzaMedianoche ? ' 🌙' : ''}</span>
+            </td>`;
+          } else if (emp.horario) {
+            horarioCell = '<td class="p-3 text-center"><span class="text-slate-600 text-xs">-</span></td>';
+          }
+          
+          empHtml += `
+            <tr class="${cls} ${rowWarningClass}">
+              <td class="p-3 font-mono text-sm">${isoF}</td>
+              <td class="p-3"><span class="badge badge-${new Date(isoF+'T00:00:00').getDay() === 0 ? 'info' : 'success'}">${dayName}</span></td>
+              ${horarioCell}
+              <td class="p-3 font-mono text-sm ${colEnt}">${ent}</td>
+              <td class="p-3 font-mono text-sm ${sal === "--:--" ? 'text-red-400' : 'text-white'}">${sal}</td>
+              <td class="p-3 text-center font-bold font-mono ${colHrs}">${hNormal > 0 ? hNormal.toFixed(2) : ''}</td>
+              <td class="p-3 text-center font-bold font-mono" style="${hExtra > 0 ? 'color: var(--gold)' : ''}">${hExtra > 0 ? hExtra.toFixed(2) : ''}</td>
+              <td class="p-3">
+                <select class="sel-incidencia rounded px-2 py-1 text-xs outline-none w-full" style="background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-primary);" data-row="${exportRows.length}">
+                  ${opcionesIncidencia.concat(["RST"]).map(o => `<option value="${o}" ${inc.toUpperCase().includes(o.substring(0,3).toUpperCase()) ? 'selected' : ''}>${o}</option>`).join('')}
+                </select>
+                ${msg ? `<span class="text-[9px] ${huerfana ? 'text-amber-500 font-extrabold animate-pulse' : inc === 'FALTA' ? 'text-red-500 font-bold' : inc === 'Retardo Excesivo' ? 'text-orange-500 font-bold' : 'text-amber-500 font-bold'} block mt-1">${msg}</span>` : ''}
+              </td>
+            </tr>`;
+          
+          exportRows.push([emp.id, emp.nombre, emp.jefe, isoF, dayName, ent, sal, hNormal.toFixed(2), hExtra.toFixed(2), inc, msg]);
+        });
+        
+        if(empIncidencias.falta === 0 && empIncidencias.retardo === 0) {
+          totalStats.asistenciasPerfectas++;
+        }
+        
+        empHtml += `</tbody></table></div>`;
+        empBox.innerHTML = empHtml;
+        container.appendChild(empBox);
+        
+        document.getElementById(`normal-${emp.id}`).innerText = sumNormal.toFixed(2);
+        document.getElementById(`extra-${emp.id}`).innerText = sumExtra.toFixed(2);
+        
+        totalStats.hrs += sumNormal;
+        totalStats.extra += sumExtra;
+      });
+      
+      // Actualizar estadísticas
+      updateStatistics(totalStats, empleados.length, incidenciasCount);
+      
+      // Crear gráficos
+      createCharts(incidenciasCount, totalStats);
+      
+      document.getElementById('statsPanel').classList.remove('hidden');
+      document.getElementById('searchBox').classList.remove('hidden');
+      document.getElementById('executiveSummary').classList.remove('hidden');
+      document.querySelectorAll('.sel-incidencia').forEach(s => s.onchange = function() { exportRows[this.dataset.row][9] = this.value; });
+      document.getElementById('btnExport').disabled = false;
+      document.getElementById('btnPrint').disabled = false;
+      
+      updateStatus(`Reporte generado: ${empleados.length} empleados`, 'success');
+      showNotification('Completado', 'Reporte generado exitosamente', 'success');
+    }
+
+    function updateStatistics(stats, numEmpleados, incidencias) {
+      document.getElementById('statHoras').innerText = stats.hrs.toFixed(2);
+      document.getElementById('statHorasExtra').innerText = stats.extra.toFixed(2);
+      document.getElementById('statFaltas').innerText = stats.faltas;
+      document.getElementById('statVac').innerText = stats.vac;
+      document.getElementById('statRet').innerText = stats.ret;
+      
+      // Contar retardos normales y excesivos
+      const retardosNormales = incidencias['RETARDO'] || 0;
+      const retardosExcesivos = incidencias['Retardo Excesivo'] || 0;
+      
+      document.getElementById('totalRetardos').innerText = retardosNormales;
+      document.getElementById('totalRetardosExcesivos').innerText = retardosExcesivos;
+      document.getElementById('vacAprobadas').innerText = stats.vac;
+      
+      // Calcular porcentajes para barras de progreso
+      const maxHoras = numEmpleados * 40; // Asumiendo 40 horas por semana
+      document.getElementById('progressHoras').style.width = `${Math.min((stats.hrs / maxHoras) * 100, 100)}%`;
+      document.getElementById('progressFaltas').style.width = `${Math.min((stats.faltas / stats.totalDias) * 100, 100)}%`;
+      document.getElementById('progressVac').style.width = `${Math.min((stats.vac / stats.totalDias) * 100, 100)}%`;
+      document.getElementById('progressRet').style.width = `${Math.min((stats.ret / stats.totalDias) * 100, 100)}%`;
+      
+      // Tasa de faltas
+      const tasaFaltas = ((stats.faltas / stats.totalDias) * 100).toFixed(1);
+      document.getElementById('tasaFaltas').innerText = `${tasaFaltas}%`;
+      
+      // Resumen ejecutivo
+      document.getElementById('promedioHoras').innerText = (stats.hrs / numEmpleados).toFixed(2);
+      document.getElementById('asistenciaPerfecta').innerText = stats.asistenciasPerfectas;
+      document.getElementById('tasaCumplimiento').innerText = `${(100 - parseFloat(tasaFaltas)).toFixed(1)}%`;
+    }
+
+    function createCharts(incidencias, stats) {
+      // Destruir gráficos anteriores si existen
+      if(incidenciasChart) incidenciasChart.destroy();
+      if(horasChart) horasChart.destroy();
+      
+      // Gráfico de incidencias
+      const ctxInc = document.getElementById('incidenciasChart').getContext('2d');
+      incidenciasChart = new Chart(ctxInc, {
+        type: 'doughnut',
+        data: {
+          labels: Object.keys(incidencias),
+          datasets: [{
+            data: Object.values(incidencias),
+            backgroundColor: [
+              'rgba(16, 185, 129, 0.8)',
+              'rgba(239, 68, 68, 0.8)',
+              'rgba(245, 158, 11, 0.8)',
+              'rgba(139, 92, 246, 0.8)',
+              'rgba(59, 130, 246, 0.8)',
+              'rgba(236, 72, 153, 0.8)'
+            ],
+            borderColor: 'rgba(15, 23, 42, 0.8)',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#e2e8f0', font: { size: 11 } }
+            },
+            title: {
+              display: true,
+              text: 'Distribución de Incidencias',
+              color: '#e2e8f0',
+              font: { size: 14, weight: 'bold' }
+            }
+          }
+        }
+      });
+      
+      // Gráfico de horas
+      const ctxHoras = document.getElementById('horasChart').getContext('2d');
+      horasChart = new Chart(ctxHoras, {
+        type: 'bar',
+        data: {
+          labels: ['H. Normales', 'H. Extras'],
+          datasets: [{
+            label: 'Horas',
+            data: [stats.hrs, stats.extra],
+            backgroundColor: [
+              'rgba(59, 130, 246, 0.8)',
+              'rgba(139, 92, 246, 0.8)'
+            ],
+            borderColor: [
+              'rgba(59, 130, 246, 1)',
+              'rgba(139, 92, 246, 1)'
+            ],
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            title: {
+              display: true,
+              text: 'Distribución de Horas',
+              color: '#e2e8f0',
+              font: { size: 14, weight: 'bold' }
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              ticks: { color: '#94a3b8' },
+              grid: { color: 'rgba(148, 163, 184, 0.1)' }
+            },
+            x: {
+              ticks: { color: '#94a3b8' },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+    }
+
+    // ==================== BÚSQUEDA ====================
+    document.getElementById('inputSearch').oninput = function() {
+      const val = this.value.toLowerCase();
+      const items = document.querySelectorAll('.searchable-item');
+      let count = 0;
+      
+      items.forEach(item => {
+        const match = item.getAttribute('data-name').includes(val);
+        item.style.display = match ? 'block' : 'none';
+        if(match) count++;
+      });
+      
+      document.getElementById('searchResults').innerText = val ? `${count} resultado(s) encontrado(s)` : '';
+    };
+
+    // ==================== EXPORTACIÓN EXCEL ====================
+    // ==================== EXPORTACIÓN EXCEL POR SUPERVISOR ====================
+    document.getElementById('btnExport').onclick = async () => {
+      try {
+        updateStatus('Generando archivos Excel...', 'info');
+        showNotification('Procesando', 'Generando archivos Excel por supervisor...', 'info');
+        
+        const colorVacaciones = 'FFFFFF00';
+        const colorRST = 'FFD1FAE5';
+        const colorFalta = 'FFFEE2E2';
+        const colorAlerta = 'FFFCD34D';
+        const colorHeader = 'FF1E293B';
+        const colorBanner = 'FFFEF3C7';
+        
+        // Obtener número de semana del periodo
+        const periodoTexto = document.getElementById('periodoSemana').options[document.getElementById('periodoSemana').selectedIndex].text;
+        const numeroSemana = periodoTexto.match(/Semana (\d+)/)[1];
+        
+        // Agrupar empleados por supervisor
+        const empleadosMap = exportRows.reduce((acc, row) => {
+          const id = row[0];
+          if (!acc[id]) acc[id] = { nombre: row[1], supervisor: row[2], datos: [] };
+          acc[id].datos.push(row);
+          return acc;
+        }, {});
+        
+        // Agrupar por supervisor
+        const porSupervisor = {};
+        Object.keys(empleadosMap).forEach(id => {
+          const emp = empleadosMap[id];
+          const supervisor = emp.supervisor;
+          if (!porSupervisor[supervisor]) {
+            porSupervisor[supervisor] = [];
+          }
+          porSupervisor[supervisor].push({ id, ...emp });
+        });
+        
+        // Generar un archivo por supervisor
+        for (const [supervisor, empleados] of Object.entries(porSupervisor)) {
+          const workbook = new ExcelJS.Workbook();
+          const worksheet = workbook.addWorksheet('Reporte de Asistencia');
+          
+          // Contar cuántos registros requieren revisión para este supervisor
+          const totalAlertas = empleados.reduce((sum, emp) => sum + emp.datos.filter(d => d[10]).length, 0);
+          
+          if (totalAlertas > 0) {
+            const bannerRow = worksheet.addRow([`⚠ ATENCIÓN: este reporte tiene ${totalAlertas} registro(s) que requieren revisión. Búscalos en la columna "Revisar" resaltada en cada hoja de empleado.`]);
+            worksheet.mergeCells(`A${bannerRow.number}:I${bannerRow.number}`);
+            bannerRow.height = 26;
+            bannerRow.eachCell((cell) => {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorBanner } };
+              cell.font = { bold: true, size: 12, color: { argb: 'FF92400E' } };
+              cell.alignment = { vertical: 'middle', horizontal: 'left' };
+            });
+            worksheet.addRow([]);
+          }
+          
+          empleados.forEach(emp => {
+            const titleRow = worksheet.addRow([emp.id, 'NOMBRE:', emp.nombre, '', 'SUPERVISOR:', emp.supervisor]);
+            titleRow.font = { bold: true, size: 12 };
+            titleRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+
+            const headRow = worksheet.addRow(['Fecha', 'Día', 'Entrada', 'Salida', 'H. Normal', 'H. Extra', 'Incidencia', 'Revisar', 'Comentarios']);
+            headRow.eachCell((cell) => {
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorHeader } };
+              cell.font = { color: { argb: 'FFFFFFFF' }, bold: true, size: 11 };
+              cell.alignment = { horizontal: 'center' };
+            });
+
+            let totalNormal = 0;
+            let totalExtra = 0;
+
+            emp.datos.forEach(d => {
+              const alerta = d[10] || '';
+              const rowData = [d[3], d[4], d[5], d[6], parseFloat(d[7]), parseFloat(d[8]), d[9], alerta, ''];
+              const row = worksheet.addRow(rowData);
+              
+              totalNormal += parseFloat(d[7]) || 0;
+              totalExtra += parseFloat(d[8]) || 0;
+
+              const inc = d[9].toUpperCase();
+              
+              let fillColor = null;
+              if (alerta) fillColor = colorAlerta;
+              else if (inc.includes('VACAC')) fillColor = colorVacaciones;
+              else if (inc.includes('RST') || inc.includes('DESCANSO')) fillColor = colorRST;
+              else if (inc.includes('FALTA') || inc.includes('INCOMPLETO')) fillColor = colorFalta;
+
+              if (fillColor) {
+                row.eachCell((cell, colNumber) => {
+                  if (colNumber !== 9) { // No colorear la columna de comentarios
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillColor } };
+                    if (alerta) cell.font = { bold: true, color: { argb: 'FF7C2D12' } };
+                  }
+                });
+              }
+
+              row.getCell(5).numFmt = '0.00';
+              row.getCell(6).numFmt = '0.00';
+              
+              // Columna de comentarios: siempre editable y en blanco
+              row.getCell(9).border = {
+                top: {style:'thin', color: {argb:'FF94A3B8'}},
+                left: {style:'thin', color: {argb:'FF94A3B8'}},
+                bottom: {style:'thin', color: {argb:'FF94A3B8'}},
+                right: {style:'thin', color: {argb:'FF94A3B8'}}
+              };
+              row.getCell(9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+            });
+
+            const footerRow = worksheet.addRow(['', '', '', 'TOTAL:', totalNormal, totalExtra, '', '', '']);
+            footerRow.font = { bold: true, size: 11 };
+            footerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+            footerRow.getCell(5).numFmt = '0.00';
+            footerRow.getCell(6).numFmt = '0.00';
+
+            worksheet.addRow([]);
+          });
+
+          // Ajustar anchos de columna
+          worksheet.columns.forEach((col, i) => {
+            col.width = [15, 10, 12, 12, 12, 12, 25, 32, 40][i];
+          });
+
+          // Crear nombre de archivo: area(Supervisor)_nomina(NumeroSemana)
+          // Limpiar nombre del supervisor (quitar espacios, caracteres especiales)
+          const nombreLimpio = supervisor
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '') // Quitar acentos
+            .replace(/\s+/g, '') // Quitar espacios
+            .replace(/[^a-zA-Z0-9]/g, ''); // Quitar caracteres especiales
+          
+          const nombreArchivo = `area(${nombreLimpio})_nomina(${numeroSemana}).xlsx`;
+
+          const buffer = await workbook.xlsx.writeBuffer();
+          saveAs(new Blob([buffer]), nombreArchivo);
+        }
+        
+        updateStatus('Archivos Excel generados exitosamente', 'success');
+        showNotification('Éxito', `${Object.keys(porSupervisor).length} archivo(s) descargado(s)`, 'success');
+      } catch(err) {
+        updateStatus('Error al generar Excel', 'error');
+        showNotification('Error', `No se pudo generar el Excel: ${err.message}`, 'error');
+        console.error('Error detallado:', err);
+      }
+    };
+
+    // ==================== CORREO ====================
+    // ==================== ENVIAR CORREO ====================
+    document.getElementById('btnCorreo').onclick = () => {
+      const email = document.getElementById('emailDestino').value;
+      if(!email || !email.includes('@')) {
+        showNotification('Error', 'Por favor ingresa un correo válido', 'error');
+        return;
+      }
+      
+      saveConfig();
+      
+      // Obtener el número de semana del periodo seleccionado
+      const sel = document.getElementById('periodoSemana');
+      const periodoTexto = sel.options[sel.selectedIndex].text; // "Semana 5: del 2026-01-29 al 2026-02-04"
+      const numeroSemana = periodoTexto.match(/Semana (\d+)/)[1]; // Extrae el número
+      
+      // Crear asunto
+      const asunto = encodeURIComponent(`Asistencia de la semana ${numeroSemana}`);
+      
+      // Crear cuerpo del mensaje
+      const cuerpo = encodeURIComponent(
+`Buen día,
+
+Se comparte el registro de asistencia correspondiente a la nómina No. ${numeroSemana}.
+
+Les solicitamos atentamente:
+* Revisar la información y reportar cualquier incidencia en el apartado de comentarios.
+* No realizar modificaciones ni alteraciones en las horas de entrada y salida. Cualquier aclaración deberá registrarse únicamente en el apartado de comentarios.
+* Una vez validada la información, favor de subir el archivo al Drive correspondiente.
+
+Formularios:
+Prenómina: https://docs.google.com/forms/d/e/1FAIpQLSckXBk6pSA36Gdqs6jaw43h-HVrNvA-eTNKUanQoLX7LdTJ4A/viewform?pli=1
+Vacaciones, permisos y checadas sin gafete: https://docs.google.com/forms/d/e/1FAIpQLSd2BV7AIwtBR4Vyao0j6Yi3-wAsH3wZIpSXf9DaY1-sTLsvIw/viewform
+
+Saludos.`
+      );
+      
+      window.location.href = `mailto:${email}?subject=${asunto}&body=${cuerpo}`;
+      showNotification('Éxito', 'Cliente de correo abierto', 'success');
+    };
+
+    // ==================== IMPRIMIR ====================
+    document.getElementById('btnPrint').onclick = () => {
+      window.print();
+    };
+
+    // ==================== MÓDULO: GESTIÓN DE HORARIOS ====================
+    const NOMBRES_DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    // Estado del formulario: índice de día (0=Dom..6=Sáb) → {entrada,salida,comida} | null (descanso)
+    let diasFormState = {};
+
+    function abrirModalHorarios() {
+      renderListaHorarios();
+      resetFormHorario();
+      document.getElementById('modalHorarios').classList.add('show');
+    }
+    function cerrarModalHorarios() {
+      document.getElementById('modalHorarios').classList.remove('show');
+      resetFormHorario();
+    }
+
+    function renderDiasSelector() {
+      const cont = document.getElementById('diasSelector');
+      cont.innerHTML = NOMBRES_DIAS.map((nombre, i) => `
+        <div class="dia-chip ${diasFormState[i] ? 'active' : ''}" onclick="toggleDiaLaborado(${i})">${nombre}</div>
+      `).join('');
+    }
+
+    function renderDiasDetalle() {
+      const cont = document.getElementById('diasDetalle');
+      const diasActivos = Object.keys(diasFormState).filter(i => diasFormState[i]).map(Number).sort();
+      
+      if (diasActivos.length === 0) {
+        cont.innerHTML = `<p class="text-xs text-center py-3" style="color: var(--text-muted)">Selecciona al menos un día laborado arriba.</p>`;
+        return;
+      }
+      
+      cont.innerHTML = diasActivos.map(i => {
+        const d = diasFormState[i];
+        return `
+          <div class="dia-detalle-row flex-wrap">
+            <span class="badge badge-orange flex-shrink-0" style="width:38px; text-align:center;">${NOMBRES_DIAS[i]}</span>
+            <input type="time" value="${d.entrada}" onchange="actualizarDiaDetalle(${i}, 'entrada', this.value)" class="field-input" style="flex:1; min-width:90px;">
+            <input type="time" value="${d.salida}" onchange="actualizarDiaDetalle(${i}, 'salida', this.value)" class="field-input" style="flex:1; min-width:90px;">
+            <input type="number" value="${d.comida}" min="0" step="5" onchange="actualizarDiaDetalle(${i}, 'comida', parseInt(this.value)||0)" class="field-input" style="width:70px;" title="Minutos de comida">
+            <label class="flex items-center gap-1 text-[10px] flex-shrink-0" style="color: var(--text-secondary);" title="La salida se registra al día siguiente (ej. entra 23:00, sale 06:00)">
+              <input type="checkbox" ${d.cruzaMedianoche ? 'checked' : ''} onchange="actualizarDiaDetalle(${i}, 'cruzaMedianoche', this.checked)">
+              🌙 Nocturno
+            </label>
+          </div>`;
+      }).join('');
+    }
+
+    function toggleDiaLaborado(i) {
+      if (diasFormState[i]) {
+        diasFormState[i] = null;
+      } else {
+        const plantillaEntrada = document.getElementById('hPlantillaEntrada').value || '08:00';
+        const plantillaSalida = document.getElementById('hPlantillaSalida').value || '17:00';
+        const plantillaComida = parseInt(document.getElementById('hPlantillaComida').value) || 0;
+        diasFormState[i] = { entrada: plantillaEntrada, salida: plantillaSalida, comida: plantillaComida, cruzaMedianoche: false };
+      }
+      renderDiasSelector();
+      renderDiasDetalle();
+    }
+
+    function actualizarDiaDetalle(i, campo, valor) {
+      if (!diasFormState[i]) return;
+      diasFormState[i][campo] = valor;
+    }
+
+    function aplicarPlantillaADias() {
+      const entrada = document.getElementById('hPlantillaEntrada').value;
+      const salida = document.getElementById('hPlantillaSalida').value;
+      const comida = parseInt(document.getElementById('hPlantillaComida').value) || 0;
+      
+      const diasActivos = Object.keys(diasFormState).filter(i => diasFormState[i]);
+      if (diasActivos.length === 0) {
+        showNotification('Sin días marcados', 'Marca primero los días laborados en el selector de arriba', 'warning');
+        return;
+      }
+      
+      diasActivos.forEach(i => {
+        const cruzaPrevio = diasFormState[i] ? diasFormState[i].cruzaMedianoche : false;
+        diasFormState[i] = { entrada, salida, comida, cruzaMedianoche: !!cruzaPrevio };
+      });
+      renderDiasDetalle();
+      showNotification('Plantilla aplicada', `Se aplicó el horario a ${diasActivos.length} día(s)`, 'success');
+    }
+
+    function renderListaHorarios() {
+      const cont = document.getElementById('listaHorarios');
+      const codigos = Object.keys(horariosDB).sort();
+      
+      if (codigos.length === 0) {
+        cont.innerHTML = `<p class="text-xs text-center py-4" style="color: var(--text-muted)">Aún no hay horarios registrados.</p>`;
+        return;
+      }
+      
+      cont.innerHTML = codigos.map(cod => {
+        const h = horariosDB[cod];
+        const asignados = Object.values(asignacionesDB).filter(v => v === cod).length;
+        const resumen = NOMBRES_DIAS.map((nombre, i) => {
+          const d = h.dias[i];
+          return d ? `<span title="${nombre}: ${d.entrada}–${d.salida}" style="color: var(--text-primary)">${nombre}</span>` : `<span title="${nombre}: Descanso" style="color: var(--text-muted); text-decoration: line-through;">${nombre}</span>`;
+        }).join(' <span style="color:var(--border-strong)">·</span> ');
+        
+        return `
+          <div class="horario-card">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span class="badge badge-orange">${cod}</span>
+                  <span class="text-sm font-semibold" style="color: var(--text-primary)">${h.nombre}</span>
+                  ${asignados > 0 ? `<span class="badge badge-info">${asignados} empleado${asignados !== 1 ? 's' : ''}</span>` : ''}
+                </div>
+                <p class="text-[11px] font-mono mb-1.5" style="color: var(--text-secondary)">${resumen}</p>
+                <div class="text-[11px] space-y-0.5 font-mono" style="color: var(--text-secondary)">
+                  ${NOMBRES_DIAS.map((nombre, i) => h.dias[i] ? `<p><strong style="color:var(--text-muted); font-family:'Inter',sans-serif;">${nombre}:</strong> ${h.dias[i].entrada}–${h.dias[i].salida}${h.dias[i].cruzaMedianoche ? ' 🌙<span style="color:var(--text-muted); font-family:\'Inter\',sans-serif;"> (termina al día siguiente)</span>' : ''} <span style="color:var(--text-muted)">(${h.dias[i].comida}min comida)</span></p>` : '').join('')}
+                </div>
+              </div>
+              <div class="flex gap-1.5 flex-shrink-0">
+                <button onclick="editarHorario('${cod}')" class="p-1.5 rounded transition-all" style="background: var(--surface-3); color: var(--text-secondary);" title="Editar">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path></svg>
+                </button>
+                <button onclick="eliminarHorario('${cod}')" class="p-1.5 rounded transition-all" style="background: rgba(193,63,58,0.12); color: var(--danger);" title="Eliminar">
+                  <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function resetFormHorario() {
+      document.getElementById('horarioEditando').value = '';
+      document.getElementById('formHorarioTitulo').textContent = 'Nuevo Horario';
+      document.getElementById('hCodigo').value = '';
+      document.getElementById('hCodigo').disabled = false;
+      document.getElementById('hNombre').value = '';
+      document.getElementById('hPlantillaEntrada').value = '08:00';
+      document.getElementById('hPlantillaSalida').value = '17:00';
+      document.getElementById('hPlantillaComida').value = '60';
+      
+      // Por defecto: Lunes a Viernes laborados, Sábado y Domingo en descanso
+      diasFormState = {
+        0: null,
+        1: { entrada: '08:00', salida: '17:00', comida: 60, cruzaMedianoche: false },
+        2: { entrada: '08:00', salida: '17:00', comida: 60, cruzaMedianoche: false },
+        3: { entrada: '08:00', salida: '17:00', comida: 60, cruzaMedianoche: false },
+        4: { entrada: '08:00', salida: '17:00', comida: 60, cruzaMedianoche: false },
+        5: { entrada: '08:00', salida: '17:00', comida: 60, cruzaMedianoche: false },
+        6: null
+      };
+      
+      renderDiasSelector();
+      renderDiasDetalle();
+      document.getElementById('btnCancelarEdicion').classList.add('hidden');
+    }
+
+    function editarHorario(codigo) {
+      const h = horariosDB[codigo];
+      if (!h) return;
+      
+      document.getElementById('horarioEditando').value = codigo;
+      document.getElementById('formHorarioTitulo').textContent = `Editando: ${codigo}`;
+      document.getElementById('hCodigo').value = codigo;
+      document.getElementById('hCodigo').disabled = true;
+      document.getElementById('hNombre').value = h.nombre;
+      
+      diasFormState = {};
+      for (let i = 0; i <= 6; i++) {
+        diasFormState[i] = h.dias[i] ? { ...h.dias[i] } : null;
+      }
+      
+      renderDiasSelector();
+      renderDiasDetalle();
+      
+      document.getElementById('btnCancelarEdicion').classList.remove('hidden');
+      document.getElementById('formHorarioTitulo').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function eliminarHorario(codigo) {
+      const asignados = Object.keys(asignacionesDB).filter(id => asignacionesDB[id] === codigo);
+      const msg = asignados.length > 0
+        ? `El horario "${codigo}" está asignado a ${asignados.length} empleado(s). Si lo eliminas, quedarán sin horario asignado. ¿Continuar?`
+        : `¿Eliminar el horario "${codigo}"?`;
+      
+      if (!confirm(msg)) return;
+      
+      delete horariosDB[codigo];
+      asignados.forEach(id => {
+        delete asignacionesDB[id];
+        if (empleadosDB[id]) empleadosDB[id].horario = '';
+      });
+      
+      guardarHorarios();
+      guardarAsignaciones();
+      renderListaHorarios();
+      showNotification('Horario eliminado', `Se eliminó "${codigo}" correctamente`, 'success');
+    }
+
+    function guardarHorarioForm() {
+      const codigoOriginal = document.getElementById('horarioEditando').value;
+      const codigo = document.getElementById('hCodigo').value.trim().toUpperCase().replace(/\s+/g, '_');
+      const nombre = document.getElementById('hNombre').value.trim();
+      
+      if (!codigo || !nombre) {
+        showNotification('Falta información', 'El código y el nombre son obligatorios', 'error');
+        return;
+      }
+      
+      if (!codigoOriginal && horariosDB[codigo]) {
+        showNotification('Código duplicado', `Ya existe un horario con el código "${codigo}"`, 'error');
+        return;
+      }
+      
+      const diasLaborados = Object.keys(diasFormState).filter(i => diasFormState[i]);
+      if (diasLaborados.length === 0) {
+        showNotification('Sin días laborados', 'Marca al menos un día como laborado', 'error');
+        return;
+      }
+      
+      const nuevoHorario = {
+        nombre,
+        dias: {
+          0: diasFormState[0] ? { ...diasFormState[0] } : null,
+          1: diasFormState[1] ? { ...diasFormState[1] } : null,
+          2: diasFormState[2] ? { ...diasFormState[2] } : null,
+          3: diasFormState[3] ? { ...diasFormState[3] } : null,
+          4: diasFormState[4] ? { ...diasFormState[4] } : null,
+          5: diasFormState[5] ? { ...diasFormState[5] } : null,
+          6: diasFormState[6] ? { ...diasFormState[6] } : null
+        }
+      };
+      
+      horariosDB[codigo] = nuevoHorario;
+      guardarHorarios();
+      
+      // Si se generó un reporte con este horario, refrescar horas de empleados afectados
+      if (empleadosDB && Object.keys(empleadosDB).length) {
+        aplicarAsignacionesAEmpleados();
+      }
+      // Si ya hay checadas cargadas, re-consolidar (las horas del horario pudieron cambiar)
+      if (Object.keys(eventosDB).length) consolidarEventosConHorarios();
+      
+      resetFormHorario();
+      renderListaHorarios();
+      showNotification('Horario guardado', `"${codigo}" se guardó correctamente`, 'success');
+    }
+
+    // ==================== MÓDULO: ASIGNACIÓN DE HORARIOS A EMPLEADOS ====================
+    let seleccionAsignacion = new Set();
+
+    function abrirModalAsignar() {
+      if (!empleadosDB || !Object.keys(empleadosDB).length) return;
+      
+      seleccionAsignacion = new Set();
+      
+      const supSel = document.getElementById('filtroSupervisorAsignar');
+      const jefes = [...new Set(Object.values(empleadosDB).map(e => e.jefe))].sort();
+      supSel.innerHTML = '<option value="">Todos los supervisores</option>' + jefes.map(j => `<option value="${j}">${j}</option>`).join('');
+      
+      const codigos = Object.keys(horariosDB).sort();
+      
+      const horFiltro = document.getElementById('filtroHorarioAsignar');
+      horFiltro.innerHTML = '<option value="">Todos los horarios</option>'
+        + codigos.map(c => `<option value="${c}">${c} — ${horariosDB[c].nombre}</option>`).join('')
+        + '<option value="__NINGUNO__">Sin horario asignado</option>';
+      
+      const horBulk = document.getElementById('bulkHorario');
+      horBulk.innerHTML = '<option value="">Selecciona horario…</option>'
+        + codigos.map(c => `<option value="${c}">${c} — ${horariosDB[c].nombre}</option>`).join('')
+        + '<option value="__NINGUNO__">Sin horario</option>';
+      
+      document.getElementById('buscarAsignar').value = '';
+      document.getElementById('chkTodosAsignar').checked = false;
+      renderListaAsignacion();
+      document.getElementById('modalAsignar').classList.add('show');
+    }
+    function cerrarModalAsignar() {
+      document.getElementById('modalAsignar').classList.remove('show');
+    }
+
+    function empleadosFiltradosAsignacion() {
+      const q = (document.getElementById('buscarAsignar').value || '').toLowerCase();
+      const supervisorSel = document.getElementById('filtroSupervisorAsignar').value;
+      const horarioSel = document.getElementById('filtroHorarioAsignar').value;
+      
+      let empleados = Object.values(empleadosDB).sort((a,b) => a.nombre.localeCompare(b.nombre));
+      
+      if (q) {
+        empleados = empleados.filter(e => e.nombre.toLowerCase().includes(q) || e.id.includes(q));
+      }
+      if (supervisorSel) {
+        empleados = empleados.filter(e => e.jefe === supervisorSel);
+      }
+      if (horarioSel === '__NINGUNO__') {
+        empleados = empleados.filter(e => !e.horario);
+      } else if (horarioSel) {
+        empleados = empleados.filter(e => e.horario === horarioSel);
+      }
+      
+      return empleados;
+    }
+
+    function renderListaAsignacion() {
+      const cont = document.getElementById('listaAsignacion');
+      const codigos = Object.keys(horariosDB).sort();
+      const empleados = empleadosFiltradosAsignacion();
+      
+      document.getElementById('totalVisiblesAsignar').textContent = `${empleados.length} empleado(s) visibles`;
+      
+      if (empleados.length === 0) {
+        cont.innerHTML = `<p class="text-xs text-center py-4" style="color: var(--text-muted)">Sin resultados con estos filtros.</p>`;
+        actualizarContadorSeleccion();
+        return;
+      }
+      
+      cont.innerHTML = empleados.map(emp => `
+        <div class="flex items-center gap-3 p-2.5 rounded" style="background: var(--surface-2); border: 1px solid var(--border);">
+          <input type="checkbox" class="chk-emp-asignar flex-shrink-0" data-id="${emp.id}" ${seleccionAsignacion.has(emp.id) ? 'checked' : ''} onchange="toggleSeleccionEmpleado('${emp.id}', this.checked)">
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold truncate" style="color: var(--text-primary)">${emp.nombre} <span style="color: var(--text-muted)">#${emp.id}</span></p>
+            <p class="text-[10px] truncate" style="color: var(--text-muted)">${emp.jefe}</p>
+          </div>
+          <select onchange="asignarHorarioIndividual('${emp.id}', this.value)" class="text-xs rounded px-2 py-1.5 flex-shrink-0" style="background: var(--surface-3); border: 1px solid var(--border-strong); color: var(--text-primary); width: 160px;">
+            <option value="">Sin horario</option>
+            ${codigos.map(c => `<option value="${c}" ${emp.horario === c ? 'selected' : ''}>${c} — ${horariosDB[c].nombre}</option>`).join('')}
+          </select>
+        </div>
+      `).join('');
+      
+      actualizarContadorSeleccion();
+    }
+
+    function toggleSeleccionEmpleado(id, marcado) {
+      if (marcado) seleccionAsignacion.add(id);
+      else seleccionAsignacion.delete(id);
+      actualizarContadorSeleccion();
+    }
+
+    function toggleSeleccionTodos(marcado) {
+      const visibles = empleadosFiltradosAsignacion();
+      visibles.forEach(emp => {
+        if (marcado) seleccionAsignacion.add(emp.id);
+        else seleccionAsignacion.delete(emp.id);
+      });
+      renderListaAsignacion();
+    }
+
+    function actualizarContadorSeleccion() {
+      document.getElementById('contadorSeleccion').textContent = seleccionAsignacion.size;
+    }
+
+    function asignarHorarioIndividual(id, codigo) {
+      asignacionesDB[id] = codigo;
+      if (empleadosDB[id]) empleadosDB[id].horario = codigo;
+      guardarAsignaciones();
+      guardarEmpleadosDB();
+      // Si ya hay checadas cargadas, re-consolidar para que tomen el horario recién asignado
+      if (Object.keys(eventosDB).length) consolidarEventosConHorarios();
+    }
+
+    function aplicarAHorarioSeleccionados() {
+      const codigo = document.getElementById('bulkHorario').value;
+      
+      if (!codigo) {
+        showNotification('Selecciona un horario', 'Elige el horario que quieres aplicar', 'warning');
+        return;
+      }
+      if (seleccionAsignacion.size === 0) {
+        showNotification('Sin selección', 'Marca al menos un empleado en la lista para aplicar el horario', 'warning');
+        return;
+      }
+      
+      const valorFinal = codigo === '__NINGUNO__' ? '' : codigo;
+      let afectados = 0;
+      
+      seleccionAsignacion.forEach(id => {
+        if (empleadosDB[id]) {
+          asignacionesDB[id] = valorFinal;
+          empleadosDB[id].horario = valorFinal;
+          afectados++;
+        }
+      });
+      
+      guardarAsignaciones();
+      guardarEmpleadosDB();
+      // Si ya hay checadas cargadas, re-consolidar para que tomen el horario recién asignado
+      if (Object.keys(eventosDB).length) consolidarEventosConHorarios();
+      renderListaAsignacion();
+      showNotification('Asignación aplicada', `${afectados} empleado(s) actualizados`, 'success');
+    }
+
+    // ==================== MÓDULO: CHECADAS CRUDAS (AUDITORÍA) ====================
+    function abrirModalChecadasCrudas() {
+      if (!eventosDB || !Object.keys(eventosDB).length) return;
+      
+      document.getElementById('crudaBuscarEmpleado').value = '';
+      poblarSelectEmpleadoCrudas();
+      document.getElementById('listaChecadasCrudas').innerHTML = `<p class="text-xs text-center py-6" style="color: var(--text-muted)">Selecciona un empleado arriba para ver sus checadas.</p>`;
+      document.getElementById('modalChecadasCrudas').classList.add('show');
+    }
+    function cerrarModalChecadasCrudas() {
+      document.getElementById('modalChecadasCrudas').classList.remove('show');
+    }
+
+    function poblarSelectEmpleadoCrudas(filtro) {
+      const q = (filtro || '').toLowerCase();
+      const sel = document.getElementById('crudaEmpleadoSelect');
+      const valorActual = sel.value;
+      
+      // Solo empleados que tienen checadas cargadas
+      let idsConEventos = Object.keys(eventosDB).filter(id => Object.keys(eventosDB[id]).length > 0);
+      
+      let opciones = idsConEventos.map(id => {
+        const emp = empleadosDB[id];
+        return { id, nombre: emp ? emp.nombre : `Empleado #${id}` };
+      }).sort((a,b) => a.nombre.localeCompare(b.nombre));
+      
+      if (q) {
+        opciones = opciones.filter(o => o.nombre.toLowerCase().includes(q) || o.id.includes(q));
+      }
+      
+      sel.innerHTML = '<option value="">Selecciona un empleado…</option>' +
+        opciones.map(o => `<option value="${o.id}">${o.nombre} — #${o.id}</option>`).join('');
+      
+      if (opciones.some(o => o.id === valorActual)) sel.value = valorActual;
+    }
+
+    function filtrarSelectEmpleadoCrudas() {
+      poblarSelectEmpleadoCrudas(document.getElementById('crudaBuscarEmpleado').value);
+    }
+
+    function renderChecadasCrudas() {
+      const id = document.getElementById('crudaEmpleadoSelect').value;
+      const cont = document.getElementById('listaChecadasCrudas');
+      
+      if (!id || !eventosDB[id]) {
+        cont.innerHTML = `<p class="text-xs text-center py-6" style="color: var(--text-muted)">Selecciona un empleado arriba para ver sus checadas.</p>`;
+        return;
+      }
+      
+      const fechas = Object.keys(eventosDB[id]).sort();
+      
+      if (fechas.length === 0) {
+        cont.innerHTML = `<p class="text-xs text-center py-6" style="color: var(--text-muted)">Este empleado no tiene checadas cargadas.</p>`;
+        return;
+      }
+      
+      cont.innerHTML = fechas.map(fecha => {
+        const dia = eventosDB[id][fecha];
+        const dayName = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'][new Date(fecha+'T00:00:00').getDay()];
+        
+        // Reconstruir la lista completa de checadas crudas de ese día, con su código original
+        let eventosDelDia = [];
+        if (dia.isRST) {
+          (dia.todas || []).forEach(hora => eventosDelDia.push({ hora, codigo: 'RST' }));
+        } else {
+          Object.keys(dia.entradas || {}).forEach(codigo => {
+            dia.entradas[codigo].forEach(hora => eventosDelDia.push({ hora, codigo }));
+          });
+          Object.keys(dia.salidas || {}).forEach(codigo => {
+            dia.salidas[codigo].forEach(hora => eventosDelDia.push({ hora, codigo }));
+          });
+        }
+        eventosDelDia.sort((a,b) => a.hora.localeCompare(b.hora));
+        
+        // Detectar si algún código se repitió más de una vez ese día (la señal que se pedía poder ver)
+        const conteoPorCodigo = {};
+        eventosDelDia.forEach(ev => { conteoPorCodigo[ev.codigo] = (conteoPorCodigo[ev.codigo] || 0) + 1; });
+        const hayDuplicados = Object.values(conteoPorCodigo).some(n => n > 1);
+        
+        const filasEventos = eventosDelDia.map(ev => {
+          const esLaUsada = ev.hora === dia.entradaFinal || ev.hora === dia.salidaFinal;
+          const repetido = conteoPorCodigo[ev.codigo] > 1;
+          return `
+            <div class="flex items-center gap-2 px-2 py-1 rounded text-[11px]" style="${esLaUsada ? 'background: rgba(30,143,99,0.10); border: 1px solid rgba(30,143,99,0.35);' : 'background: var(--surface-3);'}">
+              <span class="font-mono font-semibold" style="color: var(--text-primary); width: 48px;">${ev.hora}</span>
+              <span class="badge ${repetido ? 'badge-warning' : 'badge-info'}" style="font-size: 9px;">${ev.codigo}</span>
+              ${esLaUsada ? `<span style="color: var(--success); font-size: 10px;">✓ usada en el reporte</span>` : ''}
+            </div>`;
+        }).join('');
+        
+        return `
+          <div class="horario-card">
+            <div class="flex items-center justify-between mb-2 flex-wrap gap-1">
+              <div class="flex items-center gap-2">
+                <span class="badge badge-orange">${fecha}</span>
+                <span class="text-xs font-semibold" style="color: var(--text-primary)">${dayName}</span>
+                ${hayDuplicados ? `<span class="badge badge-warning">⚠ Checadas repetidas</span>` : ''}
+                ${dia.isRST ? `<span class="badge badge-info">RST</span>` : ''}
+              </div>
+              <span class="text-[10px] font-mono" style="color: var(--text-muted)">
+                Entrada final: <strong style="color:var(--text-primary)">${dia.entradaFinal || '--:--'}</strong> ·
+                Salida final: <strong style="color:var(--text-primary)">${dia.salidaFinal || '--:--'}</strong>
+              </span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">${filasEventos}</div>
+          </div>`;
+      }).join('');
+    }
+
+    document.getElementById('btnHorarios').onclick = abrirModalHorarios;
+    document.getElementById('btnAsignar').onclick = abrirModalAsignar;
+    document.getElementById('btnChecadasCrudas').onclick = abrirModalChecadasCrudas;
+    document.getElementById('modalHorarios').addEventListener('click', (e) => { if (e.target.id === 'modalHorarios') cerrarModalHorarios(); });
+    document.getElementById('modalAsignar').addEventListener('click', (e) => { if (e.target.id === 'modalAsignar') cerrarModalAsignar(); });
+    document.getElementById('modalChecadasCrudas').addEventListener('click', (e) => { if (e.target.id === 'modalChecadasCrudas') cerrarModalChecadasCrudas(); });
+
+    // ==================== INICIALIZACIÓN ====================
+    (function(){
+      const s = document.getElementById('periodoSemana');
+      let f = new Date("2026-01-01T00:00:00"); 
+      f.setDate(f.getDate() + (4 - f.getDay() + 7) % 7);
+      
+      for(let i=1; i<=52; i++){
+        let fin = new Date(f); 
+        fin.setDate(fin.getDate() + 6);
+        let sF = f.toISOString().split('T')[0], eF = fin.toISOString().split('T')[0];
+        s.add(new Option(`Semana ${i}: del ${sF} al ${eF}`, `${sF}|${eF}`)); 
+        f.setDate(f.getDate() + 7);
+      }
+      
+      cargarHorariosYAsignaciones();
+      actualizarBannerEmpleadosGuardados();
+      loadConfig();
+    })();
+  </script>
+</body>
+</html>
