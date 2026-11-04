@@ -45,7 +45,7 @@ if [ "$(pwd)" != "${APP_DIR}" ]; then
   cd "${APP_DIR}"
 fi
 
-npm install
+npm install --legacy-peer-deps
 npm run build
 
 # 5. Iniciar servicio con PM2

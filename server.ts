@@ -20,6 +20,15 @@ interface ServerPortalDatabase {
   dispersals?: unknown[];
   notifications?: unknown[];
   emailLogs?: unknown[];
+  empleadosDB?: Record<string, unknown>;
+  eventosDB?: Record<string, unknown>;
+  vacacionesDB?: Record<string, unknown>;
+  reportes?: unknown[];
+  resumen?: unknown;
+  selectedWeek?: string;
+  horarios?: Record<string, unknown>;
+  asignaciones?: Record<string, string>;
+  config?: Record<string, unknown>;
   updatedAt?: string;
 }
 
@@ -85,7 +94,7 @@ async function startServer() {
     });
   });
 
-  // Sincronizar cambios (usuarios, listas asignadas, incidencias, liberaciones, dispersiones, notificaciones)
+  // Sincronizar cambios (usuarios, listas asignadas, incidencias, liberaciones, dispersiones, notificaciones y nómina activa)
   app.post('/api/portal/sync', (req, res) => {
     try {
       const body = req.body || {};
@@ -95,6 +104,15 @@ async function startServer() {
         ...(body.releases && typeof body.releases === 'object' ? { releases: body.releases } : {}),
         ...(Array.isArray(body.dispersals) ? { dispersals: body.dispersals } : {}),
         ...(Array.isArray(body.notifications) ? { notifications: body.notifications } : {}),
+        ...(body.empleadosDB && typeof body.empleadosDB === 'object' ? { empleadosDB: body.empleadosDB } : {}),
+        ...(body.eventosDB && typeof body.eventosDB === 'object' ? { eventosDB: body.eventosDB } : {}),
+        ...(body.vacacionesDB && typeof body.vacacionesDB === 'object' ? { vacacionesDB: body.vacacionesDB } : {}),
+        ...(Array.isArray(body.reportes) ? { reportes: body.reportes } : {}),
+        ...(body.resumen !== undefined ? { resumen: body.resumen } : {}),
+        ...(typeof body.selectedWeek === 'string' ? { selectedWeek: body.selectedWeek } : {}),
+        ...(body.horarios && typeof body.horarios === 'object' ? { horarios: body.horarios } : {}),
+        ...(body.asignaciones && typeof body.asignaciones === 'object' ? { asignaciones: body.asignaciones } : {}),
+        ...(body.config && typeof body.config === 'object' ? { config: body.config } : {}),
       });
       res.json({ ok: true, updatedAt: updated.updatedAt });
     } catch (err: any) {

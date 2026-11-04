@@ -132,7 +132,7 @@ export class PortalService {
    * Sincroniza datos con el servidor Express (/api/portal/sync) cuando está disponible
    * (ej. en el servidor Hostinger KVM 2), sin bloquear la ejecución local.
    */
-  private static pushToServer(payload: Record<string, unknown>): void {
+  static pushToServer(payload: Record<string, unknown>): void {
     if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
     fetch('/api/portal/sync', {
       method: 'POST',
@@ -152,6 +152,15 @@ export class PortalService {
     releases?: Record<string, PayrollRelease>;
     dispersals?: PayrollDispersal[];
     notifications?: PortalNotification[];
+    empleadosDB?: Record<string, any>;
+    eventosDB?: Record<string, any>;
+    vacacionesDB?: Record<string, any>;
+    reportes?: any[];
+    resumen?: any;
+    selectedWeek?: string;
+    horarios?: Record<string, any>;
+    asignaciones?: Record<string, string>;
+    config?: Record<string, any>;
     serverInfo?: { hostname: string; uptime: number; storagePath: string };
   } | null> {
     if (typeof window === 'undefined' || window.location.protocol === 'file:') return null;

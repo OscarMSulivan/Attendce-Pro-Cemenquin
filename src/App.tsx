@@ -125,27 +125,103 @@ export default function App() {
   const [disperseByListMsg, setDisperseByListMsg] = useState<string>('');
   const [disperseSendEmail, setDisperseSendEmail] = useState<boolean>(true);
 
-  // Hidratar estado desde el servidor Express (/api/portal/state) si está disponible (ej. en Hostinger KVM 2)
+  const [isServerHydrated, setIsServerHydrated] = useState<boolean>(false);
+
+  // Hidratar estado completo desde el servidor Express (/api/portal/state) en Hostinger KVM 2
   useEffect(() => {
-    PortalService.fetchServerState().then(serverData => {
-      if (!serverData) return;
-      if (serverData.users && serverData.users.length > 0) {
-        setPortalUsers(serverData.users.map(u => PortalService.normalizeUserRecord(u)));
-      }
-      if (serverData.incidents) {
-        setIncidents(serverData.incidents);
-      }
-      if (serverData.releases) {
-        setReleases(serverData.releases);
-      }
-      if (serverData.dispersals) {
-        setDispersals(serverData.dispersals);
-      }
-      if (serverData.notifications) {
-        setNotifications(serverData.notifications);
-      }
-    });
+    PortalService.fetchServerState()
+      .then(serverData => {
+        if (serverData) {
+          if (serverData.users && serverData.users.length > 0) {
+            setPortalUsers(serverData.users.map(u => PortalService.normalizeUserRecord(u)));
+          }
+          if (serverData.incidents) {
+            setIncidents(serverData.incidents);
+          }
+          if (serverData.releases) {
+            setReleases(serverData.releases);
+          }
+          if (serverData.dispersals) {
+            setDispersals(serverData.dispersals);
+          }
+          if (serverData.notifications) {
+            setNotifications(serverData.notifications);
+          }
+          if (serverData.horarios && Object.keys(serverData.horarios).length > 0) {
+            setHorarios(serverData.horarios);
+            StorageService.saveHorarios(serverData.horarios);
+          }
+          if (serverData.asignaciones && Object.keys(serverData.asignaciones).length > 0) {
+            setAsignaciones(serverData.asignaciones);
+            StorageService.saveAsignaciones(serverData.asignaciones);
+          }
+          if (serverData.config && Object.keys(serverData.config).length > 0) {
+            setConfig(prev => ({ ...prev, ...serverData.config }));
+          }
+          if (serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0) {
+            setEmpleadosDB(serverData.empleadosDB);
+            StorageService.saveEmployees(serverData.empleadosDB);
+            setSavedEmployeesInfo({
+              count: Object.keys(serverData.empleadosDB).length,
+              savedAt: new Date().toISOString(),
+            });
+          } else {
+            const localSaved = StorageService.loadSavedEmployees();
+            if (localSaved && Object.keys(localSaved.empleados).length > 0) {
+              setEmpleadosDB(localSaved.empleados);
+            }
+          }
+          if (serverData.eventosDB && Object.keys(serverData.eventosDB).length > 0) {
+            setEventosDB(serverData.eventosDB);
+          }
+          if (serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0) {
+            setVacacionesDB(serverData.vacacionesDB);
+          }
+          if (serverData.selectedWeek) {
+            setSelectedWeek(serverData.selectedWeek);
+          }
+          if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
+            setReportes(serverData.reportes);
+          }
+          if (serverData.resumen) {
+            setResumen(serverData.resumen);
+          }
+        }
+      })
+      .finally(() => {
+        setIsServerHydrated(true);
+      });
   }, []);
+
+  // Guardar automáticamente en el servidor Hostinger KVM 2 cualquier cambio en empleados, checadas, reportes trabajados o configuración
+  useEffect(() => {
+    if (!isServerHydrated) return;
+    const timer = setTimeout(() => {
+      PortalService.pushToServer({
+        empleadosDB,
+        eventosDB,
+        vacacionesDB,
+        reportes,
+        resumen,
+        selectedWeek,
+        horarios,
+        asignaciones,
+        config,
+      });
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [
+    isServerHydrated,
+    empleadosDB,
+    eventosDB,
+    vacacionesDB,
+    reportes,
+    resumen,
+    selectedWeek,
+    horarios,
+    asignaciones,
+    config,
+  ]);
 
   // Usuario actual en sesión
   const currentUser = useMemo<PortalUser>(() => {
