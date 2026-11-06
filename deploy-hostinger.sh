@@ -3,14 +3,21 @@
 # AttendancePRO v10 — Script de Instalación Automática para Hostinger VPS KVM 2
 # Sistema Operativo Recomendado: Ubuntu 22.04 LTS o Ubuntu 24.04 LTS
 # ==============================================================================
-set -e
+# Detectar automáticamente si estamos en Attendce-Pro-Cemenquin o attendancepro
+if [ -d "/var/www/Attendce-Pro-Cemenquin" ]; then
+  APP_DIR="/var/www/Attendce-Pro-Cemenquin"
+elif [ -d "$(pwd)/.git" ]; then
+  APP_DIR="$(pwd)"
+else
+  APP_DIR="/var/www/Attendce-Pro-Cemenquin"
+fi
 
-APP_DIR="/var/www/attendancepro"
 PORT=3000
 DOMAIN="${1:-_}" # Puedes pasar tu dominio como argumento: bash deploy-hostinger.sh nomina.tuempresa.com
 
 echo "=================================================================="
-echo " Iniciando despliegue de AttendancePRO v10 en Hostinger VPS KVM 2 "
+echo " Iniciando despliegue de AttendancePRO en Hostinger VPS KVM 2 "
+echo " Carpeta: ${APP_DIR}"
 echo "=================================================================="
 
 # 1. Actualizar paquetes del sistema e instalar herramientas base

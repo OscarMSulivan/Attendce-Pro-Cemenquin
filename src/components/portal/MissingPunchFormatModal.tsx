@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   FileText,
   Upload,
@@ -290,9 +291,9 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
     });
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto my-auto shadow-2xl animate-scale-in">
         {/* Encabezado */}
         <div className="p-5 bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -642,6 +643,7 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

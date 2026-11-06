@@ -23,17 +23,19 @@ import {
   NOMBRES_DIAS_CORTO
 } from '../utils/calendarUtils';
 import {
+  circularTimeDiffMinutes,
   clasificarChecadaUnica,
   elegirHoraMasCercana,
   ENTRADAS_PRIORIDAD,
   filtrarRebotesChecadas,
+  normalizarHorarioDia,
   SALIDAS_PRIORIDAD,
   sortHoursNumerically,
   timeToMinutes
 } from './eventsHierarchy';
 
 /**
- * Obtiene la configuración de horario para un día específico de la semana (0..6).
+ * Obtiene la configuración de horario normalizada para un día específico de la semana (0..6).
  * Si el empleado aún no tiene un código de horario personalizado en el catálogo,
  * enlaza con el horario base programado ('ADMO' o el primero activo) para detectar días laborales y checadas faltantes.
  */
@@ -48,7 +50,44 @@ export function getScheduleForDay(
   if (!effectiveCode || !horariosDB[effectiveCode]) return null;
   const config = horariosDB[effectiveCode];
   if (!config.dias) return null;
-  return config.dias[dayOfWeek] || null;
+  return normalizarHorarioDia(config.dias[dayOfWeek] || null);
+}
+
+/**
+ * Obtiene un día de horario de referencia del empleado (el primer día activo de su semana programada).
+ * Sirve para saber si un empleado es de turno nocturno o diurno incluso en sus días de descanso (ej. Sábado o Domingo).
+ */
+export function getReferenceScheduleForEmployee(
+  horariosDB: Record<string, ScheduleConfig>,
+  scheduleCode: string | undefined
+): DaySchedule | null {
+  const effectiveCode = (scheduleCode && horariosDB[scheduleCode])
+    ? scheduleCode
+    : (horariosDB['ADMO'] ? 'ADMO' : Object.keys(horariosDB)[0]);
+  if (!effectiveCode || !horariosDB[effectiveCode]) return null;
+  const config = horariosDB[effectiveCode];
+  if (!config.dias) return null;
+  for (let i = 1; i <= 6; i++) {
+    if (config.dias[i]) return normalizarHorarioDia(config.dias[i]);
+  }
+  if (config.dias[0]) return normalizarHorarioDia(config.dias[0]);
+  return null;
+}
+
+/**
+ * Determina si una checada (en minutos) pertenece al bloque de Entrada nocturna o al bloque de Salida matutina
+ * de un horario que cruza medianoche.
+ */
+function esChecadaDeEntradaNocturna(horaStr: string, horarioNocturno: DaySchedule): boolean {
+  const minPunch = timeToMinutes(horaStr);
+  const minEnt = timeToMinutes(horarioNocturno.entrada);
+  const minSal = timeToMinutes(horarioNocturno.salida);
+  const diffEnt = circularTimeDiffMinutes(minPunch, minEnt);
+  const diffSal = circularTimeDiffMinutes(minPunch, minSal);
+  if (diffEnt !== diffSal) {
+    return diffEnt < diffSal;
+  }
+  return minPunch >= 14 * 60;
 }
 
 /**
@@ -60,12 +99,13 @@ export function calcularJornadaEsperadaHrs(
   tiempoComidaHrs: number,
   jornadaBase = 8.0
 ): number {
-  if (!horarioProgramado) return jornadaBase;
+  const norm = normalizarHorarioDia(horarioProgramado);
+  if (!norm) return jornadaBase;
 
-  const entradaMin = timeToMinutes(horarioProgramado.entrada);
-  const salidaMin = timeToMinutes(horarioProgramado.salida);
+  const entradaMin = timeToMinutes(norm.entrada);
+  const salidaMin = timeToMinutes(norm.salida);
   let diffMin = salidaMin - entradaMin;
-  if (diffMin < 0 || horarioProgramado.cruzaMedianoche) {
+  if (diffMin <= 0 || norm.cruzaMedianoche) {
     diffMin += 1440; // Cruce de medianoche: suma 24 horas
   }
 
@@ -115,8 +155,8 @@ export interface ConsolidateOptions {
 
 /**
  * Consolida los eventos biométricos por empleado.
- * Corrige de raíz el problema donde un evento RST descartaba las entradas/salidas normales
- * o acomodaba una checada única de salida en la columna de entrada.
+ * Corrige de raíz el problema donde un evento RST descartaba las entradas/salidas normales,
+ * acomodaba una checada única de salida en la columna de entrada, o invertía Entrada y Salida.
  */
 export function consolidarEventosConHorarios(
   eventosDB: EventsDB,
@@ -130,11 +170,13 @@ export function consolidarEventosConHorarios(
 
   for (const empId in resultado) {
     const emp = empleadosDB[empId];
+    const horarioRef = getReferenceScheduleForEmployee(horariosDB, emp?.horario);
 
     for (const fecha in resultado[empId]) {
       const dia = resultado[empId][fecha];
       const dayOfWeek = getDayOfWeekFromISO(fecha);
       const horarioProgramado = getScheduleForDay(horariosDB, emp?.horario, dayOfWeek);
+      const refDia = horarioProgramado || horarioRef;
 
       const crudos = ensureRegistrosCrudos(dia);
       const efectivas = filtrarRebotesChecadas(crudos, minutosRebote);
@@ -149,7 +191,7 @@ export function consolidarEventosConHorarios(
       // CASO 1: Solo hay 1 checada física efectiva en todo el día (checada huérfana)
       if (efectivas.length === 1) {
         const unica = efectivas[0];
-        const posicion = clasificarChecadaUnica(unica, horarioProgramado);
+        const posicion = clasificarChecadaUnica(unica, horarioProgramado, horarioRef);
         if (posicion === 'salida') {
           dia.entradaFinal = null;
           dia.salidaFinal = unica.hora;
@@ -162,11 +204,23 @@ export function consolidarEventosConHorarios(
       }
 
       // CASO 2: Hay 2 o más checadas efectivas en el día
-      const todasLasHorasEfectivas = efectivas.map(e => e.hora);
+      const todasLasHorasEfectivas = sortHoursNumerically(efectivas.map(e => e.hora));
+      const esNocturno = Boolean(refDia && refDia.cruzaMedianoche);
 
-      if (modoLectura === 'checadas_reales') {
-        // MODO POR CHECADAS REALES (Recomendado):
-        // Une todas las checadas del día (incluyendo RST, ENT, SNT, etc.) sin perder ninguna.
+      if (esNocturno && refDia) {
+        // En un turno nocturno (ej. Entrada 22:00, Salida 06:00), las checadas de la noche son Entrada
+        // y las checadas de la mañana son Salida (jamás poner 06:00 como Entrada y 22:00 como Salida).
+        const candidatasEnt = todasLasHorasEfectivas.filter(h => esChecadaDeEntradaNocturna(h, refDia));
+        const candidatasSal = todasLasHorasEfectivas.filter(h => !esChecadaDeEntradaNocturna(h, refDia));
+
+        dia.entradaFinal = candidatasEnt.length > 0
+          ? elegirHoraMasCercana(candidatasEnt, refDia.entrada, 'ultima')
+          : null;
+        dia.salidaFinal = candidatasSal.length > 0
+          ? elegirHoraMasCercana(candidatasSal, refDia.salida, 'primera')
+          : null;
+      } else if (modoLectura === 'checadas_reales') {
+        // MODO POR CHECADAS REALES (Turnos diurnos / vespertinos):
         if (horarioProgramado && !horarioProgramado.cruzaMedianoche && efectivas.length > 2) {
           // Si hay más de 2 checadas (ej. checó comida), elegir entrada cercana al inicio y salida cercana al fin
           const candidatasEnt = todasLasHorasEfectivas.slice(0, -1);
@@ -180,13 +234,12 @@ export function consolidarEventosConHorarios(
           dia.entradaFinal = entElegida;
           dia.salidaFinal = salElegida;
         } else {
-          // Con 2 checadas efectivas (o sin horario): primera del día = Entrada, última del día = Salida
+          // Con 2 checadas efectivas en turno diurno: primera del día = Entrada, última del día = Salida
           dia.entradaFinal = todasLasHorasEfectivas[0];
           dia.salidaFinal = todasLasHorasEfectivas[todasLasHorasEfectivas.length - 1];
         }
       } else {
         // MODO POR JERARQUÍA DE EVENTOS + RESCATE INTELIGENTE DE RST:
-        // 1. Buscar entrada con mayor jerarquía oficial (ENT > ERT > EFT > ENC)
         let entradaSeleccionada: string | null = null;
         let mejorPrioridadEntrada = 999;
 
@@ -202,7 +255,6 @@ export function consolidarEventosConHorarios(
           }
         }
 
-        // 2. Buscar salida con mayor jerarquía oficial (SNT > SAT > SRC > SNC)
         let salidaSeleccionada: string | null = null;
         let mejorPrioridadSalida = 999;
 
@@ -218,9 +270,7 @@ export function consolidarEventosConHorarios(
           }
         }
 
-        // 3. RESCATE CON RST / CHECADAS RESTANTES:
-        // Si falta la Entrada o falta la Salida porque el checador la etiquetó como RST (o como otro código),
-        // rescatamos la checada faltante de las checadas efectivas del día.
+        // RESCATE CON RST / CHECADAS RESTANTES:
         if (!entradaSeleccionada && !salidaSeleccionada) {
           entradaSeleccionada = todasLasHorasEfectivas[0];
           salidaSeleccionada = todasLasHorasEfectivas[todasLasHorasEfectivas.length - 1];
@@ -230,7 +280,6 @@ export function consolidarEventosConHorarios(
           if (posteriores.length > 0) {
             salidaSeleccionada = elegirHoraMasCercana(posteriores, horarioProgramado?.salida, 'ultima');
           } else {
-            // ¿Y si la supuesta "entrada" era en realidad de la tarde y había un RST en la mañana?
             const anteriores = todasLasHorasEfectivas.filter(h => minEnt - timeToMinutes(h) > minutosRebote);
             if (anteriores.length > 0) {
               salidaSeleccionada = entradaSeleccionada;
@@ -251,11 +300,11 @@ export function consolidarEventosConHorarios(
           }
         }
 
-        // Asegurar que en turnos diurnos la entrada sea anterior a la salida
+        // Asegurar que en turnos diurnos la entrada sea siempre anterior a la salida
         if (
           entradaSeleccionada &&
           salidaSeleccionada &&
-          !horarioProgramado?.cruzaMedianoche &&
+          !esNocturno &&
           timeToMinutes(entradaSeleccionada) > timeToMinutes(salidaSeleccionada)
         ) {
           const temp = entradaSeleccionada;
@@ -300,6 +349,7 @@ export function calcularMetricasDia(
   huerfana: boolean;
   rowClass: ProcessedDay['rowClass'];
 } {
+  const normHorario = normalizarHorarioDia(horarioProgramado);
   let hNormal = 0;
   let hExtra = 0;
   let inc = '';
@@ -317,20 +367,20 @@ export function calcularMetricasDia(
     if (d < 0) d += 1440; // Cruce de medianoche
 
     let totalDelDia = d / 60;
-    const tiempoComida = horarioProgramado ? (horarioProgramado.comida / 60) : 1.0;
+    const tiempoComida = normHorario ? (normHorario.comida / 60) : 1.0;
 
     if (totalDelDia > 6) {
       totalDelDia -= tiempoComida;
     }
 
-    const jornadaEsperada = calcularJornadaEsperadaHrs(horarioProgramado, tiempoComida, jornadaBase);
+    const jornadaEsperada = calcularJornadaEsperadaHrs(normHorario, tiempoComida, jornadaBase);
     hNormal = Math.max(0, Math.min(totalDelDia, jornadaEsperada));
     hExtra = Math.max(0, totalDelDia - jornadaEsperada);
     inc = 'Asistencia';
     cls = 'row-success';
 
-    if (isRST && horarioProgramado) {
-      const mSalEsperada = timeToMinutes(horarioProgramado.salida);
+    if (isRST && normHorario) {
+      const mSalEsperada = timeToMinutes(normHorario.salida);
       const mSalReal = timeToMinutes(sal);
       let diffMin = mSalReal - mSalEsperada;
       if (diffMin < -720) diffMin += 1440;
@@ -339,7 +389,7 @@ export function calcularMetricasDia(
         const hExceso = Math.floor(diffMin / 60);
         const mExceso = diffMin % 60;
         const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
-        msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${horarioProgramado.salida})`;
+        msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida})`;
       }
     } else if (hExtra >= 0.5) {
       msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
@@ -348,7 +398,7 @@ export function calcularMetricasDia(
     huerfana = true;
     inc = 'Asistencia';
     cls = 'row-warning';
-    const refHorario = horarioProgramado ? ` (Horario: ${horarioProgramado.entrada}-${horarioProgramado.salida})` : '';
+    const refHorario = normHorario ? ` (Horario: ${normHorario.entrada}-${normHorario.salida})` : '';
     msg = !tieneEnt
       ? `⚠️ Falta checada de entrada${refHorario} — requiere Formato de Checada`
       : `⚠️ Falta checada de salida${refHorario} — requiere Formato de Checada`;
@@ -357,13 +407,13 @@ export function calcularMetricasDia(
     if (isoDate && FESTIVOS_OFICIALES[isoDate]) {
       inc = 'Festivo';
       cls = 'row-default';
-    } else if (horarioProgramado === null) {
+    } else if (normHorario === null) {
       inc = 'Descanso';
       cls = 'row-default';
-    } else if (horarioProgramado) {
+    } else if (normHorario) {
       // Es un día laboral según la programación de horarios y no tiene ninguna de las 2 checadas
       cls = 'row-warning';
-      msg = `⚠️ Sin checadas en día laboral (${horarioProgramado.entrada}-${horarioProgramado.salida}) — ¿Generar Formato o es Falta?`;
+      msg = `⚠️ Sin checadas en día laboral (${normHorario.entrada}-${normHorario.salida}) — ¿Generar Formato o es Falta?`;
     }
   }
 
@@ -447,6 +497,56 @@ export function generarReporteAsistencia(
     let countRetardo = 0;
 
     const diasProcesados: ProcessedDay[] = [];
+    const horarioRefEmpleado = getReferenceScheduleForEmployee(horariosDB, emp.horario);
+
+    // Pre-verificar si el primer día del rango (startISO) tiene una checada matutina de salida
+    // que pertenece al turno nocturno iniciado la noche anterior (startISO - 1).
+    if (fechasRango.length > 0 && horarioRefEmpleado?.cruzaMedianoche) {
+      const primeraFecha = fechasRango[0];
+      const prevFecha = addDaysToISO(primeraFecha, -1);
+      const evPrev = eventosDB[emp.id]?.[prevFecha];
+      const evPrimera = eventosDB[emp.id]?.[primeraFecha];
+      const evSegunda = fechasRango.length > 1 ? eventosDB[emp.id]?.[fechasRango[1]] : undefined;
+
+      if (evPrimera) {
+        const crudosPrimera = ensureRegistrosCrudos(evPrimera);
+        const efectivasPrimera = filtrarRebotesChecadas(crudosPrimera, minutosRebote);
+        const salidasMananaPrimera = efectivasPrimera.filter(
+          r => !esChecadaDeEntradaNocturna(r.hora, horarioRefEmpleado)
+        );
+        const entradasNochePrimera = efectivasPrimera.filter(
+          r => esChecadaDeEntradaNocturna(r.hora, horarioRefEmpleado)
+        );
+
+        const prevTuvoEntradaNoche = evPrev
+          ? filtrarRebotesChecadas(ensureRegistrosCrudos(evPrev), minutosRebote).some(r =>
+              esChecadaDeEntradaNocturna(r.hora, horarioRefEmpleado)
+            )
+          : false;
+
+        const segundaTieneSalidaManana = evSegunda
+          ? filtrarRebotesChecadas(ensureRegistrosCrudos(evSegunda), minutosRebote).some(
+              r => !esChecadaDeEntradaNocturna(r.hora, horarioRefEmpleado)
+            )
+          : false;
+
+        // Si el día previo tuvo entrada nocturna, o si el primer día tiene tanto salida matutina (06:00)
+        // como entrada nocturna (22:00) y el segundo día tiene su propia salida matutina (06:00),
+        // la salida matutina del primer día corresponde al cierre del turno de la noche anterior.
+        if (salidasMananaPrimera.length > 0 && (prevTuvoEntradaNoche || (entradasNochePrimera.length > 0 && segundaTieneSalidaManana))) {
+          const salConsumida = elegirHoraMasCercana(
+            salidasMananaPrimera.map(r => r.hora),
+            horarioRefEmpleado.salida,
+            'primera'
+          );
+          crudosPrimera.forEach(r => {
+            if (Math.abs(timeToMinutes(r.hora) - timeToMinutes(salConsumida)) <= minutosRebote) {
+              horasConsumidasNocturnas.add(`${emp.id}|${primeraFecha}|${r.hora}`);
+            }
+          });
+        }
+      }
+    }
 
     fechasRango.forEach(isoF => {
       totalDiasAuditoria++;
@@ -456,7 +556,6 @@ export function generarReporteAsistencia(
       const vca: string | undefined = vacacionesDB[emp.id]?.[isoF];
 
       const horarioProgramado = getScheduleForDay(horariosDB, emp.horario, dayOfWeek);
-      const esNocturno = !!(horarioProgramado && horarioProgramado.cruzaMedianoche);
 
       // Obtener todas las checadas crudas de hoy que NO hayan sido consumidas por la salida nocturna de ayer
       const crudosHoy = (ev ? ensureRegistrosCrudos(ev) : []).filter(
@@ -464,37 +563,58 @@ export function generarReporteAsistencia(
       );
       const efectivasHoy = filtrarRebotesChecadas(crudosHoy, minutosRebote);
 
+      // Determinar si este día opera como turno nocturno:
+      // 1) Porque el horario programado de hoy cruza medianoche, o
+      // 2) Porque el empleado es de turno nocturno (horarioRefEmpleado.cruzaMedianoche) y entró en la noche de un día de descanso (ej. Domingo 22:00 para amanecer Lunes 06:00)
+      const horarioNocturnoActivo: DaySchedule | null =
+        horarioProgramado && horarioProgramado.cruzaMedianoche
+          ? horarioProgramado
+          : !horarioProgramado &&
+            horarioRefEmpleado?.cruzaMedianoche &&
+            efectivasHoy.some(r => esChecadaDeEntradaNocturna(r.hora, horarioRefEmpleado))
+          ? horarioRefEmpleado
+          : null;
+
+      const esNocturno = Boolean(horarioNocturnoActivo);
+
       let ent = '--:--';
       let sal = '--:--';
 
-      if (esNocturno) {
-        // TURNO NOCTURNO (incluso si el checador marcó RST):
-        // 1. Entrada hoy por la tarde/noche (>= 14:00, o la última checada disponible de hoy)
-        const candidatasNocheHoy = efectivasHoy.filter(r => timeToMinutes(r.hora) >= 14 * 60);
+      if (esNocturno && horarioNocturnoActivo) {
+        // TURNO NOCTURNO (ej. Entrada 22:00, Salida 06:00):
+        // 1. Entrada hoy por la tarde/noche (cercana a horarioNocturnoActivo.entrada).
+        // JAMÁS colocar una checada matutina (ej. 06:00 AM) en la columna de Entrada.
+        const candidatasNocheHoy = efectivasHoy.filter(r =>
+          esChecadaDeEntradaNocturna(r.hora, horarioNocturnoActivo)
+        );
+        const candidatasMananaHoy = efectivasHoy.filter(
+          r => !esChecadaDeEntradaNocturna(r.hora, horarioNocturnoActivo)
+        );
+
         if (candidatasNocheHoy.length > 0) {
           ent = elegirHoraMasCercana(
             candidatasNocheHoy.map(r => r.hora),
-            horarioProgramado?.entrada,
+            horarioNocturnoActivo.entrada,
             'ultima'
           );
-        } else if (efectivasHoy.length > 0) {
-          ent = efectivasHoy[efectivasHoy.length - 1].hora;
         }
 
-        // 2. Salida mañana por la mañana (<= 13:00 del día siguiente)
+        // 2. Buscar Salida en la mañana del día siguiente (isoF + 1)
         const isoSiguiente = addDaysToISO(isoF, 1);
         const evSiguiente = eventosDB[emp.id]?.[isoSiguiente];
-        if (evSiguiente) {
+        if (evSiguiente && ent !== '--:--') {
           const crudosManana = ensureRegistrosCrudos(evSiguiente).filter(
             r => !horasConsumidasNocturnas.has(`${emp.id}|${isoSiguiente}|${r.hora}`)
           );
           const efectivasManana = filtrarRebotesChecadas(crudosManana, minutosRebote);
-          const candidatasManana = efectivasManana.filter(r => timeToMinutes(r.hora) <= 13 * 60);
+          const candidatasMananaSig = efectivasManana.filter(
+            r => !esChecadaDeEntradaNocturna(r.hora, horarioNocturnoActivo)
+          );
 
-          if (candidatasManana.length > 0) {
+          if (candidatasMananaSig.length > 0) {
             sal = elegirHoraMasCercana(
-              candidatasManana.map(r => r.hora),
-              horarioProgramado?.salida,
+              candidatasMananaSig.map(r => r.hora),
+              horarioNocturnoActivo.salida,
               'primera'
             );
             // Marcar esa checada matutina de mañana (y sus rebotes cercanos) como consumida
@@ -505,12 +625,23 @@ export function generarReporteAsistencia(
             });
           }
         }
+
+        // 3. Respaldo si no hubo checada matutina en isoF + 1 (ej. último día del archivo Excel cargado,
+        // o día donde solo quedó registrada la salida matutina en la misma fecha):
+        // Si hoy hay una checada matutina no consumida (ej. 06:00 AM), colocarla SIEMPRE en Salida (`sal`), nunca en Entrada.
+        if (sal === '--:--' && candidatasMananaHoy.length > 0) {
+          sal = elegirHoraMasCercana(
+            candidatasMananaHoy.map(r => r.hora),
+            horarioNocturnoActivo.salida,
+            'primera'
+          );
+        }
       } else if (efectivasHoy.length > 0) {
-        // TURNO DIURNO / NORMAL (con soporte completo para mezclas ENT/SNT + RST)
+        // TURNO DIURNO / VESPERTINO NORMAL (con soporte completo para mezclas ENT/SNT + RST)
         if (efectivasHoy.length === 1) {
-          // Solo quedó 1 checada hoy: clasificar si es Entrada o Salida
+          // Solo quedó 1 checada hoy: clasificar si es Entrada o Salida comparando con su horario
           const unica = efectivasHoy[0];
-          const posicion = clasificarChecadaUnica(unica, horarioProgramado);
+          const posicion = clasificarChecadaUnica(unica, horarioProgramado, horarioRefEmpleado);
           if (posicion === 'salida') {
             ent = '--:--';
             sal = unica.hora;
@@ -519,7 +650,7 @@ export function generarReporteAsistencia(
             sal = '--:--';
           }
         } else {
-          // Hay 2 o más checadas hoy: usar las consolidadas si están disponibles y no fueron consumidas,
+          // Hay 2 o más checadas hoy: usar las consolidadas si están disponibles y en orden cronológico,
           // o tomar primera y última de efectivasHoy
           const entCons = ev?.entradaFinal && efectivasHoy.some(r => r.hora === ev.entradaFinal)
             ? ev.entradaFinal
@@ -529,8 +660,13 @@ export function generarReporteAsistencia(
             : null;
 
           if (entCons && salCons && entCons !== salCons) {
-            ent = entCons;
-            sal = salCons;
+            if (timeToMinutes(entCons) <= timeToMinutes(salCons)) {
+              ent = entCons;
+              sal = salCons;
+            } else {
+              ent = salCons;
+              sal = entCons;
+            }
           } else {
             const horasOrdenadas = sortHoursNumerically(efectivasHoy.map(r => r.hora));
             ent = horasOrdenadas[0];
@@ -568,7 +704,8 @@ export function generarReporteAsistencia(
       }
 
       sumNormal += metricas.hNormal;
-      sumExtra += metricas.hExtra;
+      // El total de horas extras empieza en 0 y se suma conforme se van autorizando los días de tiempo extra
+      sumExtra += 0;
 
       if (metricas.incidencia) {
         resumen.incidenciasConteo[metricas.incidencia] =

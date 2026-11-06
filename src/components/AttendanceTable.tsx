@@ -18,10 +18,13 @@ import {
   Download,
   CheckCircle2,
   CalendarClock,
-  Sparkles
+  Sparkles,
+  ShieldCheck,
+  XCircle,
+  Lock
 } from 'lucide-react';
 import { Employee, EmployeeReport, ProcessedDay, ScheduleConfig } from '../types/attendance';
-import { FESTIVOS_OFICIALES, OPCIONES_INCIDENCIA, formatScheduleHoursSummary } from '../utils/calendarUtils';
+import { FESTIVOS_OFICIALES, OPCIONES_INCIDENCIA, OPCIONES_INCIDENCIA_SUPERVISOR, formatScheduleHoursSummary } from '../utils/calendarUtils';
 import { ResolutionMode } from './portal/MissingPunchFormatModal';
 import saveAs from 'file-saver';
 
@@ -36,6 +39,7 @@ interface AttendanceTableProps {
   onAssignSchedule?: (employeeId: string, scheduleCode: string) => void;
   filteredCount: number;
   isSupervisorMode?: boolean;
+  onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
 }
 
 export const AttendanceTable: React.FC<AttendanceTableProps> = ({
@@ -49,6 +53,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   onAssignSchedule,
   filteredCount,
   isSupervisorMode = false,
+  onToggleOvertimeApproval,
 }) => {
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -139,6 +144,7 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
             horarios={horarios}
             onAssignSchedule={isSupervisorMode ? undefined : onAssignSchedule}
             isSupervisorMode={isSupervisorMode}
+            onToggleOvertimeApproval={onToggleOvertimeApproval}
           />
         ))}
       </div>
@@ -181,6 +187,7 @@ interface EmployeeCardProps {
   horarios?: Record<string, ScheduleConfig>;
   onAssignSchedule?: (employeeId: string, scheduleCode: string) => void;
   isSupervisorMode?: boolean;
+  onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
 }
 
 const EmployeeCard: React.FC<EmployeeCardProps> = ({
@@ -193,10 +200,25 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   horarios,
   onAssignSchedule,
   isSupervisorMode = false,
+  onToggleOvertimeApproval,
 }) => {
-  const { empleado, dias, totalNormal, totalExtra } = report;
+  const { empleado, dias, totalNormal, faltas, retardos } = report;
 
   const supModCount = dias.filter(d => d.modificadoPorSupervisor).length;
+  const authorizedExtra = dias.reduce(
+    (acc, d) => acc + (d.horasExtrasAutorizadas === true ? d.hExtra : 0),
+    0
+  );
+  const detectedExtra = dias.reduce((acc, d) => acc + d.hExtra, 0);
+  const hasUnresolvedMissingPunches = dias.some(d => {
+    const isFestivo = Boolean(FESTIVOS_OFICIALES[d.isoDate]);
+    const isScheduledWorkday = Boolean(d.horarioProgramado) && !isFestivo;
+    const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
+    const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+    return isScheduledWorkday && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor;
+  });
+  const sinIncidencias = faltas === 0 && retardos === 0 && !hasUnresolvedMissingPunches;
+
   const activeScheduleCode = empleado.horario && horarios?.[empleado.horario] ? empleado.horario : 'ADMO';
   const activeScheduleConfig = horarios?.[activeScheduleCode];
   const hoursSummaryText = formatScheduleHoursSummary(activeScheduleConfig);
@@ -244,6 +266,13 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 </div>
               )}
 
+              {sinIncidencias && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  Sin incidencias
+                </span>
+              )}
+
               {supModCount > 0 && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-purple-400" />
@@ -269,8 +298,13 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
           </div>
           <div className="h-8 w-px bg-slate-800" />
           <div>
-            <p className="text-[9px] uppercase font-bold tracking-wider text-amber-400">H. Extras</p>
-            <p className="text-xl font-black font-mono text-amber-400">{totalExtra.toFixed(2)}</p>
+            <p className="text-[9px] uppercase font-bold tracking-wider text-amber-400">H. Extras (Aut.)</p>
+            <p className="text-xl font-black font-mono text-amber-400">{authorizedExtra.toFixed(2)}</p>
+            {detectedExtra > 0 && (
+              <p className="text-[9px] font-mono font-bold text-slate-400">
+                Detectadas: {detectedExtra.toFixed(2)}h
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -301,6 +335,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 onChangeNote={onUpdateDayNote ? (note) => onUpdateDayNote(empleado.id, d.isoDate, note) : undefined}
                 onOpenFormatAssistant={onOpenFormatAssistant}
                 onQuickConfirmFalta={onQuickConfirmFalta ? () => onQuickConfirmFalta(empleado.id, d.isoDate) : undefined}
+                isSupervisorMode={isSupervisorMode}
+                onToggleOvertimeApproval={onToggleOvertimeApproval ? (aut) => onToggleOvertimeApproval(empleado.id, d.isoDate, aut) : undefined}
               />
             ))}
           </tbody>
@@ -318,6 +354,8 @@ interface DayRowProps {
   onChangeNote?: (note: string) => void;
   onOpenFormatAssistant?: (employee: Employee, day: ProcessedDay, mode: ResolutionMode) => void;
   onQuickConfirmFalta?: () => void;
+  isSupervisorMode?: boolean;
+  onToggleOvertimeApproval?: (autorizada: boolean) => void;
 }
 
 const DayRow: React.FC<DayRowProps> = ({
@@ -328,6 +366,8 @@ const DayRow: React.FC<DayRowProps> = ({
   onChangeNote,
   onOpenFormatAssistant,
   onQuickConfirmFalta,
+  isSupervisorMode = false,
+  onToggleOvertimeApproval,
 }) => {
   const isWeekend = day.dayOfWeek === 0 || day.dayOfWeek === 6;
   const isFestivo = Boolean(FESTIVOS_OFICIALES[day.isoDate]);
@@ -528,28 +568,100 @@ const DayRow: React.FC<DayRowProps> = ({
         {day.hNormal > 0 ? day.hNormal.toFixed(2) : '-'}
       </td>
 
-      {/* H. Extra */}
-      <td className="p-3 text-center font-bold text-amber-400 align-top">
-        {day.hExtra > 0 ? day.hExtra.toFixed(2) : '-'}
+      {/* H. Extra y Pregunta de Autorización de Tiempo Extra */}
+      <td className="p-3 text-center align-top whitespace-nowrap">
+        {day.hExtra > 0 ? (
+          <div className="flex flex-col items-center gap-1.5">
+            <span className="font-bold text-amber-400 font-mono text-xs">
+              {day.hExtra.toFixed(2)}h
+            </span>
+
+            {/* Prompt interactivo: ¿Tiempo extra autorizado? */}
+            <div className="flex flex-col items-center gap-1 p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px]">
+              <span className="text-[9px] uppercase font-bold text-amber-300">
+                ¿Autorizado?
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onToggleOvertimeApproval && onToggleOvertimeApproval(true)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5 transition-all cursor-pointer ${
+                    day.horasExtrasAutorizadas === true
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-emerald-300 border border-slate-700'
+                  }`}
+                  title="Marcar tiempo extra como AUTORIZADO (se exporta a CONTPAQi)"
+                >
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                  <span>SÍ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onToggleOvertimeApproval && onToggleOvertimeApproval(false)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-0.5 transition-all cursor-pointer ${
+                    day.horasExtrasAutorizadas === false
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-slate-900 text-slate-400 hover:text-rose-300 border border-slate-700'
+                  }`}
+                  title="Marcar tiempo extra como NO AUTORIZADO (no se exporta a CONTPAQi)"
+                >
+                  <XCircle className="w-3 h-3 text-rose-400" />
+                  <span>NO</span>
+                </button>
+              </div>
+
+              {day.horasExtrasAutorizadas === true && (
+                <span className="text-[8px] font-mono font-bold text-emerald-300">
+                  ✓ Para CONTPAQi
+                </span>
+              )}
+              {day.horasExtrasAutorizadas === false && (
+                <span className="text-[8px] font-mono font-bold text-rose-300">
+                  ✕ Sin pago extra
+                </span>
+              )}
+              {day.horasExtrasAutorizadas === undefined && (
+                <span className="text-[8px] text-amber-300/80 animate-pulse">
+                  Pendiente validación
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <span className="text-slate-500">-</span>
+        )}
       </td>
 
       {/* Incidencia, formatos, advertencias y acciones de resolución */}
       <td className="p-3 pr-4 font-sans min-w-[290px] align-top">
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <select
-              value={day.incidencia}
-              onChange={(e) => onChangeIncidence(e.target.value)}
-              className="flex-1 text-xs rounded-md px-2 py-1 bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-amber-500/60"
-            >
-              {OPCIONES_INCIDENCIA.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt || '(Sin incidencia)'}
-                </option>
-              ))}
-              <option value="Falta Confirmada">Falta Confirmada (No asistió)</option>
-            </select>
-          </div>
+          {/* Bloqueo estricto para supervisores en días de Asistencia normal o Descanso */}
+          {isSupervisorMode && (day.incidencia === 'Asistencia' || day.incidencia === 'Descanso' || day.incidencia === 'Festivo') ? (
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-300">
+              <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span className="text-xs font-semibold text-slate-200">
+                {day.incidencia}
+              </span>
+              <span className="text-[10px] text-slate-400 ml-auto italic">
+                (Bloqueado para edición)
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <select
+                value={day.incidencia}
+                onChange={(e) => onChangeIncidence(e.target.value)}
+                className="flex-1 text-xs rounded-md px-2 py-1 bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-amber-500/60"
+              >
+                {(isSupervisorMode ? OPCIONES_INCIDENCIA_SUPERVISOR : OPCIONES_INCIDENCIA).map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt || '(Sin incidencia)'}
+                  </option>
+                ))}
+                <option value="Falta Confirmada">Falta Confirmada (No asistió)</option>
+              </select>
+            </div>
+          )}
 
           {/* DISTINTIVO CUANDO EL SUPERVISOR AGREGÓ CHECADA / FORMATO / FALTA */}
           {day.modificadoPorSupervisor && (
@@ -718,15 +830,17 @@ const DayRow: React.FC<DayRowProps> = ({
             </span>
           )}
 
-          {/* Comentario rápido del día */}
+          {/* Comentario rápido del día (bloqueado para supervisores si es Asistencia o Descanso) */}
           {onChangeNote && (
-            <input
-              type="text"
-              value={day.notaSupervisorDia || ''}
-              onChange={(e) => onChangeNote(e.target.value)}
-              placeholder="Agregar nota o comentario para RH..."
-              className="w-full text-[11px] rounded px-2 py-1 bg-slate-950/60 border border-slate-800/80 text-slate-300 placeholder:text-slate-600 outline-none focus:border-purple-500/60"
-            />
+            isSupervisorMode && (day.incidencia === 'Asistencia' || day.incidencia === 'Descanso' || day.incidencia === 'Festivo') ? null : (
+              <input
+                type="text"
+                value={day.notaSupervisorDia || ''}
+                onChange={(e) => onChangeNote(e.target.value)}
+                placeholder="Agregar nota o comentario para RH..."
+                className="w-full text-[11px] rounded px-2 py-1 bg-slate-950/60 border border-slate-800/80 text-slate-300 placeholder:text-slate-600 outline-none focus:border-purple-500/60"
+              />
+            )
           )}
 
           {mostrarPillsCrudos && (

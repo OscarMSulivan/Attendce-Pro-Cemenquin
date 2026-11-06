@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   FileSpreadsheet, 
   Download, 
@@ -67,6 +68,7 @@ interface SupervisorWorkspaceViewProps {
   onUpdateDayNote: (employeeId: string, isoDate: string, note: string) => void;
   onResolveMissingPunchDay: (payload: DayResolutionPayload) => void;
   onQuickConfirmFalta: (employeeId: string, isoDate: string) => void;
+  onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
 }
 
 export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = ({
@@ -89,11 +91,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   onUpdateDayNote,
   onResolveMissingPunchDay,
   onQuickConfirmFalta,
+  onToggleOvertimeApproval,
 }) => {
   const [activeModule, setActiveModule] = useState<'nominas' | 'equipo' | 'solicitudes'>('nominas');
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
   const [listSearchQuery, setListSearchQuery] = useState('');
   const [listFilterMode, setListFilterMode] = useState<'all' | 'missing_punches' | 'modified'>('all');
+  const [showLogsPanel, setShowLogsPanel] = useState(false);
 
   // Estado para el asistente de Formato de Checada / Permiso / Falta
   const [formatModalTarget, setFormatModalTarget] = useState<{
@@ -182,6 +186,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       return {
         normalHours: 0,
         extraHours: 0,
+        detectedExtraHours: 0,
         missingPunchDaysCount: 0,
         supAddedPunchesCount: 0,
         supWithoutFormatCount: 0,
@@ -193,6 +198,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
     let normalHours = 0;
     let extraHours = 0;
+    let detectedExtraHours = 0;
     let missingPunchDaysCount = 0;
     let supAddedPunchesCount = 0;
     let supWithoutFormatCount = 0;
@@ -202,8 +208,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
     activeListWeeklyReports.forEach(r => {
       normalHours += r.totalNormal;
-      extraHours += r.totalExtra;
       r.dias.forEach(d => {
+        if (d.hExtra > 0) {
+          detectedExtraHours += d.hExtra;
+          if (d.horasExtrasAutorizadas === true) {
+            extraHours += d.hExtra;
+          }
+        }
         if (isDayMissingPunchesUnresolved(d)) {
           missingPunchDaysCount++;
         }
@@ -247,6 +258,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     return {
       normalHours,
       extraHours,
+      detectedExtraHours,
       missingPunchDaysCount,
       supAddedPunchesCount,
       supWithoutFormatCount,
@@ -621,8 +633,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                     <span className="text-lg font-bold text-emerald-400 font-mono">{stats.normalHours.toFixed(2)}h</span>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
-                    <span className="text-[10px] uppercase font-bold text-amber-400 block">Horas Extras</span>
+                    <span className="text-[10px] uppercase font-bold text-amber-400 block">Horas Extras (Aut.)</span>
                     <span className="text-lg font-bold text-amber-300 font-mono">{stats.extraHours.toFixed(2)}h</span>
+                    {stats.detectedExtraHours > 0 && (
+                      <span className="text-[9px] font-mono text-slate-400 block">
+                        Detectadas: {stats.detectedExtraHours.toFixed(2)}h
+                      </span>
+                    )}
                   </div>
                   <div className="p-3 rounded-xl bg-amber-950/20 border border-amber-500/30">
                     <span className="text-[10px] uppercase font-bold text-amber-400 block">Sin 2 Checadas</span>
@@ -764,6 +781,19 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Checadas / Formatos Validados por Mí ({stats.supAddedPunchesCount + stats.confirmedFaltasCount})</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowLogsPanel(prev => !prev)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      showLogsPanel
+                        ? 'bg-indigo-600 text-white shadow'
+                        : 'bg-slate-950 text-indigo-300 hover:bg-indigo-950/30 border border-indigo-500/30'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>{showLogsPanel ? 'Ocultar Logs de Lista' : 'Ver Bitácora / Logs de Cambios'}</span>
+                  </button>
                 </div>
 
                 {/* Buscador en la lista de nómina */}
@@ -779,6 +809,130 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 </div>
               </div>
 
+              {/* ÁREA DE LOGS / BITÁCORA DE MODIFICACIONES REALIZADAS A LA LISTA */}
+              {showLogsPanel && (
+                <div className="p-4 rounded-2xl bg-slate-900 border border-indigo-500/30 shadow-lg space-y-3 animate-scale-in">
+                  <div className="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-800">
+                    <div>
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-indigo-400" />
+                        Bitácora de Modificaciones de la Lista ({targetSupervisor})
+                      </h3>
+                      <p className="text-[11px] text-slate-400">
+                        Historial detallado de todas las checadas agregadas, permisos, faltas confirmadas y autorizaciones de tiempo extra en esta lista.
+                      </p>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const logRows: Array<{
+                      key: string;
+                      empId: string;
+                      empName: string;
+                      isoDate: string;
+                      dayName: string;
+                      badge: string;
+                      badgeClass: string;
+                      detail: string;
+                      note?: string;
+                      file?: string;
+                    }> = [];
+
+                    activeListWeeklyReports.forEach(r => {
+                      r.dias.forEach(d => {
+                        if (
+                          d.modificadoPorSupervisor ||
+                          d.horasExtrasAutorizadas !== undefined ||
+                          Boolean(d.notaSupervisorDia)
+                        ) {
+                          let badge = 'Modificación';
+                          let badgeClass = 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+                          let detail = `Entrada: ${d.entrada} | Salida: ${d.salida} (Orig: ${d.entradaOriginal || '--:--'} a ${d.salidaOriginal || '--:--'})`;
+
+                          if (d.tipoModificacionSupervisor === 'falta_confirmada') {
+                            badge = 'Falta Confirmada';
+                            badgeClass = 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+                            detail = 'El supervisor confirmó que el colaborador no asistió a laborar.';
+                          } else if (d.tipoModificacionSupervisor === 'formato_permiso') {
+                            badge = `Permiso (${d.incidencia})`;
+                            badgeClass = 'bg-blue-500/15 text-blue-300 border-blue-500/30';
+                            detail = `Incidencia registrada: ${d.incidencia} (${d.hNormal.toFixed(2)}h normales)`;
+                          } else if (
+                            d.tipoModificacionSupervisor === 'checada_agregada' ||
+                            d.tipoModificacionSupervisor === 'formato_checada_sin_gafete'
+                          ) {
+                            badge = 'Checada sin Gafete';
+                            badgeClass = 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+                          }
+
+                          if (d.horasExtrasAutorizadas === true) {
+                            badge = `${badge} + Extra Autorizado (${d.hExtra.toFixed(2)}h)`;
+                            badgeClass = 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+                          } else if (d.horasExtrasAutorizadas === false && d.hExtra > 0) {
+                            badge = `${badge} • Extra NO Autorizado (${d.hExtra.toFixed(2)}h)`;
+                          }
+
+                          logRows.push({
+                            key: `${r.empleado.id}_${d.isoDate}`,
+                            empId: r.empleado.id,
+                            empName: r.empleado.nombre,
+                            isoDate: d.isoDate,
+                            dayName: d.dayName,
+                            badge,
+                            badgeClass,
+                            detail,
+                            note: d.notaSupervisorDia,
+                            file: d.formatoSubidoNombre,
+                          });
+                        }
+                      });
+                    });
+
+                    if (logRows.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 py-4 text-center">
+                          Aún no se han realizado modificaciones en esta lista.
+                        </p>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                        {logRows.map(item => (
+                          <div
+                            key={item.key}
+                            className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs space-y-1"
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="font-bold text-slate-100">
+                                <span className="font-mono text-blue-300 mr-1">#{item.empId}</span>
+                                {item.empName}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${item.badgeClass}`}>
+                                {item.badge}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-mono text-slate-300">
+                              {item.dayName} {item.isoDate} — {item.detail}
+                            </div>
+                            {item.note && (
+                              <div className="text-[11px] text-slate-400 italic">
+                                Nota: &ldquo;{item.note}&rdquo;
+                              </div>
+                            )}
+                            {item.file && (
+                              <div className="text-[10px] font-mono text-emerald-300 flex items-center gap-1">
+                                <Paperclip className="w-3 h-3" /> Respaldo: {item.file}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {/* TABLA INTERACTIVA DEL SUPERVISOR PARA TRABAJAR LA LISTA DESDE EL SISTEMA */}
               <AttendanceTable
                 reports={filteredWeeklyReports}
@@ -792,6 +946,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 horarios={horarios}
                 filteredCount={activeListWeeklyReports.length}
                 isSupervisorMode={true}
+                onToggleOvertimeApproval={onToggleOvertimeApproval}
               />
             </>
           )}
@@ -1024,10 +1179,11 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       )}
 
       {/* MODAL: LIBERAR NÓMINA TRABAJADA A RH (DESDE EL SISTEMA O ADJUNTANDO EXCEL) */}
-      {isWorkingOnRelease && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden">
-            {/* Header */}
+      {isWorkingOnRelease &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto my-auto shadow-2xl animate-scale-in">
+              {/* Header */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
@@ -1189,7 +1345,8 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

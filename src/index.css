@@ -3,32 +3,121 @@
 @layer base {
   body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #171821;
+    color: #f8fafc;
   }
 
+  /* ============================================================================
+   * TEMA CLARO EJECUTIVO (LIGHT MODE) — REDISEÑADO DESDE CERO CON ALTO CONTRASTE
+   * ============================================================================ */
   body.light-mode {
-    background-color: #f8fafc;
-    color: #0f172a;
-  }
-
-  body.light-mode .bg-slate-950 {
-    background-color: #ffffff !important;
-  }
-
-  body.light-mode .bg-slate-900 {
     background-color: #f1f5f9 !important;
+    color: #0f172a !important;
   }
 
+  /* 1. Superficies base y contenedores principales (incluyendo #171821 y #21222D del nuevo diseño) */
+  body.light-mode .bg-\[\#171821\],
+  body.light-mode .bg-\[\#171821\]\/95,
+  body.light-mode .bg-\[\#171821\]\/80,
+  body.light-mode .bg-slate-950 {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  body.light-mode .bg-\[\#21222D\],
+  body.light-mode .bg-\[\#21222D\]\/95,
+  body.light-mode .bg-slate-900,
+  body.light-mode .bg-slate-900\/98,
+  body.light-mode .bg-slate-900\/95,
+  body.light-mode .bg-slate-900\/90,
+  body.light-mode .bg-slate-900\/80,
+  body.light-mode .bg-slate-900\/60 {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04) !important;
+  }
+
+  body.light-mode .bg-\[\#2B2B36\],
+  body.light-mode .bg-\[\#2B2B36\]\/80 {
+    background-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  body.light-mode .text-\[\#A9DFD8\] {
+    color: #0f766e !important;
+  }
+
+  body.light-mode .text-\[\#FEB95A\] {
+    color: #b45309 !important;
+  }
+
+  body.light-mode .text-\[\#F2C8ED\] {
+    color: #86198f !important;
+  }
+
+  body.light-mode .text-\[\#20AEF3\] {
+    color: #0369a1 !important;
+  }
+
+  body.light-mode .bg-\[\#A9DFD8\],
+  body.light-mode .bg-\[\#A9DFD8\] * {
+    background-color: #0d9488 !important;
+    color: #ffffff !important;
+  }
+
+  body.light-mode .bg-slate-950\/90,
+  body.light-mode .bg-slate-950\/80,
   body.light-mode .bg-slate-950\/70,
   body.light-mode .bg-slate-950\/60,
-  body.light-mode .bg-slate-950\/40,
-  body.light-mode .bg-slate-950\/50 {
-    background-color: #ffffff !important;
+  body.light-mode .bg-slate-950\/50,
+  body.light-mode .bg-slate-950\/40 {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
   }
 
-  body.light-mode .border-slate-800,
-  body.light-mode .border-slate-800\/60,
-  body.light-mode .border-slate-800\/80 {
+  /* Mantener el backdrop oscuro translúcido en modales */
+  body.light-mode .fixed.inset-0.bg-slate-950\/80,
+  body.light-mode .fixed.inset-0.bg-slate-950\/85,
+  body.light-mode .fixed.inset-0.bg-slate-900\/60 {
+    background-color: rgba(15, 23, 42, 0.55) !important;
+  }
+
+  body.light-mode .bg-slate-800,
+  body.light-mode .bg-slate-800\/80,
+  body.light-mode .bg-slate-800\/60 {
+    background-color: #e2e8f0 !important;
+    color: #0f172a !important;
     border-color: #cbd5e1 !important;
+  }
+
+  /* 2. Bordes y divisores con contraste nítido */
+  body.light-mode .border-white\/\[0\.05\],
+  body.light-mode .border-white\/\[0\.06\],
+  body.light-mode .border-white\/\[0\.08\],
+  body.light-mode .border-white\/10,
+  body.light-mode .border-slate-800,
+  body.light-mode .border-slate-800\/90,
+  body.light-mode .border-slate-800\/80,
+  body.light-mode .border-slate-800\/70,
+  body.light-mode .border-slate-800\/60,
+  body.light-mode .border-slate-700,
+  body.light-mode .border-slate-700\/80 {
+    border-color: #cbd5e1 !important;
+  }
+
+  body.light-mode .divide-white\/\[0\.05\] > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #e2e8f0 !important;
+  }
+
+  /* 3. Tipografía neutra de alto contraste */
+  body.light-mode .text-white {
+    color: #0f172a !important;
   }
 
   body.light-mode .text-slate-100,
@@ -36,12 +125,280 @@
     color: #0f172a !important;
   }
 
-  body.light-mode .text-slate-300,
+  body.light-mode .text-slate-300 {
+    color: #1e293b !important;
+  }
+
   body.light-mode .text-slate-400 {
     color: #334155 !important;
   }
+
+  body.light-mode .text-slate-500,
+  body.light-mode .text-slate-600 {
+    color: #475569 !important;
+  }
+
+  /* 4. AMBER / AMARILLO (Horarios Asignados, Jornadas, Horas Extras, Alertas) */
+  body.light-mode .text-amber-200,
+  body.light-mode .text-amber-200\/90,
+  body.light-mode .text-amber-300,
+  body.light-mode .text-amber-300\/90,
+  body.light-mode .text-amber-300\/80,
+  body.light-mode .text-amber-400,
+  body.light-mode .text-amber-500,
+  body.light-mode .text-yellow-300,
+  body.light-mode .text-yellow-400 {
+    color: #92400e !important;
+  }
+
+  body.light-mode .bg-amber-500\/10,
+  body.light-mode .bg-amber-500\/15,
+  body.light-mode .bg-amber-500\/20,
+  body.light-mode .bg-amber-500\/30,
+  body.light-mode .bg-amber-950\/20,
+  body.light-mode .bg-amber-950\/30 {
+    background-color: #fef3c7 !important;
+    color: #78350f !important;
+    border-color: #f59e0b !important;
+  }
+
+  body.light-mode .border-amber-500\/20,
+  body.light-mode .border-amber-500\/25,
+  body.light-mode .border-amber-500\/30,
+  body.light-mode .border-amber-500\/40,
+  body.light-mode .border-amber-500\/50 {
+    border-color: #d97706 !important;
+  }
+
+  /* Etiqueta de horario programado en tabla (De 08:00 a 17:30 hrs) */
+  body.light-mode .bg-slate-800.text-amber-200 {
+    background-color: #fef3c7 !important;
+    color: #78350f !important;
+    border-color: #f59e0b !important;
+  }
+
+  /* 5. EMERALD / VERDE (Sin Incidencias, Asistencia Perfecta, Nómina Liberada, Horas Normales) */
+  body.light-mode .text-emerald-200,
+  body.light-mode .text-emerald-300,
+  body.light-mode .text-emerald-400,
+  body.light-mode .text-emerald-500 {
+    color: #065f46 !important;
+  }
+
+  body.light-mode .bg-emerald-500\/10,
+  body.light-mode .bg-emerald-500\/15,
+  body.light-mode .bg-emerald-500\/20,
+  body.light-mode .bg-emerald-600\/20,
+  body.light-mode .bg-emerald-950\/10,
+  body.light-mode .bg-emerald-950\/20,
+  body.light-mode .bg-emerald-950\/30,
+  body.light-mode .bg-emerald-950\/40 {
+    background-color: #d1fae5 !important;
+    color: #064e3b !important;
+    border-color: #10b981 !important;
+  }
+
+  body.light-mode .border-emerald-500\/20,
+  body.light-mode .border-emerald-500\/30,
+  body.light-mode .border-emerald-500\/35,
+  body.light-mode .border-emerald-500\/40,
+  body.light-mode .border-emerald-500\/60 {
+    border-color: #059669 !important;
+  }
+
+  /* 6. BLUE / INDIGO (Panel Superior de Notificaciones, Banners, IDs de Empleado, Permisos) */
+  body.light-mode .text-blue-200,
+  body.light-mode .text-blue-300,
+  body.light-mode .text-blue-400,
+  body.light-mode .text-blue-500 {
+    color: #1e40af !important;
+  }
+
+  body.light-mode .text-indigo-200,
+  body.light-mode .text-indigo-300,
+  body.light-mode .text-indigo-400,
+  body.light-mode .text-indigo-500 {
+    color: #3730a3 !important;
+  }
+
+  body.light-mode .bg-blue-500\/10,
+  body.light-mode .bg-blue-500\/15,
+  body.light-mode .bg-blue-500\/20,
+  body.light-mode .bg-blue-600\/20,
+  body.light-mode .bg-blue-950\/20,
+  body.light-mode .bg-blue-950\/25,
+  body.light-mode .bg-blue-950\/30 {
+    background-color: #dbeafe !important;
+    color: #1e3a8a !important;
+    border-color: #3b82f6 !important;
+  }
+
+  body.light-mode .bg-indigo-500\/10,
+  body.light-mode .bg-indigo-500\/15,
+  body.light-mode .bg-indigo-500\/20,
+  body.light-mode .bg-indigo-600\/20,
+  body.light-mode .bg-indigo-950\/40,
+  body.light-mode .bg-indigo-950\/30,
+  body.light-mode .bg-indigo-950\/20 {
+    background-color: #e0e7ff !important;
+    color: #1e1b4b !important;
+    border-color: #6366f1 !important;
+  }
+
+  body.light-mode .border-blue-500\/20,
+  body.light-mode .border-blue-500\/30,
+  body.light-mode .border-blue-500\/40,
+  body.light-mode .border-indigo-500\/20,
+  body.light-mode .border-indigo-500\/30,
+  body.light-mode .border-indigo-500\/40,
+  body.light-mode .border-indigo-500\/50 {
+    border-color: #4f46e5 !important;
+  }
+
+  /* Banners superiores con gradiente oscuro (Notificaciones, Bienvenida Supervisor, Encabezados de Modal) */
+  body.light-mode .from-indigo-950\/90,
+  body.light-mode .via-blue-950\/80 {
+    background-image: linear-gradient(135deg, #e0e7ff 0%, #dbeafe 55%, #eff6ff 100%) !important;
+    color: #1e1b4b !important;
+    border-color: #6366f1 !important;
+  }
+
+  body.light-mode .from-slate-900.via-slate-900.to-blue-950\/40,
+  body.light-mode .from-slate-900.via-indigo-950\/60.to-slate-900 {
+    background-image: linear-gradient(135deg, #ffffff 0%, #f1f5f9 60%, #e0e7ff 100%) !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  /* 7. PURPLE / VIOLET (Checadas sin Gafete, Validaciones de Supervisor) */
+  body.light-mode .text-purple-200,
+  body.light-mode .text-purple-300,
+  body.light-mode .text-purple-400 {
+    color: #5b21b6 !important;
+  }
+
+  body.light-mode .bg-purple-500\/10,
+  body.light-mode .bg-purple-500\/15,
+  body.light-mode .bg-purple-500\/20,
+  body.light-mode .bg-purple-600\/20,
+  body.light-mode .bg-purple-950\/20,
+  body.light-mode .bg-purple-950\/25,
+  body.light-mode .bg-purple-950\/30 {
+    background-color: #f3e8ff !important;
+    color: #4c1d95 !important;
+    border-color: #a855f7 !important;
+  }
+
+  body.light-mode .border-purple-500\/20,
+  body.light-mode .border-purple-500\/30,
+  body.light-mode .border-purple-500\/40 {
+    border-color: #9333ea !important;
+  }
+
+  /* 8. ROSE / RED (Faltas Confirmadas, Retardos, Bloqueos) */
+  body.light-mode .text-rose-200,
+  body.light-mode .text-rose-300,
+  body.light-mode .text-rose-400 {
+    color: #9f1239 !important;
+  }
+
+  body.light-mode .bg-rose-500\/10,
+  body.light-mode .bg-rose-500\/15,
+  body.light-mode .bg-rose-500\/20,
+  body.light-mode .bg-rose-600\/20,
+  body.light-mode .bg-rose-950\/10,
+  body.light-mode .bg-rose-950\/15,
+  body.light-mode .bg-rose-950\/20,
+  body.light-mode .bg-rose-950\/25,
+  body.light-mode .bg-rose-950\/30 {
+    background-color: #ffe4e6 !important;
+    color: #881337 !important;
+    border-color: #f43f5e !important;
+  }
+
+  body.light-mode .border-rose-500\/30,
+  body.light-mode .border-rose-500\/40,
+  body.light-mode .border-rose-500\/50,
+  body.light-mode .border-rose-500\/60 {
+    border-color: #e11d48 !important;
+  }
+
+  /* 9. Preservar texto blanco puro en botones sólidos de acción y avatares */
+  body.light-mode .bg-blue-600,
+  body.light-mode .bg-indigo-600,
+  body.light-mode .bg-indigo-500,
+  body.light-mode .bg-emerald-600,
+  body.light-mode .bg-rose-600,
+  body.light-mode .bg-rose-600\/80,
+  body.light-mode .bg-rose-500,
+  body.light-mode .bg-purple-600,
+  body.light-mode .bg-violet-600,
+  body.light-mode .from-blue-600,
+  body.light-mode .from-indigo-900 {
+    color: #ffffff !important;
+  }
+
+  body.light-mode .bg-blue-600 *,
+  body.light-mode .bg-indigo-600 *,
+  body.light-mode .bg-emerald-600 *,
+  body.light-mode .bg-rose-600 *,
+  body.light-mode .bg-rose-600\/80 *,
+  body.light-mode .bg-rose-500 *,
+  body.light-mode .bg-purple-600 *,
+  body.light-mode .bg-violet-600 *,
+  body.light-mode .from-blue-600 * {
+    color: #ffffff !important;
+  }
+
+  body.light-mode .bg-amber-500,
+  body.light-mode .from-amber-500 {
+    color: #0f172a !important;
+  }
+
+  /* 10. Inputs, selects, textareas y tablas */
+  body.light-mode input,
+  body.light-mode select,
+  body.light-mode textarea {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: #94a3b8 !important;
+  }
+
+  body.light-mode input:focus,
+  body.light-mode select:focus,
+  body.light-mode textarea:focus {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
+  }
+
+  body.light-mode input::placeholder,
+  body.light-mode textarea::placeholder {
+    color: #64748b !important;
+  }
+
+  body.light-mode table thead tr {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+  }
+
+  body.light-mode table thead th {
+    color: #1e293b !important;
+    font-weight: 800 !important;
+  }
+
+  body.light-mode table tbody tr:hover {
+    background-color: #f8fafc !important;
+  }
+
+  body.light-mode .hover\:bg-slate-800\/40:hover,
+  body.light-mode .hover\:bg-slate-800\/80:hover,
+  body.light-mode .hover\:bg-slate-900\/60:hover {
+    background-color: #e2e8f0 !important;
+  }
 }
 
+/* Importante: 100% usa transform: none para no atrapar modales position: fixed al hacer scroll */
 @keyframes fadeSlideUp {
   0% {
     opacity: 0;
@@ -49,7 +406,7 @@
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
@@ -60,7 +417,7 @@
   }
   100% {
     opacity: 1;
-    transform: scale(1);
+    transform: none;
   }
 }
 
@@ -125,4 +482,3 @@
     page-break-after: auto;
   }
 }
-

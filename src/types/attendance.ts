@@ -70,6 +70,8 @@ export interface ProcessedDay {
   rowClass: 'row-success' | 'row-warning' | 'row-danger' | 'row-default';
   horarioProgramado: DaySchedule | null;
   registrosCrudosDia: RawPunchItem[];
+  // Autorización de Horas Extras por el Supervisor (para envío a RH y CONTPAQi)
+  horasExtrasAutorizadas?: boolean;
   // Campos de trazabilidad cuando el supervisor trabaja la lista en el sistema
   modificadoPorSupervisor?: boolean;
   tipoModificacionSupervisor?: SupervisorModificationType;

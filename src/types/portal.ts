@@ -185,3 +185,27 @@ export interface PortalNotification {
   emailEnviado: boolean;
 }
 
+export interface PayrollModificationLog {
+  id: string;
+  timestamp: string;
+  employeeId: string;
+  employeeName: string;
+  supervisorName: string;
+  isoDate: string;
+  dayName: string;
+  actionType:
+    | 'checada_agregada'
+    | 'formato_permiso'
+    | 'falta_confirmada'
+    | 'tiempo_extra_autorizado'
+    | 'tiempo_extra_rechazado'
+    | 'cambio_incidencia'
+    | 'nota_supervisor';
+  summary: string;
+  details?: string;
+  modifiedBy: string;
+  hasAttachment?: boolean;
+  attachmentName?: string;
+}
+
+

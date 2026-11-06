@@ -637,7 +637,8 @@ export function buildContpaqiPayrollData(
       });
 
       // 2. Evaluar Horas Extras (Dobles y Triples)
-      if (d.hExtra > 0) {
+      // Solo se exporta y genera clave a CONTPAQi si el supervisor / RH la autorizó explícitamente (horasExtrasAutorizadas === true)
+      if (d.hExtra > 0 && d.horasExtrasAutorizadas === true) {
         const prevExtra = horasExtrasAcumuladasSemana;
         const newExtraTotal = Number((prevExtra + d.hExtra).toFixed(2));
         horasExtrasAcumuladasSemana = newExtraTotal;

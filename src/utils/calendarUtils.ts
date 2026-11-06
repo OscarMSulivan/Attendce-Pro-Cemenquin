@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { normalizarHorarioDia } from '../core/eventsHierarchy';
+
 export const NOMBRES_DIAS_CORTO = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 export const NOMBRES_DIAS_COMPLETO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
@@ -31,19 +33,22 @@ export const OPCIONES_INCIDENCIA = [
   "Asistencia",
   "Retardo",
   "Falta Injustificada",
-  "Prima Dominical",
-  "Vacaciones",
-  "Home Office",
-  "Permiso de viaje",
-  "Descanso",
-  "Festivo",
-  "RST",
+  "Checado sin Gafete",
   "Permiso sin Goce",
-  "Permiso con goce",
-  "Incapacidad",
-  "Ingreso de Empleado",
   "Pase Medico",
-  "Checado sin Gafete"
+  "Descanso",
+  "Festivo"
+];
+
+// Opciones disponibles para selección manual por parte del Supervisor
+// Festivos, Vacaciones, Permisos con goce, Incapacidades y Primas Dominicales son automáticos o por solicitud formal
+export const OPCIONES_INCIDENCIA_SUPERVISOR = [
+  "",
+  "Retardo",
+  "Falta Injustificada",
+  "Checado sin Gafete",
+  "Permiso sin Goce",
+  "Pase Medico"
 ];
 
 /**
@@ -203,8 +208,8 @@ export function detectPayrollWeekFromDates(
 export function formatScheduleHoursSummary(
   cfg?: {
     nombre?: string;
-    dias?: Record<number, { entrada: string; salida: string; cruzaMedianoche?: boolean } | null>;
-    turnos?: Record<number, { entrada: string; salida: string; cruzaMedianoche?: boolean } | null>;
+    dias?: Record<number, { entrada: string; salida: string; comida?: number; cruzaMedianoche?: boolean } | null>;
+    turnos?: Record<number, { entrada: string; salida: string; comida?: number; cruzaMedianoche?: boolean } | null>;
   } | null
 ): string {
   const map = cfg?.dias || cfg?.turnos;
@@ -223,8 +228,15 @@ export function formatScheduleHoursSummary(
   };
 
   for (const d of dayOrder) {
-    const shift = map[d];
-    if (!shift || !shift.entrada || !shift.salida) continue;
+    const rawShift = map[d];
+    if (!rawShift || !rawShift.entrada || !rawShift.salida) continue;
+    const shift = normalizarHorarioDia({
+      entrada: rawShift.entrada,
+      salida: rawShift.salida,
+      comida: rawShift.comida ?? 60,
+      cruzaMedianoche: Boolean(rawShift.cruzaMedianoche),
+    });
+    if (!shift) continue;
     const rangeStr = `${shift.entrada} a ${shift.salida} hrs${shift.cruzaMedianoche ? ' (+1d)' : ''}`;
     const last = groups[groups.length - 1];
     if (last && last.range === rangeStr) {
@@ -246,5 +258,6 @@ export function formatScheduleHoursSummary(
     })
     .join(' · ');
 }
+
 
 

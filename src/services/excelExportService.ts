@@ -89,16 +89,16 @@ export async function exportPayrollExcelBySupervisor(
     throw new Error('No hay registros para exportar.');
   }
 
-  // Paleta de colores ejecutiva (ARGB)
+  // Paleta de colores ejecutiva unificada (un solo color institucional en encabezados, conservando intactos los colores de alertas e inconsistencias)
   const PALETTE = {
-    navyDark: 'FF0F172A',       // Encabezado principal oscuro
-    slateHeader: 'FF1E293B',    // Encabezado de tabla
-    indigoAccent: 'FF1E3A8A',   // Encabezado de columnas A-C (ID/Empleado/Supervisor)
+    navyDark: 'FF1E3A8A',       // Color único institucional para encabezados (Azul Marino Ejecutivo uniforme de A a L)
+    slateHeader: 'FF1E3A8A',    // Subencabezado uniforme en el mismo tono institucional (sin mezcla de azul y negro)
+    indigoAccent: 'FF1E3A8A',   // Columnas A-C unificadas con el resto del encabezado
     empBannerBg: 'FFDBEAFE',    // Barra superior de cada bloque de empleado (Azul cielo ejecutivo)
     empBannerText: 'FF1E3A8A',  // Texto azul marino intenso
-    empIdBadgeBg: 'FF1D4ED8',   // Badge azul rey para el ID del empleado
-    colIdBgEven: 'FFEFF6FF',    // Fondo azul hielo suave para Columna A (ID)
-    colIdBgOdd: 'FFDBEAFE',     // Fondo azul hielo alternado para Columna A (ID)
+    empIdBadgeBg: 'FF1E3A8A',   // Badge azul marino uniforme para el ID del empleado
+    colIdBgEven: 'FFF8FAFC',    // Fondo neutro limpio para Columna A (ID)
+    colIdBgOdd: 'FFF1F5F9',     // Fondo neutro alternado para Columna A (ID)
     colMetaEven: 'FFF8FAFC',    // Fondo gris perla para Nombre y Supervisor (par)
     colMetaOdd: 'FFF1F5F9',     // Fondo gris perla para Nombre y Supervisor (impar)
     rowEven: 'FFFFFFFF',        // Fila de datos par
@@ -123,7 +123,7 @@ export async function exportPayrollExcelBySupervisor(
     bannerWarnBg: 'FFFEF3C7',   // Banner superior de atención
     bannerWarnText: 'FF92400E',
     bannerOkBg: 'FFDBEAFE',     // Banner superior informativo
-    bannerOkText: 'FF1E40AF'
+    bannerOkText: 'FF1E3A8A'
   };
 
   const borderThin: Partial<ExcelJS.Borders> = {
@@ -323,7 +323,9 @@ export async function exportPayrollExcelBySupervisor(
       const row = worksheet.addRow(rowData);
       row.height = 19;
       totalNormal += d.hNormal;
-      totalExtra += d.hExtra;
+      if (d.horasExtrasAutorizadas === true) {
+        totalExtra += d.hExtra;
+      }
 
       const inc = incidenciaLimpia.toUpperCase();
 

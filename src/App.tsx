@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Navbar } from './components/Navbar';
+import { SidebarNav } from './components/SidebarNav';
 import { StatsPanel } from './components/StatsPanel';
 import { ExecutiveSummary } from './components/ExecutiveSummary';
 import { FileDropzoneSection } from './components/FileDropzoneSection';
@@ -63,6 +63,7 @@ import {
   PayrollRelease,
   PayrollDispersal,
   PortalNotification,
+  PayrollModificationLog,
   IncidentType,
   getUserAllowedLists,
 } from './types/portal';
@@ -108,6 +109,7 @@ export default function App() {
   const [isAssignOpen, setIsAssignOpen] = useState<boolean>(false);
   const [isRawPunchesOpen, setIsRawPunchesOpen] = useState<boolean>(false);
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
   // Estado del Portal Multirrol (Admin, RH, Supervisores)
   const [portalUsers, setPortalUsers] = useState<PortalUser[]>(() => PortalService.loadUsers());
@@ -171,20 +173,100 @@ export default function App() {
               setEmpleadosDB(localSaved.empleados);
             }
           }
-          if (serverData.eventosDB && Object.keys(serverData.eventosDB).length > 0) {
-            setEventosDB(serverData.eventosDB);
-          }
+          const hydratedHorarios =
+            serverData.horarios && Object.keys(serverData.horarios).length > 0
+              ? serverData.horarios
+              : horarios;
+          const hydratedEmpleados =
+            serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0
+              ? serverData.empleadosDB
+              : StorageService.loadSavedEmployees()?.empleados || empleadosDB;
+          const hydratedVacaciones =
+            serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0
+              ? serverData.vacacionesDB
+              : vacacionesDB;
+          const hydratedConfig =
+            serverData.config && Object.keys(serverData.config).length > 0
+              ? { ...config, ...serverData.config }
+              : config;
+          const hydratedWeek = serverData.selectedWeek || selectedWeek;
+
           if (serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0) {
             setVacacionesDB(serverData.vacacionesDB);
           }
           if (serverData.selectedWeek) {
             setSelectedWeek(serverData.selectedWeek);
           }
-          if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
-            setReportes(serverData.reportes);
-          }
-          if (serverData.resumen) {
-            setResumen(serverData.resumen);
+
+          if (serverData.eventosDB && Object.keys(serverData.eventosDB).length > 0) {
+            const reconsolidado = consolidarEventosConHorarios(
+              serverData.eventosDB,
+              hydratedEmpleados,
+              hydratedHorarios,
+              {
+                modoLectura: hydratedConfig.modoLectura,
+                minutosRebote: hydratedConfig.minutosRebote,
+              }
+            );
+            setEventosDB(reconsolidado);
+
+            if (
+              Array.isArray(serverData.reportes) &&
+              serverData.reportes.length > 0 &&
+              hydratedWeek &&
+              Object.keys(hydratedEmpleados).length > 0
+            ) {
+              const [startISO, endISO] = hydratedWeek.split('|');
+              const { reportes: recalculados } = generarReporteAsistencia(
+                Object.values(hydratedEmpleados),
+                reconsolidado,
+                hydratedVacaciones,
+                hydratedHorarios,
+                startISO,
+                endISO,
+                {
+                  jornadaBase: hydratedConfig.jornadaBase,
+                  modoLectura: hydratedConfig.modoLectura,
+                  minutosRebote: hydratedConfig.minutosRebote,
+                }
+              );
+
+              const merged = recalculados.map(newRep => {
+                const prevRep = serverData.reportes!.find((r: EmployeeReport) => r.empleado.id === newRep.empleado.id);
+                if (!prevRep) return newRep;
+                let sumN = 0;
+                let sumE = 0;
+                const diasMerged = newRep.dias.map(nd => {
+                  const pd = prevRep.dias.find((d: any) => d.isoDate === nd.isoDate);
+                  if (pd && pd.modificadoPorSupervisor) {
+                    sumN += pd.hNormal;
+                    if (pd.horasExtrasAutorizadas === true) sumE += pd.hExtra;
+                    return { ...pd, horarioProgramado: nd.horarioProgramado };
+                  }
+                  sumN += nd.hNormal;
+                  if (nd.horasExtrasAutorizadas === true) sumE += nd.hExtra;
+                  return nd;
+                });
+                return { ...newRep, dias: diasMerged, totalNormal: sumN, totalExtra: sumE };
+              });
+
+              setReportes(merged);
+              if (serverData.resumen) {
+                setResumen(serverData.resumen);
+              }
+            } else if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
+              setReportes(serverData.reportes);
+              if (serverData.resumen) {
+                setResumen(serverData.resumen);
+              }
+            }
+          } else {
+            if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
+              setReportes(serverData.reportes);
+            }
+            if (serverData.resumen) {
+              setResumen(serverData.resumen);
+            }
           }
         }
       })
@@ -650,7 +732,7 @@ export default function App() {
         const updatedDias = rep.dias.map(d => {
           if (d.isoDate !== isoDate) {
             sumN += d.hNormal;
-            sumE += d.hExtra;
+            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
             if (d.incidencia === 'Asistencia') empAsist++;
             else if (d.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
             else if (d.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -677,7 +759,7 @@ export default function App() {
             (!origEnt || origEnt === '--:--') && (!origSal || origSal === '--:--');
 
           sumN += metricas.hNormal;
-          sumE += metricas.hExtra;
+          if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
           if (metricas.incidencia === 'Asistencia') empAsist++;
           else if (metricas.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
           else if (metricas.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -740,6 +822,41 @@ export default function App() {
     );
   };
 
+  // Autorizar o desautorizar tiempo extra detectado por el supervisor y recalcular el total de horas extras en tiempo real
+  const handleToggleOvertimeApproval = (employeeId: string, isoDate: string, autorizada: boolean) => {
+    setReportes(prevReportes => {
+      const updated = prevReportes.map(rep => {
+        if (rep.empleado.id !== employeeId) return rep;
+        const updatedDias = rep.dias.map(d => {
+          if (d.isoDate !== isoDate) return d;
+          return {
+            ...d,
+            horasExtrasAutorizadas: autorizada,
+            modificadoPorSupervisor: true,
+            notaSupervisorDia: d.notaSupervisorDia || (autorizada ? 'Tiempo extra autorizado por supervisor' : 'Tiempo extra NO autorizado')
+          };
+        });
+        const newTotalExtra = updatedDias.reduce(
+          (acc, d) => acc + (d.horasExtrasAutorizadas === true ? d.hExtra : 0),
+          0
+        );
+        return {
+          ...rep,
+          dias: updatedDias,
+          totalExtra: newTotalExtra
+        };
+      });
+      setResumen(recomputeSummaryFromReports(updated));
+      return updated;
+    });
+    setStatusMessage(
+      autorizada
+        ? `✓ Tiempo extra AUTORIZADO para #${employeeId}. Se sumó al total de Horas Extras y generará clave en CONTPAQi.`
+        : `✕ Tiempo extra marcado como NO AUTORIZADO para #${employeeId}. No se computa en el total ni en CONTPAQi.`
+    );
+    setStatusType(autorizada ? 'success' : 'info');
+  };
+
   // Confirmar rápidamente que el trabajador NO vino ese día laboral ("Es Falta")
   const handleQuickConfirmFalta = (employeeId: string, isoDate: string) => {
     setReportes(prevReportes => {
@@ -755,7 +872,7 @@ export default function App() {
         const updatedDias = rep.dias.map(d => {
           if (d.isoDate !== isoDate) {
             sumN += d.hNormal;
-            sumE += d.hExtra;
+            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
             if (d.incidencia === 'Asistencia') empAsist++;
             else if (d.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
             else if (d.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -771,6 +888,7 @@ export default function App() {
             salida: '--:--',
             hNormal: 0,
             hExtra: 0,
+            horasExtrasAutorizadas: false,
             incidencia: 'Falta Confirmada',
             advertencia: '🚫 FALTA CONFIRMADA POR SUPERVISOR (El trabajador no se presentó)',
             huerfana: false,
@@ -824,7 +942,7 @@ export default function App() {
         const updatedDias = rep.dias.map(d => {
           if (d.isoDate !== payload.isoDate) {
             sumN += d.hNormal;
-            sumE += d.hExtra;
+            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
             if (d.incidencia === 'Asistencia') empAsist++;
             else if (d.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
             else if (d.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -844,6 +962,7 @@ export default function App() {
               salida: '--:--',
               hNormal: 0,
               hExtra: 0,
+              horasExtrasAutorizadas: false,
               incidencia: 'Falta Confirmada',
               advertencia: '🚫 FALTA CONFIRMADA POR SUPERVISOR (El trabajador no se presentó)',
               huerfana: false,
@@ -890,7 +1009,7 @@ export default function App() {
                 };
 
             sumN += metricas.hNormal;
-            sumE += metricas.hExtra;
+            if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
             empAsist++;
 
             return {
@@ -927,7 +1046,7 @@ export default function App() {
           );
 
           sumN += metricas.hNormal;
-          sumE += metricas.hExtra;
+          if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
           if (metricas.incidencia === 'Asistencia') empAsist++;
           else if (metricas.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
           else if (metricas.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -1157,11 +1276,11 @@ Saludos.`
             const pd = prevRep.dias.find(d => d.isoDate === nd.isoDate);
             if (pd && pd.modificadoPorSupervisor) {
               sumN += pd.hNormal;
-              sumE += pd.hExtra;
+              if (pd.horasExtrasAutorizadas === true) sumE += pd.hExtra;
               return { ...pd, horarioProgramado: nd.horarioProgramado };
             }
             sumN += nd.hNormal;
-            sumE += nd.hExtra;
+            if (nd.horasExtrasAutorizadas === true) sumE += nd.hExtra;
             return nd;
           });
           return { ...newRep, dias: diasMerged, totalNormal: sumN, totalExtra: sumE };
@@ -1708,6 +1827,94 @@ Saludos.`
     }).length;
   }, [supervisorsList, currentWeekNumber, releases]);
 
+  // Supervisores presentes en la lista activa en pantalla para dispersión directa en 1 clic (sin pop-up)
+  const activeListSupervisors = useMemo(() => {
+    if (selectedSupervisor) return [selectedSupervisor];
+    const fromFiltered = [...new Set(filteredReports.map(r => r.empleado.jefe).filter(Boolean))];
+    return fromFiltered.length > 0 ? fromFiltered : supervisorsList;
+  }, [selectedSupervisor, filteredReports, supervisorsList]);
+
+  const activeListSupervisorLabel = useMemo(() => {
+    if (selectedSupervisor) return selectedSupervisor;
+    if (activeListSupervisors.length === 1) return activeListSupervisors[0];
+    return `${activeListSupervisors.length} listas`;
+  }, [selectedSupervisor, activeListSupervisors]);
+
+  const isActiveListDispersed = useMemo(() => {
+    if (!currentWeekDispersalObj || activeListSupervisors.length === 0) return false;
+    const notifiedSet = new Set(
+      currentWeekDispersalObj.supervisoresNotificados.map(s => s.trim().toUpperCase())
+    );
+    return activeListSupervisors.every(s => notifiedSet.has(s.trim().toUpperCase()));
+  }, [currentWeekDispersalObj, activeListSupervisors]);
+
+  // Bitácora / Logs automáticos de todas las modificaciones realizadas sobre las listas trabajadas
+  const modificationLogs = useMemo<PayrollModificationLog[]>(() => {
+    const logs: PayrollModificationLog[] = [];
+    reportes.forEach(rep => {
+      const supName = rep.empleado.jefe || 'GENERAL';
+      rep.dias.forEach(d => {
+        const hasSupMod = Boolean(d.modificadoPorSupervisor);
+        const hasOvertimeDecision = d.horasExtrasAutorizadas !== undefined && d.hExtra > 0;
+        const hasNote = Boolean(d.notaSupervisorDia && d.notaSupervisorDia.trim());
+
+        if (!hasSupMod && !hasOvertimeDecision && !hasNote) return;
+
+        let actionType: PayrollModificationLog['actionType'] = 'checada_agregada';
+        let summary = `Entrada: ${d.entrada} | Salida: ${d.salida} (Orig: ${d.entradaOriginal || '--:--'} a ${d.salidaOriginal || '--:--'})`;
+
+        if (d.tipoModificacionSupervisor === 'falta_confirmada') {
+          actionType = 'falta_confirmada';
+          summary = 'Falta confirmada por supervisor (0.00 hrs trabajadas)';
+        } else if (d.tipoModificacionSupervisor === 'formato_permiso') {
+          actionType = 'formato_permiso';
+          summary = `Solicitud / Permiso registrado: ${d.incidencia} (${d.hNormal.toFixed(2)}h normales)`;
+        } else if (
+          d.tipoModificacionSupervisor === 'checada_agregada' ||
+          d.tipoModificacionSupervisor === 'formato_checada_sin_gafete'
+        ) {
+          actionType = 'checada_agregada';
+          summary = `Checada validada: ${d.entrada} a ${d.salida} (Orig: ${d.entradaOriginal || '--:--'} a ${d.salidaOriginal || '--:--'})`;
+        } else if (hasOvertimeDecision) {
+          actionType = d.horasExtrasAutorizadas ? 'tiempo_extra_autorizado' : 'tiempo_extra_rechazado';
+          summary = d.horasExtrasAutorizadas
+            ? `Tiempo extra AUTORIZADO: +${d.hExtra.toFixed(2)} hrs (Se envía a CONTPAQi)`
+            : `Tiempo extra NO autorizado: ${d.hExtra.toFixed(2)} hrs (Sin pago extra)`;
+        } else if (hasNote) {
+          actionType = 'nota_supervisor';
+          summary = `Incidencia: ${d.incidencia || 'Asistencia'} (${d.entrada} - ${d.salida})`;
+        }
+
+        if (
+          hasOvertimeDecision &&
+          actionType !== 'tiempo_extra_autorizado' &&
+          actionType !== 'tiempo_extra_rechazado'
+        ) {
+          summary += d.horasExtrasAutorizadas
+            ? ` • Extra Autorizado (+${d.hExtra.toFixed(2)}h)`
+            : ` • Extra NO Autorizado (${d.hExtra.toFixed(2)}h)`;
+        }
+
+        logs.push({
+          id: `log_${rep.empleado.id}_${d.isoDate}`,
+          timestamp: d.isoDate,
+          employeeId: rep.empleado.id,
+          employeeName: rep.empleado.nombre,
+          supervisorName: supName,
+          isoDate: d.isoDate,
+          dayName: d.dayName,
+          actionType,
+          summary,
+          details: d.notaSupervisorDia || undefined,
+          modifiedBy: supName,
+          hasAttachment: Boolean(d.formatoSubidoNombre),
+          attachmentName: d.formatoSubidoNombre,
+        });
+      });
+    });
+    return logs;
+  }, [reportes]);
+
   // Si el usuario no ha iniciado sesión, mostrar el Módulo de Login
   if (!isAuthenticated) {
     return (
@@ -1719,42 +1926,52 @@ Saludos.`
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans transition-colors">
-      {/* Barra de navegación */}
-      <Navbar
-        statusMessage={statusMessage}
-        statusType={statusType}
-        config={config}
-        onToggleTheme={handleToggleTheme}
-        onOpenSettings={() => setIsConfigOpen(true)}
-        onOpenSchedules={() => setIsSchedulesOpen(true)}
-        onOpenAssign={() => setIsAssignOpen(true)}
-        onOpenRawPunches={() => setIsRawPunchesOpen(true)}
-        onExportBackup={handleExportBackup}
-        onImportBackup={handleImportBackup}
-        onDownloadPortable={handleDownloadPortable}
-        hasEmployees={Object.keys(empleadosDB).length > 0}
-        hasEvents={Object.keys(eventosDB).length > 0}
-        isSupervisor={currentUser.role === 'supervisor'}
-      />
-
-      {/* Barra de Sesión de Usuario y Cambio de Roles del Portal */}
-      <UserSessionBar
-        currentUser={currentUser}
-        allUsers={portalUsers}
-        onSwitchUser={handleSwitchUser}
-        onLogout={handleLogout}
+    <div className="min-h-screen bg-[#171821] text-slate-100 flex font-sans transition-colors">
+      {/* Barra Lateral de Navegación Inspirada en el Dashboard */}
+      <SidebarNav
+        userRole={currentUser.role}
         activeTab={portalTab}
         onTabChange={setPortalTab}
         pendingIncidentsCount={pendingIncidentsCount}
         pendingReleasesCount={pendingReleasesCount}
-        notifications={notifications}
-        onMarkNotificationRead={handleMarkNotificationRead}
-        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onOpenSchedules={() => setIsSchedulesOpen(true)}
+        onOpenAssign={() => setIsAssignOpen(true)}
+        onOpenRawPunches={() => setIsRawPunchesOpen(true)}
+        onOpenSettings={() => setIsConfigOpen(true)}
+        onDownloadPortable={handleDownloadPortable}
+        onExportBackup={handleExportBackup}
+        onImportBackup={handleImportBackup}
+        onLogout={handleLogout}
+        hasEmployees={Object.keys(empleadosDB).length > 0}
+        hasEvents={Object.keys(eventosDB).length > 0}
+        mobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
-      {/* Contenido principal según la pestaña activa del portal y el rol */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Encabezado Superior Unificado (Sin barras duplicadas de pestañas u opciones) */}
+        <UserSessionBar
+          currentUser={currentUser}
+          allUsers={portalUsers}
+          onSwitchUser={handleSwitchUser}
+          onLogout={handleLogout}
+          activeTab={portalTab}
+          onTabChange={setPortalTab}
+          pendingIncidentsCount={pendingIncidentsCount}
+          pendingReleasesCount={pendingReleasesCount}
+          notifications={notifications}
+          modificationLogs={modificationLogs}
+          onMarkNotificationRead={handleMarkNotificationRead}
+          onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+          statusMessage={statusMessage}
+          statusType={statusType}
+          theme={config.theme}
+          onToggleTheme={handleToggleTheme}
+          onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
+        />
+
+        {/* Contenido principal según la pestaña activa del portal y el rol */}
+        <main className="flex-1 max-w-[1600px] mx-auto w-full px-3 sm:px-5 lg:px-6 py-5 sm:py-6">
         {/* VISTA DEDICADA PARA SUPERVISORES */}
         {currentUser.role === 'supervisor' && portalTab === 'nomina' && (
           <SupervisorWorkspaceView
@@ -1787,20 +2004,26 @@ Saludos.`
             onUpdateDayNote={handleUpdateDayNote}
             onResolveMissingPunchDay={handleResolveMissingPunchDay}
             onQuickConfirmFalta={handleQuickConfirmFalta}
+            onToggleOvertimeApproval={handleToggleOvertimeApproval}
           />
         )}
 
         {/* VISTAS PARA RECURSOS HUMANOS / NÓMINAS Y ADMINISTRADOR */}
         {currentUser.role !== 'supervisor' && portalTab === 'nomina' && (
           <>
-            {/* Panel de Estadísticas superiores */}
+            {/* Panel de Estadísticas superiores (Today's Sales + Level) */}
             {activeSummary && (
-              <StatsPanel summary={activeSummary} />
+              <StatsPanel summary={activeSummary} reports={filteredReports} />
             )}
 
-            {/* Resumen Ejecutivo */}
+            {/* Resumen Ejecutivo (Top Products + Customer Fulfilment + Earnings Gauge) */}
             {activeSummary && (
-              <ExecutiveSummary summary={activeSummary} />
+              <ExecutiveSummary
+                summary={activeSummary}
+                reports={reportes}
+                selectedSupervisor={selectedSupervisor}
+                onSelectSupervisor={setSelectedSupervisor}
+              />
             )}
 
             {/* Panel de Carga de Archivos (Exclusivo RH / Nóminas) */}
@@ -1835,7 +2058,9 @@ Saludos.`
               onEmailChange={setEmailDestino}
               onGenerateReport={handleGenerateReport}
               onDisperseAllPayroll={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, supervisorsList, true)}
-              onOpenDisperseByList={() => setIsDisperseByListModalOpen(true)}
+              onDisperseActiveList={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, activeListSupervisors, true)}
+              activeListSupervisorLabel={activeListSupervisorLabel}
+              isActiveListDispersed={isActiveListDispersed}
               dispersedSupervisorsCount={dispersedSupervisorsCount}
               onExportExcel={handleExportExcel}
               onSendEmail={handleSendEmail}
@@ -1862,6 +2087,7 @@ Saludos.`
               horarios={horarios}
               onAssignSchedule={handleAssignIndividual}
               filteredCount={reportes.length}
+              onToggleOvertimeApproval={handleToggleOvertimeApproval}
             />
           </>
         )}
@@ -1927,7 +2153,8 @@ Saludos.`
             onDeleteUser={handleDeletePortalUser}
           />
         )}
-      </main>
+        </main>
+      </div>
 
       {/* Modales Existentes */}
       <ScheduleModal
@@ -1939,6 +2166,7 @@ Saludos.`
         assignedCountBySchedule={assignedCountBySchedule}
         onExportBackup={handleExportBackup}
         onImportBackup={handleImportBackup}
+        onSwitchToAssign={() => setIsAssignOpen(true)}
       />
 
       <AssignScheduleModal
@@ -1948,6 +2176,7 @@ Saludos.`
         horarios={horarios}
         onAssignIndividual={handleAssignIndividual}
         onAssignBulk={handleAssignBulk}
+        onSwitchToCreate={() => setIsSchedulesOpen(true)}
       />
 
       <RawPunchAuditModal
