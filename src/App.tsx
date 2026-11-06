@@ -42,7 +42,6 @@ import { parseEmployeesFile } from './parsers/employeeParser';
 import { parseBiometricEventsFile } from './parsers/biometricParser';
 import { parseVacationsFile } from './parsers/vacationParser';
 import { exportPayrollExcelBySupervisor } from './services/excelExportService';
-import { PORTABLE_HTML_BASE64 } from './services/portableHtmlData';
 import saveAs from 'file-saver';
 
 // Importaciones del Portal RH y Supervisores
@@ -1418,21 +1417,17 @@ Saludos.`
     setStatusType('success');
   };
 
-  // Descargar versión portable .HTML directamente desde memoria (sin peticiones de red ni cookies)
-  const handleDownloadPortable = useCallback(() => {
+  // Descargar versión portable .HTML bajo demanda sin inflar el bundle inicial
+  const handleDownloadPortable = useCallback(async () => {
     try {
-      const binaryString = atob(PORTABLE_HTML_BASE64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      const blob = new Blob([bytes], { type: 'text/html;charset=utf-8' });
+      const res = await fetch('/AttendancePRO_v10_Portable.html');
+      if (!res.ok) throw new Error('No disponible');
+      const blob = await res.blob();
       saveAs(blob, 'AttendancePRO_v10_Portable.html');
-      setStatusMessage('✓ Archivo AttendancePRO_v10_Portable.html descargado directamente');
+      setStatusMessage('✓ Archivo AttendancePRO_v10_Portable.html descargado');
       setStatusType('success');
     } catch (e: any) {
       console.error(e);
-      window.open('/AttendancePRO_v10_Portable.html', '_blank');
     }
   }, []);
 
