@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   FileSpreadsheet,
   Download,
@@ -16,6 +17,11 @@ import {
   RotateCcw,
   Plus,
   Trash2,
+  X,
+  Clock,
+  AlertTriangle,
+  Zap,
+  Calculator
 } from 'lucide-react';
 import { EmployeeReport } from '../../types/attendance';
 import { PayrollRelease } from '../../types/portal';
@@ -46,7 +52,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
   weekPeriod,
 }) => {
   const [cfg, setCfg] = useState<ContpaqiConfig>(() => loadContpaqiConfig());
-  const [showConfigPanel, setShowConfigPanel] = useState<boolean>(true);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
   const [activeSubTab, setActiveSubTab] = useState<'formato_oficial' | 'tdd'>('formato_oficial');
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [selectedConcepto, setSelectedConcepto] = useState<string>('');
@@ -71,14 +77,14 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     const newId = `CUSTOM_${Date.now()}`;
     const newRule: ContpaqiIncidenceRule = {
       id: newId,
-      etiquetaSistema: 'Nueva Incidencia Personalizada',
-      palabraClaveMatch: 'GUARDIA',
-      clave: 'NVA',
+      etiquetaSistema: 'Otra Incidencia Personalizada',
+      palabraClaveMatch: 'PERMISO',
+      clave: 'PCS',
       prefijoCantidad: true,
-      nombreColA: 'PAGO ESPECIAL',
+      nombreColA: 'INCIDENCIAS',
       observacionesModo: 'SUPERVISOR',
       observacionesFijo: '',
-      conceptoColC: 'CONCEPTO PERSONALIZADO',
+      conceptoColC: 'OTRA INCIDENCIA',
       montoColF: 0,
       activa: true,
       esPersonalizada: true,
@@ -86,7 +92,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     handleUpdateConfig({
       reglasIncidencias: [...cfg.reglasIncidencias, newRule],
     });
-    setFeedbackMsg('✓ Nueva regla de incidencia agregada al catálogo configurable');
+    setFeedbackMsg('✓ Se agregó una nueva incidencia personalizada al catálogo');
   };
 
   const handleDeleteCustomRule = (ruleId: string) => {
@@ -98,7 +104,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
   const handleResetConfig = () => {
     setCfg(DEFAULT_CONTPAQI_CONFIG);
     saveContpaqiConfig(DEFAULT_CONTPAQI_CONFIG);
-    setFeedbackMsg('✓ Catálogo de claves y formato restaurados a los valores por defecto');
+    setFeedbackMsg('✓ Conceptos restaurados a los 4 esenciales (FINJ, Retardo, Horas Extras Dobles y Triples)');
   };
 
   // Reportes filtrados por supervisor seleccionado
@@ -154,24 +160,35 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     });
   }, [movements, selectedConcepto, searchQuery]);
 
-  // KPIs ejecutivos
+  // KPIs ejecutivos simplificados
   const kpis = useMemo(() => {
-    const activeRulesCount = cfg.reglasIncidencias.filter(r => r.activa).length;
-    const faltasRows = formatRows.filter(r => r.ruleId === 'FALTA').length;
-    const primaRows = formatRows.filter(r => r.ruleId === 'PRIMA_DOMINICAL').length;
-    const retardoRows = formatRows.filter(r => r.ruleId === 'RETARDO').length;
-    const montoTotal = formatRows.reduce((acc, r) => acc + (r.montoColF || 0), 0);
+    const faltasRows = formatRows.filter(r => r.ruleId === 'FALTA');
+    const totalDiasFalta = faltasRows.reduce((acc, r) => acc + r.totalOcurrenciasSemana, 0);
+
+    const retardoRows = formatRows.filter(r => r.ruleId === 'RETARDO');
+    const totalMinutosRetardo = retardoRows.reduce(
+      (acc, r) => acc + (r.minutosRetardoAcumulados || 0),
+      0
+    );
+    const totalDescuentoRetardo = retardoRows.reduce((acc, r) => acc + (r.montoColF || 0), 0);
+
+    const doblesRows = formatRows.filter(r => r.ruleId === 'HORAS_EXTRAS_DOBLES');
+    const triplesRows = formatRows.filter(r => r.ruleId === 'HORAS_EXTRAS_TRIPLES');
+    const totalHorasDobles = doblesRows.reduce((acc, r) => acc + r.totalOcurrenciasSemana, 0);
+    const totalHorasTriples = triplesRows.reduce((acc, r) => acc + r.totalOcurrenciasSemana, 0);
 
     return {
       totalFilasFormato: formatRows.length,
-      totalMovimientos: movements.length,
-      activeRulesCount,
-      faltasRows,
-      primaRows,
-      retardoRows,
-      montoTotal,
+      faltasEmpCount: faltasRows.length,
+      totalDiasFalta,
+      retardoEmpCount: retardoRows.length,
+      totalMinutosRetardo,
+      totalHorasRetardo: Number((totalMinutosRetardo / 60).toFixed(2)),
+      totalDescuentoRetardo,
+      totalHorasDobles: Number(totalHorasDobles.toFixed(1)),
+      totalHorasTriples: Number(totalHorasTriples.toFixed(1)),
     };
-  }, [formatRows, movements, cfg.reglasIncidencias]);
+  }, [formatRows]);
 
   const handleDownloadExcel = async () => {
     if (baseReports.length === 0) return;
@@ -193,55 +210,53 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Encabezado Ejecutivo del Módulo CONTPAQi Nóminas */}
-      <div className="rounded-2xl p-6 bg-gradient-to-r from-indigo-950/70 via-slate-900 to-slate-900 border border-indigo-500/30 shadow-xl">
+    <div className="space-y-6 animate-fade-up">
+      {/* Encabezado Principal alineado al diseño #21222D / #171821 / #A9DFD8 */}
+      <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 shrink-0">
+            <div className="w-11 h-11 rounded-2xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/35 flex items-center justify-center text-[#A9DFD8] shrink-0">
               <FileSpreadsheet className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                  Módulo Configurable CONTPAQi® Nóminas
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/35">
+                  CONTPAQi® Nóminas · Semana {weekNumber}
                 </span>
-                <span className="text-xs font-mono text-slate-400">
-                  Semana No. <strong className="text-slate-200">{weekNumber}</strong> ({weekPeriod || cfg.ejercicio})
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-md bg-[#171821] text-[#FEB95A] border border-white/[0.06]">
+                  Celda vacía = Asistencia normal
                 </span>
               </div>
-              <h2 className="text-lg font-extrabold text-slate-100 mt-1">
-                Generador de Layout de Incidencias para CONTPAQi® Nóminas
+              <h2 className="text-base sm:text-lg font-bold text-white mt-1.5 tracking-tight">
+                Layout Simplificado de Incidencias y Tiempo Extra
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5 max-w-3xl">
-                Configura las claves de <strong>todas las incidencias</strong> (Faltas <code>1FINJ</code>, Prima Dominical <code>1SRDN</code>, Asistencia <code>1ASIS</code>, Retardos <code>1RET</code>, Vacaciones, Permisos, Horas Extras, etc.) y descarga el Excel con las columnas exactas: <strong>NOMBRE | OBSERVACIONES | CONCEPTO | NUM EMPLEADO | NOMBRE | MONTO | 7 Fechas de la Semana</strong>.
+              <p className="text-xs text-[#87888C] mt-0.5 max-w-3xl">
+                Enfocado exclusivamente en <strong className="text-white">FINJ</strong> (Falta Injustificada),{' '}
+                <strong className="text-white">Retardo</strong> (con cálculo automático de minutos y descuento),{' '}
+                <strong className="text-white">Horas Extras Dobles y Triples</strong>, dejando en blanco los días de asistencia normal.
               </p>
             </div>
           </div>
 
-          {/* Botones de Descarga y Configuración */}
+          {/* Botones de Acción (Configuración en Menú Emergente + Descargas) */}
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             <button
               type="button"
-              onClick={() => setShowConfigPanel(!showConfigPanel)}
-              className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                showConfigPanel
-                  ? 'bg-indigo-600/25 text-indigo-200 border-indigo-500/60'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-              }`}
+              onClick={() => setIsConfigModalOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-[#171821] hover:bg-[#2B2B36] text-[#FEB95A] border border-[#FEB95A]/35 text-xs font-bold transition-all cursor-pointer"
             >
-              <Settings2 className="w-4 h-4 text-indigo-400" />
-              <span>{showConfigPanel ? 'Ocultar Configurador de Claves' : 'Configurar Todas las Incidencias'}</span>
+              <Settings2 className="w-4 h-4 text-[#FEB95A]" />
+              <span>Configurar Conceptos y Retardo</span>
             </button>
 
             <button
               type="button"
               onClick={handleDownloadTxt}
               disabled={reports.length === 0}
-              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 border border-slate-700 text-xs font-bold transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#171821] hover:bg-[#2B2B36] disabled:opacity-40 text-[#20AEF3] border border-[#20AEF3]/35 text-xs font-bold transition-all cursor-pointer"
               title="Descargar archivo .TXT separado por tabuladores"
             >
-              <FileText className="w-4 h-4 text-blue-400" />
+              <FileText className="w-4 h-4 text-[#20AEF3]" />
               <span>Descargar .TXT</span>
             </button>
 
@@ -249,24 +264,24 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
               type="button"
               onClick={handleDownloadExcel}
               disabled={reports.length === 0 || isExporting}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d2ca] disabled:opacity-40 text-[#171821] text-xs font-extrabold transition-all shadow-md shadow-[#A9DFD8]/15 cursor-pointer"
             >
               <Download className="w-4 h-4" />
-              <span>{isExporting ? 'Generando Excel...' : 'Descargar Excel Formato CONTPAQi (.xlsx)'}</span>
+              <span>{isExporting ? 'Generando...' : 'Descargar Excel CONTPAQi (.xlsx)'}</span>
             </button>
           </div>
         </div>
 
         {feedbackMsg && (
-          <div className="mt-4 px-3.5 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center justify-between">
+          <div className="mt-4 px-3.5 py-2.5 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/40 text-[#A9DFD8] text-xs flex items-center justify-between">
             <span className="flex items-center gap-2 font-semibold">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <CheckCircle2 className="w-4 h-4 text-[#A9DFD8]" />
               {feedbackMsg}
             </span>
             <button
               type="button"
               onClick={() => setFeedbackMsg(null)}
-              className="text-slate-400 hover:text-white text-xs cursor-pointer"
+              className="text-[#87888C] hover:text-white text-xs cursor-pointer"
             >
               ✕
             </button>
@@ -274,400 +289,148 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
         )}
       </div>
 
-      {/* PANEL CONFIGURADOR DE TODAS LAS INCIDENCIAS Y CLAVES */}
-      {showConfigPanel && (
-        <div className="p-5 rounded-2xl bg-slate-900 border border-indigo-500/40 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+      {/* Tarjetas Resumen Estilo Bento ("Today's Sales" style) */}
+      <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+          {/* 1. FINJ - Falta Injustificada */}
+          <div className="rounded-xl p-4 bg-[#171821] border border-white/[0.04] flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+              <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                1FINJ
+              </span>
+            </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                <Settings2 className="w-4 h-4 text-indigo-400" />
-                Configuración de Claves, Conceptos y Montos para Todas las Incidencias
-              </h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Activa o desactiva qué incidencias deseas incluir en el Excel (incluyendo <strong>Asistencia</strong>, <strong>Retardo</strong>, <strong>Falta Injustificada</strong>, <strong>Prima Dominical</strong>, etc.) y personaliza su Clave (ej. <code>FINJ</code> &rarr; <code>1FINJ</code>, <code>SRDN</code> &rarr; <code>1SRDN</code>), Columna <code>NOMBRE</code>, <code>OBSERVACIONES</code>, <code>CONCEPTO</code> y <code>MONTO</code>.
+              <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-white">
+                {kpis.totalDiasFalta} <span className="text-xs font-normal text-[#87888C]">días</span>
+              </p>
+              <p className="text-xs font-medium text-[#E8E8EA] mt-1">
+                Faltas Injustificadas (FINJ)
+              </p>
+              <p className="text-[10px] font-mono text-rose-400 mt-1">
+                {kpis.faltasEmpCount} colaborador(es) con falta
               </p>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={handleAddCustomRule}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold cursor-pointer transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Agregar Incidencia</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResetConfig}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Restaurar Valores</span>
-              </button>
+          {/* 2. RETARDO - Cálculo de tiempo y descuento */}
+          <div className="rounded-xl p-4 bg-[#171821] border border-white/[0.04] flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-8 h-8 rounded-lg bg-[#FEB95A]/15 border border-[#FEB95A]/30 flex items-center justify-center text-[#FEB95A]">
+                <Clock className="w-4 h-4" />
+              </div>
+              <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-[#FEB95A]/15 text-[#FEB95A] border border-[#FEB95A]/30">
+                1RET · Descuento
+              </span>
+            </div>
+            <div>
+              <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-white">
+                {kpis.totalMinutosRetardo}m{' '}
+                <span className="text-xs font-normal text-[#87888C]">({kpis.totalHorasRetardo}h)</span>
+              </p>
+              <p className="text-xs font-medium text-[#E8E8EA] mt-1">
+                Tiempo de Retardo a Descontar
+              </p>
+              <p className="text-[10px] font-mono text-[#FEB95A] mt-1">
+                {kpis.totalDescuentoRetardo > 0
+                  ? `Descuento estimado: $${kpis.totalDescuentoRetardo.toFixed(2)} (${kpis.retardoEmpCount} emp.)`
+                  : `${kpis.retardoEmpCount} colaborador(es) con retardo`}
+              </p>
             </div>
           </div>
 
-          {/* Tabla editable de todas las incidencias */}
-          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-950/60">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-950 text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
-                  <th className="p-2.5 pl-3 text-center">Incluir en Excel</th>
-                  <th className="p-2.5">Incidencia del Sistema</th>
-                  <th className="p-2.5 text-center">Clave (Ej. FINJ / SRDN)</th>
-                  <th className="p-2.5 text-center">Vista en Fecha</th>
-                  <th className="p-2.5">Columna A: NOMBRE</th>
-                  <th className="p-2.5">Columna B: OBSERVACIONES</th>
-                  <th className="p-2.5">Columna C: CONCEPTO</th>
-                  <th className="p-2.5 text-right pr-3">Columna F: MONTO</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/70">
-                {cfg.reglasIncidencias.map(rule => {
-                  const previewCode = rule.prefijoCantidad
-                    ? `1${(rule.clave || '').trim().toUpperCase()}`
-                    : (rule.clave || '').trim().toUpperCase();
-
-                  return (
-                    <tr
-                      key={rule.id}
-                      className={`transition-colors ${
-                        rule.activa ? 'bg-slate-900/70 hover:bg-slate-800/60' : 'bg-slate-950/40 opacity-60 hover:opacity-90'
-                      }`}
-                    >
-                      {/* Switch Activa */}
-                      <td className="p-2.5 pl-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={rule.activa}
-                          onChange={(e) => handleUpdateRule(rule.id, { activa: e.target.checked })}
-                          className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
-                          title="Marcar para exportar esta incidencia al Excel de CONTPAQi"
-                        />
-                      </td>
-
-                      {/* Nombre de la incidencia en el sistema */}
-                      <td className="p-2.5">
-                        {rule.esPersonalizada ? (
-                          <div className="space-y-1">
-                            <input
-                              type="text"
-                              value={rule.etiquetaSistema}
-                              onChange={(e) => handleUpdateRule(rule.id, { etiquetaSistema: e.target.value })}
-                              className="w-full rounded px-2 py-1 bg-slate-950 border border-slate-700 text-slate-200 text-xs font-semibold"
-                              placeholder="Nombre de regla"
-                            />
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] text-slate-400">Si dice:</span>
-                              <input
-                                type="text"
-                                value={rule.palabraClaveMatch || ''}
-                                onChange={(e) =>
-                                  handleUpdateRule(rule.id, { palabraClaveMatch: e.target.value.toUpperCase() })
-                                }
-                                className="w-28 rounded px-1.5 py-0.5 bg-slate-950 border border-slate-800 text-indigo-300 font-mono text-[10px]"
-                                placeholder="PALABRA CLAVE"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteCustomRule(rule.id)}
-                                className="text-rose-400 hover:text-rose-300 p-1 cursor-pointer"
-                                title="Eliminar regla personalizada"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <span className="font-bold text-slate-200 block">{rule.etiquetaSistema}</span>
-                            <span className="text-[10px] text-slate-500 font-mono">{rule.id}</span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Clave editable */}
-                      <td className="p-2.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <input
-                            type="text"
-                            value={rule.clave}
-                            onChange={(e) =>
-                              handleUpdateRule(rule.id, { clave: e.target.value.toUpperCase() })
-                            }
-                            className="w-20 text-center rounded-lg px-2 py-1 bg-slate-950 border border-indigo-500/40 text-indigo-300 font-mono font-bold text-xs uppercase focus:border-indigo-400 outline-none"
-                          />
-                          <label
-                            className="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer"
-                            title="Antepone el número 1 o cantidad de horas antes de la clave (ej. 1FINJ, 1SRDN)"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={rule.prefijoCantidad}
-                              onChange={(e) =>
-                                handleUpdateRule(rule.id, { prefijoCantidad: e.target.checked })
-                              }
-                              className="rounded accent-indigo-500"
-                            />
-                            <span>1+</span>
-                          </label>
-                        </div>
-                      </td>
-
-                      {/* Badge de cómo se verá en la columna de fecha */}
-                      <td className="p-2.5 text-center">
-                        <span className="inline-block font-mono font-bold text-xs px-2.5 py-1 rounded bg-slate-950 border border-slate-700 text-emerald-300">
-                          {previewCode}
-                        </span>
-                      </td>
-
-                      {/* Columna A: NOMBRE (Ej. PAGO 0, GUARDIAS 12 HRS) */}
-                      <td className="p-2.5">
-                        <input
-                          type="text"
-                          value={rule.nombreColA}
-                          onChange={(e) =>
-                            handleUpdateRule(rule.id, { nombreColA: e.target.value.toUpperCase() })
-                          }
-                          className="w-36 rounded-lg px-2.5 py-1 bg-slate-950 border border-slate-800 text-slate-200 font-mono text-xs uppercase focus:border-indigo-500 outline-none"
-                          placeholder="Ej. PAGO 0"
-                        />
-                      </td>
-
-                      {/* Columna B: OBSERVACIONES (Supervisor automático o Texto fijo como SEMANA REDUCIDA) */}
-                      <td className="p-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <select
-                            value={rule.observacionesModo}
-                            onChange={(e) =>
-                              handleUpdateRule(rule.id, {
-                                observacionesModo: e.target.value as 'SUPERVISOR' | 'FIJO',
-                              })
-                            }
-                            className="rounded-lg px-2 py-1 bg-slate-950 border border-slate-800 text-slate-300 text-[11px] outline-none"
-                          >
-                            <option value="SUPERVISOR">Nombre Supervisor</option>
-                            <option value="FIJO">Texto Fijo</option>
-                          </select>
-                          {rule.observacionesModo === 'FIJO' && (
-                            <input
-                              type="text"
-                              value={rule.observacionesFijo}
-                              onChange={(e) =>
-                                handleUpdateRule(rule.id, {
-                                  observacionesFijo: e.target.value.toUpperCase(),
-                                })
-                              }
-                              placeholder="Ej. SEMANA REDUCIDA"
-                              className="w-36 rounded-lg px-2 py-1 bg-slate-950 border border-amber-500/40 text-amber-200 font-mono text-xs uppercase outline-none"
-                            />
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Columna C: CONCEPTO (Ej. FALTA INJUSTIFICADA, PRIMA DOMINICAL) */}
-                      <td className="p-2.5">
-                        <input
-                          type="text"
-                          value={rule.conceptoColC}
-                          onChange={(e) =>
-                            handleUpdateRule(rule.id, { conceptoColC: e.target.value.toUpperCase() })
-                          }
-                          className="w-44 rounded-lg px-2.5 py-1 bg-slate-950 border border-slate-800 text-slate-200 font-mono text-xs uppercase focus:border-indigo-500 outline-none"
-                          placeholder="Ej. FALTA INJUSTIFICADA"
-                        />
-                      </td>
-
-                      {/* Columna F: MONTO (0 muestra "-", o monto numérico ej. 168.75) */}
-                      <td className="p-2.5 pr-3 text-right">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={rule.montoColF}
-                          onChange={(e) =>
-                            handleUpdateRule(rule.id, {
-                              montoColF: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="w-24 text-right rounded-lg px-2 py-1 bg-slate-950 border border-slate-800 text-emerald-300 font-mono font-bold text-xs outline-none focus:border-indigo-500"
-                          title="Si es 0, en el Excel aparecerá '-' como en FALTA INJUSTIFICADA. Si es mayor a 0 (ej. 168.75), aparecerá el monto."
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Opciones Generales del Formato */}
-          <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-800 text-xs">
-            <div className="flex flex-wrap items-center gap-5">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={cfg.detectarPrimaDominicalAuto}
-                  onChange={(e) =>
-                    handleUpdateConfig({ detectarPrimaDominicalAuto: e.target.checked })
-                  }
-                  className="rounded accent-indigo-500"
-                />
-                <span>
-                  Detectar automáticamente <strong>Prima Dominical (1SRDN)</strong> cuando el empleado trabaja en Domingo
-                </span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={cfg.separarExtrasDoblesTriplesLFT}
-                  onChange={(e) =>
-                    handleUpdateConfig({ separarExtrasDoblesTriplesLFT: e.target.checked })
-                  }
-                  className="rounded accent-indigo-500"
-                />
-                <span>Separar Horas Extras Dobles (≤9h) y Triples (&gt;9h) LFT</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={cfg.soloSupervisoresLiberados}
-                  onChange={(e) =>
-                    handleUpdateConfig({ soloSupervisoresLiberados: e.target.checked })
-                  }
-                  className="rounded accent-emerald-500"
-                />
-                <span>Solo incluir nóminas Liberadas por Supervisor</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={cfg.incluirFilaVaciaSeparadora}
-                  onChange={(e) =>
-                    handleUpdateConfig({ incluirFilaVaciaSeparadora: e.target.checked })
-                  }
-                  className="rounded accent-indigo-500"
-                />
-                <span>Incluir fila vacía debajo del encabezado gris (idéntico al formato)</span>
-              </label>
+          {/* 3. Horas Extras Dobles y Triples */}
+          <div className="rounded-xl p-4 bg-[#171821] border border-white/[0.04] flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-8 h-8 rounded-lg bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8]">
+                <Zap className="w-4 h-4" />
+              </div>
+              <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/30">
+                1HE / 2HE
+              </span>
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400">Formato Fecha Encabezado:</span>
-              <select
-                value={cfg.formatoEncabezadoFecha}
-                onChange={(e) =>
-                  handleUpdateConfig({
-                    formatoEncabezadoFecha: e.target.value as 'M/D/YYYY' | 'DD/MM/YYYY',
-                  })
-                }
-                className="rounded-lg px-2.5 py-1 bg-slate-950 border border-slate-800 text-slate-200 font-mono text-xs"
-              >
-                <option value="M/D/YYYY">M/D/YYYY (Ej. 10/8/2026)</option>
-                <option value="DD/MM/YYYY">DD/MM/YYYY (Ej. 08/10/2026)</option>
-              </select>
+            <div>
+              <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-white">
+                {kpis.totalHorasDobles}h <span className="text-xs font-normal text-[#87888C]">2x</span> ·{' '}
+                {kpis.totalHorasTriples}h <span className="text-xs font-normal text-[#87888C]">3x</span>
+              </p>
+              <p className="text-xs font-medium text-[#E8E8EA] mt-1">
+                Horas Extras Dobles y Triples
+              </p>
+              <p className="text-[10px] font-mono text-[#A9DFD8] mt-1">
+                Solo incluye tiempo extra autorizado ✓
+              </p>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Tarjetas Resumen */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block">
-            Filas en Formato Excel
-          </span>
-          <span className="text-2xl font-black text-slate-100 font-mono">
-            {kpis.totalFilasFormato}
-          </span>
-          <span className="text-[10px] text-slate-500 block mt-0.5">
-            {kpis.activeRulesCount} tipos de incidencia activos
-          </span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-rose-950/20 border border-rose-500/30">
-          <span className="text-[10px] uppercase font-bold text-rose-400 block">
-            Faltas Injustificadas
-          </span>
-          <span className="text-2xl font-black text-rose-300 font-mono">{kpis.faltasRows}</span>
-          <span className="text-[10px] text-rose-400/80 block mt-0.5">Empleados con faltas</span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/30">
-          <span className="text-[10px] uppercase font-bold text-amber-400 block">
-            Prima Dominical / Guardias
-          </span>
-          <span className="text-2xl font-black text-amber-300 font-mono">{kpis.primaRows}</span>
-          <span className="text-[10px] text-amber-400/80 block mt-0.5">Registros SRDN</span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-blue-950/20 border border-blue-500/30">
-          <span className="text-[10px] uppercase font-bold text-blue-400 block">
-            Retardos y Otras Incidencias
-          </span>
-          <span className="text-2xl font-black text-blue-300 font-mono">
-            {kpis.totalMovimientos}
-          </span>
-          <span className="text-[10px] text-blue-400/80 block mt-0.5">Eventos en la semana</span>
-        </div>
-
-        <div className="p-4 rounded-xl bg-emerald-950/20 border border-emerald-500/30">
-          <span className="text-[10px] uppercase font-bold text-emerald-400 block">
-            Suma Columna MONTO
-          </span>
-          <span className="text-2xl font-black text-emerald-300 font-mono">
-            ${kpis.montoTotal.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </span>
-          <span className="text-[10px] text-emerald-400/80 block mt-0.5">Conceptos con importe</span>
+          {/* 4. Asistencia = Vacío + Total Filas */}
+          <div className="rounded-xl p-4 bg-[#171821] border border-white/[0.04] flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-3">
+              <div className="w-8 h-8 rounded-lg bg-[#20AEF3]/15 border border-[#20AEF3]/30 flex items-center justify-center text-[#20AEF3]">
+                <Calculator className="w-4 h-4" />
+              </div>
+              <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded bg-[#20AEF3]/15 text-[#20AEF3] border border-[#20AEF3]/30">
+                Vacío = Asistencia
+              </span>
+            </div>
+            <div>
+              <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-white">
+                {kpis.totalFilasFormato} <span className="text-xs font-normal text-[#87888C]">filas</span>
+              </p>
+              <p className="text-xs font-medium text-[#E8E8EA] mt-1">
+                Registros en Layout Excel
+              </p>
+              <p className="text-[10px] font-mono text-[#20AEF3] mt-1">
+                {cfg.reglasIncidencias.filter(r => r.activa).length} conceptos activos
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
       {reports.length === 0 ? (
-        <div className="p-10 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-2">
-          <FileSpreadsheet className="w-10 h-10 text-slate-600 mx-auto" />
-          <h3 className="text-sm font-bold text-slate-200">
-            Primero genera el reporte de la semana en &ldquo;Carga y Proceso Nómina&rdquo;
+        <div className="p-10 rounded-2xl bg-[#21222D] border border-white/[0.06] text-center space-y-2">
+          <FileSpreadsheet className="w-10 h-10 text-[#87888C] mx-auto" />
+          <h3 className="text-sm font-bold text-white">
+            Primero genera el reporte de la semana en &ldquo;Dashboard Nómina&rdquo;
           </h3>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
-            Una vez cargadas las checadas y generado el reporte, aquí verás la tabla con el formato exacto lista para descargar a Excel.
+          <p className="text-xs text-[#87888C] max-w-md mx-auto">
+            Una vez cargadas las checadas y generado el reporte, aquí verás la tabla lista para descargar a CONTPAQi® Nóminas.
           </p>
         </div>
       ) : (
         <>
           {/* Barra de Sub-pestañas y Filtros */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="p-4 rounded-2xl bg-[#21222D] border border-white/[0.06] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => setActiveSubTab('formato_oficial')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeSubTab === 'formato_oficial'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                    ? 'bg-[#A9DFD8] text-[#171821] shadow'
+                    : 'bg-[#171821] text-[#87888C] hover:text-white border border-white/[0.06]'
                 }`}
               >
                 <Table2 className="w-4 h-4" />
                 <span>
-                  Hoja 1: Formato Oficial Excel (NOMBRE | OBSERVACIONES | CONCEPTO | 7 Fechas) ({filteredFormatRows.length})
+                  Hoja 1: Formato Oficial Excel ({filteredFormatRows.length})
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveSubTab('tdd')}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeSubTab === 'tdd'
-                    ? 'bg-indigo-600 text-white shadow'
-                    : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                    ? 'bg-[#A9DFD8] text-[#171821] shadow'
+                    : 'bg-[#171821] text-[#87888C] hover:text-white border border-white/[0.06]'
                 }`}
               >
                 <ListChecks className="w-4 h-4" />
-                <span>Hoja 2: Desglose Vertical por Día ({filteredMovements.length})</span>
+                <span>Hoja 2: Desglose de Movimientos y Retardos ({filteredMovements.length})</span>
               </button>
             </div>
 
@@ -676,9 +439,9 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
               <select
                 value={selectedSupervisor}
                 onChange={(e) => setSelectedSupervisor(e.target.value)}
-                className="rounded-lg px-3 py-1.5 text-xs bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-indigo-500"
+                className="rounded-xl px-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8]"
               >
-                <option value="">Todos los Supervisores ({supervisors.length})</option>
+                <option value="">Todas las Listas / Supervisores ({supervisors.length})</option>
                 {supervisors.map(s => (
                   <option key={s} value={s}>
                     {s}
@@ -690,7 +453,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
               <select
                 value={selectedConcepto}
                 onChange={(e) => setSelectedConcepto(e.target.value)}
-                className="rounded-lg px-3 py-1.5 text-xs bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-indigo-500 font-mono"
+                className="rounded-xl px-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8] font-mono"
               >
                 <option value="">Todos los Conceptos</option>
                 {availableConcepts.map(c => (
@@ -702,19 +465,19 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
 
               {/* Buscador */}
               <div className="relative w-full sm:w-56">
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-3.5 h-3.5 text-[#87888C] absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Buscar 00615, nombre o concepto..."
-                  className="w-full rounded-lg pl-8 pr-3 py-1.5 text-xs bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-indigo-500 font-mono"
+                  placeholder="Buscar 00615, nombre..."
+                  className="w-full rounded-xl pl-8 pr-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] outline-none focus:border-[#A9DFD8] font-mono"
                 />
               </div>
             </div>
           </div>
 
-          {/* VISTA PREVIA 1: FORMATO OFICIAL EXACTO DE LA IMAGEN */}
+          {/* VISTA PREVIA 1: FORMATO OFICIAL EXACTO */}
           {activeSubTab === 'formato_oficial' && (
             <div className="rounded-2xl bg-white text-slate-950 border border-slate-400 shadow-2xl overflow-hidden">
               <div className="overflow-x-auto">
@@ -726,7 +489,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                       <th className="py-2 px-3 border border-slate-500 whitespace-nowrap">CONCEPTO</th>
                       <th className="py-2 px-3 border border-slate-500 whitespace-nowrap">NUM EMPLEADO</th>
                       <th className="py-2 px-3 border border-slate-500 whitespace-nowrap">NOMBRE</th>
-                      <th className="py-2 px-3 border border-slate-500 whitespace-nowrap">MONTO</th>
+                      <th className="py-2 px-3 border border-slate-500 whitespace-nowrap">MONTO / DESC.</th>
                       {datesInPeriod.map(d => (
                         <th
                           key={d.isoDate}
@@ -738,7 +501,6 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {/* Fila vacía debajo del encabezado si está activada */}
                     {cfg.incluirFilaVaciaSeparadora && (
                       <tr className="h-5 bg-white">
                         <td className="border border-slate-300" />
@@ -759,7 +521,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                           colSpan={6 + datesInPeriod.length}
                           className="p-8 text-center text-slate-500 font-sans"
                         >
-                          No hay incidencias que coincidan con las reglas activas o el filtro actual. Puedes activar &ldquo;Asistencia Normal&rdquo; u otras incidencias en el panel superior.
+                          No hay faltas injustificadas (FINJ), retardos ni horas extras autorizadas con el filtro actual. (Recuerda que la asistencia normal deja la celda vacía).
                         </td>
                       </tr>
                     ) : (
@@ -774,7 +536,7 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                           <td className="py-1.5 px-2.5 border border-slate-300 whitespace-nowrap">
                             {row.observacionesColB}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-nowrap">
+                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-nowrap font-semibold">
                             {row.conceptoColC}
                           </td>
                           <td className="py-1.5 px-2.5 border border-slate-300 font-mono whitespace-nowrap">
@@ -783,8 +545,12 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                           <td className="py-1.5 px-3 border border-slate-300 whitespace-nowrap">
                             {row.nombreEmpleadoColE}
                           </td>
-                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-nowrap">
-                            {row.montoColF > 0 ? row.montoColF.toFixed(2) : '-'}
+                          <td className="py-1.5 px-2.5 border border-slate-300 whitespace-nowrap font-mono">
+                            {row.montoColF > 0
+                              ? `$${row.montoColF.toFixed(2)}`
+                              : row.minutosRetardoAcumulados && row.minutosRetardoAcumulados > 0
+                              ? `-${row.minutosRetardoAcumulados} min`
+                              : '-'}
                           </td>
                           {datesInPeriod.map(d => {
                             const val = row.celdasPorFecha[d.isoDate] || '';
@@ -792,8 +558,9 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
                               <td
                                 key={d.isoDate}
                                 className={`py-1.5 px-2 border border-slate-300 font-mono whitespace-nowrap ${
-                                  val ? 'font-bold text-slate-950 bg-amber-50/40' : ''
+                                  val ? 'font-bold text-slate-950 bg-amber-50/60' : ''
                                 }`}
+                                title={val ? val : 'Vacío = Asistencia normal'}
                               >
                                 {val}
                               </td>
@@ -810,42 +577,48 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
 
           {/* VISTA PREVIA 2: DESGLOSE VERTICAL TDD */}
           {activeSubTab === 'tdd' && (
-            <div className="rounded-2xl bg-slate-900 border border-slate-800 shadow-xl overflow-hidden">
+            <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] shadow-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-slate-950/90 text-[10px] uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                    <tr className="bg-[#171821] text-[10px] uppercase tracking-wider text-[#87888C] border-b border-white/[0.06]">
                       <th className="p-3 pl-4">Num Empleado</th>
                       <th className="p-3">Nombre</th>
-                      <th className="p-3">Nombre Grupo (Col A)</th>
-                      <th className="p-3">Observaciones (Col B)</th>
-                      <th className="p-3">Concepto (Col C)</th>
+                      <th className="p-3">Supervisor</th>
+                      <th className="p-3">Concepto y Cálculo</th>
                       <th className="p-3 text-center">Clave Fecha</th>
                       <th className="p-3 text-center">Fecha</th>
-                      <th className="p-3 text-right pr-4">Monto</th>
+                      <th className="p-3 text-center">Valor / Tiempo</th>
+                      <th className="p-3 text-right pr-4">Descuento / Monto</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                  <tbody className="divide-y divide-white/[0.05] font-mono">
                     {filteredMovements.map((m, idx) => (
                       <tr
                         key={`${m.codigoEmpleado}-${m.fechaISO}-${m.claveIncidencia}-${idx}`}
-                        className="hover:bg-slate-800/40 transition-colors"
+                        className="hover:bg-white/[0.02] transition-colors"
                       >
-                        <td className="p-3 pl-4 font-bold text-blue-300">{m.codigoEmpleado}</td>
-                        <td className="p-3 font-sans font-semibold text-slate-100">
+                        <td className="p-3 pl-4 font-bold text-[#20AEF3]">{m.codigoEmpleado}</td>
+                        <td className="p-3 font-sans font-semibold text-white">
                           {m.nombreEmpleado}
                         </td>
-                        <td className="p-3 font-sans text-slate-300">{m.nombreColA}</td>
-                        <td className="p-3 font-sans text-slate-300">{m.observacionesColB}</td>
-                        <td className="p-3 font-sans text-slate-200">{m.conceptoDescripcion}</td>
+                        <td className="p-3 font-sans text-[#87888C]">{m.observacionesColB}</td>
+                        <td className="p-3 font-sans text-[#E8E8EA]">{m.conceptoDescripcion}</td>
                         <td className="p-3 text-center">
-                          <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold">
+                          <span className="px-2 py-0.5 rounded bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/35 font-bold">
                             {m.claveIncidencia}
                           </span>
                         </td>
-                        <td className="p-3 text-center text-slate-300">{m.fechaContpaqi}</td>
-                        <td className="p-3 pr-4 text-right text-emerald-300">
-                          {m.monto > 0 ? m.monto.toFixed(2) : '-'}
+                        <td className="p-3 text-center text-[#87888C]">{m.fechaContpaqi}</td>
+                        <td className="p-3 text-center text-[#FEB95A] font-bold">
+                          {m.valor} {m.unidad}
+                        </td>
+                        <td className="p-3 pr-4 text-right text-[#A9DFD8] font-bold">
+                          {m.monto > 0
+                            ? `$${m.monto.toFixed(2)}`
+                            : m.minutosRetardo
+                            ? `-${m.minutosRetardo} min`
+                            : '-'}
                         </td>
                       </tr>
                     ))}
@@ -856,6 +629,376 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
           )}
         </>
       )}
+
+      {/* MENÚ EMERGENTE (MODAL POP-UP) DE CONFIGURACIÓN DE CONCEPTOS Y CÁLCULO DE RETARDO */}
+      {isConfigModalOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="bg-[#21222D] border border-white/[0.08] rounded-2xl w-full max-w-4xl max-h-[92vh] my-auto flex flex-col shadow-2xl animate-scale-in text-slate-100">
+              {/* Header del Modal */}
+              <div className="p-4 sm:p-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#FEB95A]/15 border border-[#FEB95A]/35 flex items-center justify-center text-[#FEB95A] shrink-0">
+                    <Settings2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
+                      Configuración de Conceptos CONTPAQi® y Descuento por Retardo
+                    </h3>
+                    <p className="text-xs text-[#87888C]">
+                      Solo se muestran las incidencias esenciales (FINJ, Retardo, Horas Extras Dobles y Triples) + personalizadas. Celda vacía = Asistencia.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAddCustomRule}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-xs font-extrabold cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Agregar Otra Incidencia</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetConfig}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-[#171821] hover:bg-[#2B2B36] text-[#87888C] hover:text-white border border-white/[0.07] text-xs font-semibold cursor-pointer transition-colors"
+                    title="Restaurar los 4 conceptos por defecto"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Restaurar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsConfigModalOpen(false)}
+                    className="p-1.5 rounded-xl text-[#87888C] hover:text-white hover:bg-[#171821] transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Body del Modal */}
+              <div className="p-4 sm:p-5 overflow-y-auto space-y-5">
+                {/* Regla de Cálculo Automático de Descuento por Retardo */}
+                <div className="p-4 rounded-xl bg-[#171821] border border-[#FEB95A]/30 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-[#FEB95A]" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#FEB95A]">
+                        Cálculo Automático de Descuento por Retardo
+                      </h4>
+                    </div>
+                    <span className="text-[11px] text-[#87888C]">
+                      Calcula los minutos de diferencia entre la hora programada de entrada y la checada real
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#87888C] block mb-1">
+                        Modo de Descuento en Retardo
+                      </label>
+                      <select
+                        value={cfg.modoDescuentoRetardo}
+                        onChange={(e) =>
+                          handleUpdateConfig({
+                            modoDescuentoRetardo: e.target.value as 'POR_MINUTO' | 'POR_EVENTO' | 'SOLO_TIEMPO',
+                          })
+                        }
+                        className="w-full rounded-xl px-3 py-2 bg-[#21222D] border border-white/[0.08] text-white text-xs outline-none focus:border-[#A9DFD8]"
+                      >
+                        <option value="POR_MINUTO">Calcular $ por cada minuto de retardo</option>
+                        <option value="SOLO_TIEMPO">Mostrar minutos y horas a descontar (sin $)</option>
+                        <option value="POR_EVENTO">Monto fijo por cada día con retardo</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#87888C] block mb-1">
+                        Costo por Minuto de Retardo ($ MXN)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.10"
+                        min="0"
+                        disabled={cfg.modoDescuentoRetardo !== 'POR_MINUTO'}
+                        value={cfg.costoPorMinutoRetardo}
+                        onChange={(e) =>
+                          handleUpdateConfig({
+                            costoPorMinutoRetardo: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="w-full rounded-xl px-3 py-2 bg-[#21222D] border border-white/[0.08] text-[#FEB95A] font-mono font-bold text-xs outline-none focus:border-[#A9DFD8] disabled:opacity-40"
+                      />
+                    </div>
+
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-[#E8E8EA]">
+                        <input
+                          type="checkbox"
+                          checked={cfg.incluirMinutosEnCeldaRetardo}
+                          onChange={(e) =>
+                            handleUpdateConfig({ incluirMinutosEnCeldaRetardo: e.target.checked })
+                          }
+                          className="w-4 h-4 rounded accent-[#A9DFD8]"
+                        />
+                        <span>Mostrar minutos en celda (ej. <code>1RET (-18m)</code>)</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de las 4 Incidencias Esenciales + Personalizadas */}
+                <div className="overflow-x-auto rounded-xl border border-white/[0.06] bg-[#171821]">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-[#171821] text-[10px] uppercase tracking-wider text-[#87888C] border-b border-white/[0.06]">
+                        <th className="p-3 text-center">Activa</th>
+                        <th className="p-3">Incidencia</th>
+                        <th className="p-3 text-center">Clave</th>
+                        <th className="p-3 text-center">Vista Celda</th>
+                        <th className="p-3">Col A: NOMBRE</th>
+                        <th className="p-3">Col B: OBSERVACIONES</th>
+                        <th className="p-3">Col C: CONCEPTO</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.05]">
+                      {cfg.reglasIncidencias.map(rule => {
+                        const previewCode = rule.prefijoCantidad
+                          ? `1${(rule.clave || '').trim().toUpperCase()}`
+                          : (rule.clave || '').trim().toUpperCase();
+
+                        return (
+                          <tr
+                            key={rule.id}
+                            className={`transition-colors ${
+                              rule.activa ? 'hover:bg-white/[0.02]' : 'opacity-50'
+                            }`}
+                          >
+                            <td className="p-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={rule.activa}
+                                onChange={(e) => handleUpdateRule(rule.id, { activa: e.target.checked })}
+                                className="w-4 h-4 rounded accent-[#A9DFD8] cursor-pointer"
+                              />
+                            </td>
+
+                            <td className="p-3">
+                              {rule.esPersonalizada ? (
+                                <div className="space-y-1.5">
+                                  <input
+                                    type="text"
+                                    value={rule.etiquetaSistema}
+                                    onChange={(e) =>
+                                      handleUpdateRule(rule.id, { etiquetaSistema: e.target.value })
+                                    }
+                                    className="w-full rounded-lg px-2 py-1 bg-[#21222D] border border-white/[0.08] text-white text-xs font-semibold"
+                                    placeholder="Nombre de incidencia"
+                                  />
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-[#87888C]">Cuando diga:</span>
+                                    <input
+                                      type="text"
+                                      value={rule.palabraClaveMatch || ''}
+                                      onChange={(e) =>
+                                        handleUpdateRule(rule.id, {
+                                          palabraClaveMatch: e.target.value.toUpperCase(),
+                                        })
+                                      }
+                                      className="w-28 rounded-lg px-2 py-0.5 bg-[#21222D] border border-white/[0.08] text-[#A9DFD8] font-mono text-[10px]"
+                                      placeholder="PALABRA CLAVE"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteCustomRule(rule.id)}
+                                      className="text-rose-400 hover:text-rose-300 p-1 cursor-pointer"
+                                      title="Eliminar incidencia personalizada"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className="font-bold text-white block">{rule.etiquetaSistema}</span>
+                                  <span className="text-[10px] text-[#87888C] font-mono">{rule.id}</span>
+                                </div>
+                              )}
+                            </td>
+
+                            <td className="p-3 text-center">
+                              <div className="flex items-center justify-center gap-1.5">
+                                <input
+                                  type="text"
+                                  value={rule.clave}
+                                  onChange={(e) =>
+                                    handleUpdateRule(rule.id, { clave: e.target.value.toUpperCase() })
+                                  }
+                                  className="w-16 text-center rounded-lg px-2 py-1 bg-[#21222D] border border-[#A9DFD8]/35 text-[#A9DFD8] font-mono font-bold text-xs uppercase outline-none"
+                                />
+                                <label
+                                  className="flex items-center gap-1 text-[10px] text-[#87888C] cursor-pointer"
+                                  title="Antepone cantidad al código (ej. 1FINJ)"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={rule.prefijoCantidad}
+                                    onChange={(e) =>
+                                      handleUpdateRule(rule.id, { prefijoCantidad: e.target.checked })
+                                    }
+                                    className="rounded accent-[#A9DFD8]"
+                                  />
+                                  <span>1+</span>
+                                </label>
+                              </div>
+                            </td>
+
+                            <td className="p-3 text-center">
+                              <span className="inline-block font-mono font-bold text-xs px-2 py-0.5 rounded bg-[#21222D] border border-white/[0.08] text-[#A9DFD8]">
+                                {previewCode}
+                              </span>
+                            </td>
+
+                            <td className="p-3">
+                              <input
+                                type="text"
+                                value={rule.nombreColA}
+                                onChange={(e) =>
+                                  handleUpdateRule(rule.id, { nombreColA: e.target.value.toUpperCase() })
+                                }
+                                className="w-36 rounded-lg px-2.5 py-1 bg-[#21222D] border border-white/[0.08] text-white font-mono text-xs uppercase outline-none focus:border-[#A9DFD8]"
+                              />
+                            </td>
+
+                            <td className="p-3">
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  value={rule.observacionesModo}
+                                  onChange={(e) =>
+                                    handleUpdateRule(rule.id, {
+                                      observacionesModo: e.target.value as 'SUPERVISOR' | 'FIJO',
+                                    })
+                                  }
+                                  className="rounded-lg px-2 py-1 bg-[#21222D] border border-white/[0.08] text-white text-[11px] outline-none"
+                                >
+                                  <option value="SUPERVISOR">Supervisor</option>
+                                  <option value="FIJO">Texto Fijo</option>
+                                </select>
+                                {rule.observacionesModo === 'FIJO' && (
+                                  <input
+                                    type="text"
+                                    value={rule.observacionesFijo}
+                                    onChange={(e) =>
+                                      handleUpdateRule(rule.id, {
+                                        observacionesFijo: e.target.value.toUpperCase(),
+                                      })
+                                    }
+                                    placeholder="Texto..."
+                                    className="w-28 rounded-lg px-2 py-1 bg-[#21222D] border border-[#FEB95A]/40 text-[#FEB95A] font-mono text-xs uppercase outline-none"
+                                  />
+                                )}
+                              </div>
+                            </td>
+
+                            <td className="p-3">
+                              <input
+                                type="text"
+                                value={rule.conceptoColC}
+                                onChange={(e) =>
+                                  handleUpdateRule(rule.id, {
+                                    conceptoColC: e.target.value.toUpperCase(),
+                                  })
+                                }
+                                className="w-40 rounded-lg px-2.5 py-1 bg-[#21222D] border border-white/[0.08] text-white font-mono text-xs uppercase outline-none focus:border-[#A9DFD8]"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Opciones de Formato General */}
+                <div className="p-3.5 rounded-xl bg-[#171821] border border-white/[0.06] flex flex-wrap items-center justify-between gap-4 text-xs">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer text-[#E8E8EA]">
+                      <input
+                        type="checkbox"
+                        checked={cfg.separarExtrasDoblesTriplesLFT}
+                        onChange={(e) =>
+                          handleUpdateConfig({ separarExtrasDoblesTriplesLFT: e.target.checked })
+                        }
+                        className="rounded accent-[#A9DFD8]"
+                      />
+                      <span>Separar Horas Extras Dobles (≤9h) y Triples (&gt;9h) LFT</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-[#E8E8EA]">
+                      <input
+                        type="checkbox"
+                        checked={cfg.soloSupervisoresLiberados}
+                        onChange={(e) =>
+                          handleUpdateConfig({ soloSupervisoresLiberados: e.target.checked })
+                        }
+                        className="rounded accent-[#A9DFD8]"
+                      />
+                      <span>Solo incluir listas liberadas por supervisor</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-[#E8E8EA]">
+                      <input
+                        type="checkbox"
+                        checked={cfg.incluirFilaVaciaSeparadora}
+                        onChange={(e) =>
+                          handleUpdateConfig({ incluirFilaVaciaSeparadora: e.target.checked })
+                        }
+                        className="rounded accent-[#A9DFD8]"
+                      />
+                      <span>Incluir fila vacía debajo del encabezado gris</span>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[#87888C]">Fecha en encabezado:</span>
+                    <select
+                      value={cfg.formatoEncabezadoFecha}
+                      onChange={(e) =>
+                        handleUpdateConfig({
+                          formatoEncabezadoFecha: e.target.value as 'M/D/YYYY' | 'DD/MM/YYYY',
+                        })
+                      }
+                      className="rounded-lg px-2.5 py-1 bg-[#21222D] border border-white/[0.08] text-white font-mono text-xs"
+                    >
+                      <option value="M/D/YYYY">M/D/YYYY</option>
+                      <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer del Modal */}
+              <div className="p-4 border-t border-white/[0.06] flex items-center justify-between bg-[#171821]/80 rounded-b-2xl">
+                <span className="text-xs text-[#87888C]">
+                  Nota: Cuando un día tiene Asistencia o Descanso, su celda queda vacía automáticamente.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsConfigModalOpen(false)}
+                  className="px-5 py-2 rounded-xl text-xs font-extrabold uppercase tracking-wider bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] transition-all cursor-pointer"
+                >
+                  Guardar y Cerrar ✓
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

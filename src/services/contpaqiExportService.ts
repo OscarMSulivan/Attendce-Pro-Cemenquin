@@ -10,55 +10,52 @@ import { PayrollRelease } from '../types/portal';
 
 export type IncidenceRuleId =
   | 'FALTA'
-  | 'PRIMA_DOMINICAL'
-  | 'ASISTENCIA'
   | 'RETARDO'
-  | 'VACACIONES'
-  | 'PERMISO_CON_GOCE'
-  | 'PERMISO_SIN_GOCE'
-  | 'HOME_OFFICE'
-  | 'OTRA_JUSTIFICACION'
-  | 'INCAPACIDAD'
-  | 'PASE_MEDICO'
-  | 'CHECADA_SIN_GAFETE'
-  | 'DESCANSO'
-  | 'FESTIVO'
-  | 'RST'
-  | 'INGRESO'
   | 'HORAS_EXTRAS_DOBLES'
   | 'HORAS_EXTRAS_TRIPLES'
   | string;
 
 export interface ContpaqiIncidenceRule {
   id: IncidenceRuleId;
-  etiquetaSistema: string;     // Nombre amigable en el configurador (ej. "Falta Injustificada", "Asistencia", "Retardo")
-  clave: string;               // Clave CONTPAQi (ej. "FINJ", "SRDN", "ASIS", "RET", "VAC")
-  prefijoCantidad: boolean;    // Si true, antepone el número al código en las celdas de fecha (ej. "1FINJ", "1SRDN")
-  nombreColA: string;          // Columna A ("NOMBRE"): ej. "PAGO 0", "GUARDIAS 12 HRS"
-  observacionesModo: 'SUPERVISOR' | 'FIJO'; // Si usa el nombre del supervisor o un texto fijo en Columna B ("OBSERVACIONES")
-  observacionesFijo: string;   // Texto fijo para Columna B cuando observacionesModo === 'FIJO' (ej. "SEMANA REDUCIDA")
-  conceptoColC: string;        // Columna C ("CONCEPTO"): ej. "FALTA INJUSTIFICADA", "PRIMA DOMINICAL"
-  montoColF: number;           // Columna F ("MONTO"): ej. 0 (muestra "-") o 168.75
-  activa: boolean;             // Si se incluye o no en el reporte de exportación a CONTPAQi
-  esPersonalizada?: boolean;   // Si fue agregada manualmente por el usuario
-  palabraClaveMatch?: string;  // Texto para empatar con day.incidencia en reglas personalizadas
+  etiquetaSistema: string;     // Nombre amigable en el configurador
+  clave: string;               // Clave CONTPAQi (ej. "FINJ", "RET", "1HE", "2HE")
+  prefijoCantidad: boolean;    // Si true, antepone el número al código en las celdas de fecha (ej. "1FINJ", "21HE")
+  nombreColA: string;          // Columna A ("NOMBRE"): ej. "PAGO 0", "DESCUENTO RETARDO", "TIEMPO EXTRA"
+  observacionesModo: 'SUPERVISOR' | 'FIJO';
+  observacionesFijo: string;
+  conceptoColC: string;        // Columna C ("CONCEPTO"): ej. "FALTA INJUSTIFICADA", "RETARDO"
+  montoColF: number;           // Columna F ("MONTO") base o tarifa
+  activa: boolean;
+  esPersonalizada?: boolean;
+  palabraClaveMatch?: string;
 }
 
 export interface ContpaqiConfig {
   tipoPeriodo: 'SEMANAL' | 'QUINCENAL' | 'CATORCENAL';
   ejercicio: number;
-  formatoEncabezadoFecha: 'M/D/YYYY' | 'DD/MM/YYYY'; // En la imagen de referencia es M/D/YYYY (ej. 10/8/2026)
-  incluirFilaVaciaSeparadora: boolean;              // Fila 2 en blanco debajo del encabezado gris (como en el formato)
-  separarExtrasDoblesTriplesLFT: boolean;           // Tope 9 horas dobles por semana según LFT
-  detectarPrimaDominicalAuto: boolean;              // Detecta automáticamente asistencia en domingo / guardia como Prima Dominical (SRDN)
-  soloSupervisoresLiberados: boolean;               // Filtrar solo nóminas liberadas por supervisor
+  formatoEncabezadoFecha: 'M/D/YYYY' | 'DD/MM/YYYY';
+  incluirFilaVaciaSeparadora: boolean;
+  separarExtrasDoblesTriplesLFT: boolean;
+  soloSupervisoresLiberados: boolean;
+  // Configuración de cálculo de descuento por retardo
+  modoDescuentoRetardo: 'POR_MINUTO' | 'POR_EVENTO' | 'SOLO_TIEMPO';
+  costoPorMinutoRetardo: number;       // Ej. $2.50 por minuto de retardo (o 0 si solo se reportan minutos/horas)
+  incluirMinutosEnCeldaRetardo: boolean; // Si true, muestra ej. "1RET (18m)" o los minutos a descontar
   reglasIncidencias: ContpaqiIncidenceRule[];
 }
 
+/**
+ * Catálogo simplificado con únicamente las 4 incidencias esenciales solicitadas por Nóminas:
+ * 1. FINJ — Falta Injustificada
+ * 2. RETARDO — Retardo (con cálculo automático de tiempo/monto a descontar)
+ * 3. HORAS_EXTRAS_DOBLES — Horas Extras Dobles (≤ 9h LFT)
+ * 4. HORAS_EXTRAS_TRIPLES — Horas Extras Triples (> 9h LFT)
+ * Nota: Cuando la celda está vacía ("") = Asistencia normal.
+ */
 export const DEFAULT_INCIDENCE_RULES: ContpaqiIncidenceRule[] = [
   {
     id: 'FALTA',
-    etiquetaSistema: 'Falta Injustificada',
+    etiquetaSistema: 'Falta Injustificada (FINJ)',
     clave: 'FINJ',
     prefijoCantidad: true,
     nombreColA: 'PAGO 0',
@@ -69,182 +66,14 @@ export const DEFAULT_INCIDENCE_RULES: ContpaqiIncidenceRule[] = [
     activa: true,
   },
   {
-    id: 'PRIMA_DOMINICAL',
-    etiquetaSistema: 'Prima Dominical / Semana Reducida',
-    clave: 'SRDN',
-    prefijoCantidad: true,
-    nombreColA: 'GUARDIAS 12 HRS',
-    observacionesModo: 'FIJO',
-    observacionesFijo: 'SEMANA REDUCIDA',
-    conceptoColC: 'PRIMA DOMINICAL',
-    montoColF: 168.75,
-    activa: true,
-  },
-  {
     id: 'RETARDO',
-    etiquetaSistema: 'Retardo',
+    etiquetaSistema: 'Retardo (Cálculo de Descuento)',
     clave: 'RET',
     prefijoCantidad: true,
-    nombreColA: 'INCIDENCIA TIEMPO',
+    nombreColA: 'DESCUENTO RETARDO',
     observacionesModo: 'SUPERVISOR',
     observacionesFijo: '',
     conceptoColC: 'RETARDO',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'ASISTENCIA',
-    etiquetaSistema: 'Asistencia Normal',
-    clave: 'ASIS',
-    prefijoCantidad: true,
-    nombreColA: 'ASISTENCIA',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'ASISTENCIA',
-    montoColF: 0,
-    activa: false,
-  },
-  {
-    id: 'VACACIONES',
-    etiquetaSistema: 'Vacaciones',
-    clave: 'VAC',
-    prefijoCantidad: true,
-    nombreColA: 'PRESTACIONES',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'VACACIONES',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'PERMISO_CON_GOCE',
-    etiquetaSistema: 'Permiso con Goce / Viaje',
-    clave: 'PCS',
-    prefijoCantidad: true,
-    nombreColA: 'PERMISOS',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'PERMISO CON GOCE',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'PERMISO_SIN_GOCE',
-    etiquetaSistema: 'Permiso sin Goce de Sueldo',
-    clave: 'PSS',
-    prefijoCantidad: true,
-    nombreColA: 'PAGO 0',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'PERMISO SIN GOCE',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'HOME_OFFICE',
-    etiquetaSistema: 'Solicitud de Home Office',
-    clave: 'HOFF',
-    prefijoCantidad: true,
-    nombreColA: 'ASISTENCIA REMOTA',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'HOME OFFICE',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'OTRA_JUSTIFICACION',
-    etiquetaSistema: 'Otra Justificación (Ej. Permiso Paternidad)',
-    clave: 'PCS',
-    prefijoCantidad: true,
-    nombreColA: 'PERMISOS ESPECIALES',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'PERMISO ESPECIAL / PATERNIDAD',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'INCAPACIDAD',
-    etiquetaSistema: 'Incapacidad IMSS / Médica',
-    clave: 'EG',
-    prefijoCantidad: true,
-    nombreColA: 'INCAPACIDADES',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'INCAPACIDAD',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'PASE_MEDICO',
-    etiquetaSistema: 'Pase Médico',
-    clave: 'PMED',
-    prefijoCantidad: true,
-    nombreColA: 'PERMISOS',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'PASE MEDICO',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'CHECADA_SIN_GAFETE',
-    etiquetaSistema: 'Checada sin Gafete (Validada Supervisor)',
-    clave: 'CSG',
-    prefijoCantidad: true,
-    nombreColA: 'AJUSTE CHECADA',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'CHECADA SIN GAFETE',
-    montoColF: 0,
-    activa: false,
-  },
-  {
-    id: 'DESCANSO',
-    etiquetaSistema: 'Día de Descanso',
-    clave: 'DESC',
-    prefijoCantidad: true,
-    nombreColA: 'DESCANSO SEMANAL',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'DESCANSO',
-    montoColF: 0,
-    activa: false,
-  },
-  {
-    id: 'FESTIVO',
-    etiquetaSistema: 'Día Festivo Oficial',
-    clave: 'FEST',
-    prefijoCantidad: true,
-    nombreColA: 'DIA FESTIVO',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'FESTIVO',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'RST',
-    etiquetaSistema: 'RST (Descanso Trabajado / Guardia)',
-    clave: 'RST',
-    prefijoCantidad: true,
-    nombreColA: 'GUARDIAS 12 HRS',
-    observacionesModo: 'FIJO',
-    observacionesFijo: 'SEMANA REDUCIDA',
-    conceptoColC: 'RST',
-    montoColF: 0,
-    activa: true,
-  },
-  {
-    id: 'INGRESO',
-    etiquetaSistema: 'Ingreso de Empleado',
-    clave: 'ING',
-    prefijoCantidad: true,
-    nombreColA: 'ALTAS',
-    observacionesModo: 'SUPERVISOR',
-    observacionesFijo: '',
-    conceptoColC: 'INGRESO DE EMPLEADO',
     montoColF: 0,
     activa: true,
   },
@@ -280,12 +109,15 @@ export const DEFAULT_CONTPAQI_CONFIG: ContpaqiConfig = {
   formatoEncabezadoFecha: 'M/D/YYYY',
   incluirFilaVaciaSeparadora: true,
   separarExtrasDoblesTriplesLFT: true,
-  detectarPrimaDominicalAuto: true,
   soloSupervisoresLiberados: false,
+  modoDescuentoRetardo: 'POR_MINUTO',
+  costoPorMinutoRetardo: 2.5,
+  incluirMinutosEnCeldaRetardo: true,
   reglasIncidencias: DEFAULT_INCIDENCE_RULES,
 };
 
-const CONTPAQI_CONFIG_KEY = 'attendance_pro_v10_contpaqi_config_v2';
+// Nueva versión de llave para limpiar el exceso de reglas anteriores y dejar solo las 4 esenciales + personalizadas
+const CONTPAQI_CONFIG_KEY = 'attendance_pro_v10_contpaqi_config_v3_simplified';
 
 export function loadContpaqiConfig(): ContpaqiConfig {
   try {
@@ -296,13 +128,12 @@ export function loadContpaqiConfig(): ContpaqiConfig {
       ? parsed.reglasIncidencias
       : [];
 
-    // Asegurar que todas las reglas base existan manteniendo personalizaciones del usuario
+    // Mantener las 4 reglas esenciales en orden + las personalizadas que el usuario haya creado
     const mergedRules: ContpaqiIncidenceRule[] = DEFAULT_INCIDENCE_RULES.map(defRule => {
       const found = savedRules.find(r => r.id === defRule.id);
       return found ? { ...defRule, ...found } : defRule;
     });
 
-    // Agregar reglas personalizadas creadas por el usuario
     savedRules.forEach(r => {
       if (r.esPersonalizada && !mergedRules.some(m => m.id === r.id)) {
         mergedRules.push(r);
@@ -327,43 +158,42 @@ export function saveContpaqiConfig(cfg: ContpaqiConfig): void {
   }
 }
 
-/**
- * Fila exacta del formato solicitado por Nóminas / CONTPAQi:
- * NOMBRE | OBSERVACIONES | CONCEPTO | NUM EMPLEADO | NOMBRE | MONTO | Fecha1 | Fecha2 | ... | Fecha7
- */
 export interface ContpaqiFormatRow {
   rowKey: string;
   ruleId: IncidenceRuleId;
-  nombreColA: string;          // Ej. "PAGO 0", "GUARDIAS 12 HRS"
-  observacionesColB: string;   // Ej. "PATRICIA CONSEJO", "SEMANA REDUCIDA"
-  conceptoColC: string;        // Ej. "FALTA INJUSTIFICADA", "PRIMA DOMINICAL"
-  numEmpleadoColD: string;     // 5 dígitos ej. "00227", "00620"
-  nombreEmpleadoColE: string;  // Ej. "PATRICIA FERNANDA ROSETE LOPEZ DE LLERGO"
-  montoColF: number;           // 0 -> "-", 168.75 -> 168.75
+  nombreColA: string;
+  observacionesColB: string;
+  conceptoColC: string;
+  numEmpleadoColD: string;
+  nombreEmpleadoColE: string;
+  montoColF: number;
+  minutosRetardoAcumulados?: number;
+  horasDescuentoRetardo?: number;
   supervisor: string;
   estatusLiberacion: 'LIBERADO' | 'PENDIENTE';
   origenSupervisor: boolean;
   totalOcurrenciasSemana: number;
-  celdasPorFecha: Record<string, string>; // isoDate -> ej. "1FINJ", "1SRDN", ""
+  celdasPorFecha: Record<string, string>;
 }
 
 export interface ContpaqiMovementRow {
-  codigoEmpleado: string;     // 5 dígitos ej. "00615"
+  codigoEmpleado: string;
   nombreEmpleado: string;
   supervisor: string;
   estatusLiberacion: 'LIBERADO' | 'PENDIENTE';
   ejercicio: number;
   tipoPeriodo: string;
   numeroPeriodo: number;
-  fechaISO: string;           // YYYY-MM-DD
-  fechaContpaqi: string;      // DD/MM/YYYY
-  claveIncidencia: string;    // Ej. 1FINJ, 1SRDN, 1VAC, etc.
+  fechaISO: string;
+  fechaContpaqi: string;
+  claveIncidencia: string;
   nombreColA: string;
   observacionesColB: string;
   conceptoDescripcion: string;
   monto: number;
-  valor: number;              // 1 (día) o cantidad de horas
-  unidad: 'DÍAS' | 'HORAS';
+  minutosRetardo?: number;
+  valor: number;
+  unidad: 'DÍAS' | 'HORAS' | 'MINUTOS';
   origenSupervisor: boolean;
   respaldoArchivo?: string;
 }
@@ -384,16 +214,64 @@ function formatISOToDDMMYYYY(isoDate: string): string {
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
-function buildCellCode(rule: ContpaqiIncidenceRule, cantidad = 1): string {
+function parseTimeMinutes(timeStr?: string): number | null {
+  if (!timeStr || !timeStr.includes(':')) return null;
+  const m = timeStr.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if (isNaN(hh) || isNaN(mm)) return null;
+  return hh * 60 + mm;
+}
+
+/**
+ * Calcula cuántos minutos de retardo tuvo el colaborador en ese día comparando
+ * su hora de entrada real contra la hora de entrada de su horario programado.
+ */
+export function calcularMinutosRetardoDia(day: ProcessedDay): number {
+  const realMin = parseTimeMinutes(day.entrada);
+  if (realMin === null) return 15; // Si fue marcado manualmente como Retardo sin hora exacta, estimar 15 min
+
+  if (day.horarioProgramado && day.horarioProgramado.entrada) {
+    const schedMin = parseTimeMinutes(day.horarioProgramado.entrada);
+    if (schedMin !== null) {
+      let diff = realMin - schedMin;
+      if (diff < -720) diff += 1440;
+      if (diff > 0) return diff;
+    }
+  }
+
+  // Fallback si el horario estándar entra a las 08:00 (480 min)
+  if (realMin > 480 && realMin < 720) {
+    return realMin - 480;
+  }
+  return 15;
+}
+
+function buildCellCode(
+  rule: ContpaqiIncidenceRule,
+  cantidad = 1,
+  minutosRetardo?: number,
+  incluirMinutosRetardo?: boolean
+): string {
   const cleanClave = (rule.clave || '').trim().toUpperCase();
   if (!cleanClave) return '';
-  if (!rule.prefijoCantidad) return cleanClave;
-  const qtyStr = Number.isInteger(cantidad) ? String(cantidad) : cantidad.toFixed(1);
-  // Si el usuario ya escribió "1FINJ" en la clave y cantidad es 1, no duplicar a "11FINJ"
-  if (cantidad === 1 && /^\d+/.test(cleanClave) && cleanClave !== '1HE' && cleanClave !== '2HE') {
-    return cleanClave;
+
+  let baseCode = cleanClave;
+  if (rule.prefijoCantidad) {
+    const qtyStr = Number.isInteger(cantidad) ? String(cantidad) : cantidad.toFixed(1);
+    if (cantidad === 1 && /^\d+/.test(cleanClave) && cleanClave !== '1HE' && cleanClave !== '2HE') {
+      baseCode = cleanClave;
+    } else {
+      baseCode = `${qtyStr}${cleanClave}`;
+    }
   }
-  return `${qtyStr}${cleanClave}`;
+
+  if (rule.id === 'RETARDO' && incluirMinutosRetardo && minutosRetardo && minutosRetardo > 0) {
+    return `${baseCode} (-${minutosRetardo}m)`;
+  }
+
+  return baseCode;
 }
 
 function resolveObservacionesColB(rule: ContpaqiIncidenceRule, supervisorName: string): string {
@@ -404,19 +282,19 @@ function resolveObservacionesColB(rule: ContpaqiIncidenceRule, supervisorName: s
 }
 
 /**
- * Identifica qué reglas de incidencia aplican a un día específico de un colaborador
+ * Identifica qué reglas de incidencia aplican a un día específico.
+ * Nota: Cuando es Asistencia normal o Descanso, regresa vacío (celda vacía = Asistencia).
  */
 function matchDayRules(
   day: ProcessedDay,
   cfg: ContpaqiConfig,
   rulesMap: Map<string, ContpaqiIncidenceRule>
-): { rule: ContpaqiIncidenceRule; cantidad: number }[] {
-  const matched: { rule: ContpaqiIncidenceRule; cantidad: number }[] = [];
+): { rule: ContpaqiIncidenceRule; cantidad: number; minutosRetardo?: number }[] {
+  const matched: { rule: ContpaqiIncidenceRule; cantidad: number; minutosRetardo?: number }[] = [];
   const inc = (day.incidencia || '').trim().toUpperCase();
   const adv = (day.advertencia || '').trim().toUpperCase();
-  const dayNameUpper = (day.dayName || '').trim().toUpperCase();
 
-  // 1. Verificar primero reglas personalizadas por palabra clave
+  // 1. Verificar primero reglas personalizadas agregadas por el usuario
   cfg.reglasIncidencias.forEach(r => {
     if (r.esPersonalizada && r.palabraClaveMatch) {
       const kw = r.palabraClaveMatch.trim().toUpperCase();
@@ -426,89 +304,22 @@ function matchDayRules(
     }
   });
 
-  // 2. Clasificación estándar exhaustiva de todas las incidencias del sistema
+  // 2. Clasificación de las incidencias esenciales (Falta Injustificada y Retardo)
+  // Si es Asistencia o Descanso -> queda vacío ("")
   if (inc.includes('FALTA') || adv.includes('FALTA CONFIRMADA')) {
     const r = rulesMap.get('FALTA');
     if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('PRIMA DOMINICAL') || inc.includes('SEMANA REDUCIDA') || inc.includes('SRDN')) {
-    const r = rulesMap.get('PRIMA_DOMINICAL');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('VACACIONES') || inc === 'VAC') {
-    const r = rulesMap.get('VACACIONES');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('SIN GOCE')) {
-    const r = rulesMap.get('PERMISO_SIN_GOCE');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('HOME OFFICE') || inc.includes('REMOTO')) {
-    const r = rulesMap.get('HOME_OFFICE');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.startsWith('OTRA:') || inc === 'OTRO' || inc.includes('PATERNIDAD') || inc.includes('MATRIMONIO') || inc.includes('DEFUNCI')) {
-    const r = rulesMap.get('OTRA_JUSTIFICACION');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('CON GOCE') || inc.includes('VIAJE') || inc.includes('COMISI')) {
-    const r = rulesMap.get('PERMISO_CON_GOCE');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('INCAPACIDAD')) {
-    const r = rulesMap.get('INCAPACIDAD');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('PASE') || inc.includes('MEDICO') || inc.includes('MÉDICO')) {
-    const r = rulesMap.get('PASE_MEDICO');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc === 'RST') {
-    const r = rulesMap.get('RST');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('FESTIVO')) {
-    const r = rulesMap.get('FESTIVO');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('INGRESO')) {
-    const r = rulesMap.get('INGRESO');
-    if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('CHECADA SIN GAFETE') || inc.includes('CHECADO SIN GAFETE') || day.tipoModificacionSupervisor === 'formato_checada_sin_gafete') {
-    const rCSG = rulesMap.get('CHECADA_SIN_GAFETE');
-    if (rCSG && rCSG.activa) {
-      matched.push({ rule: rCSG, cantidad: 1 });
-    }
-    const rAsis = rulesMap.get('ASISTENCIA');
-    if (rAsis && rAsis.activa) {
-      matched.push({ rule: rAsis, cantidad: 1 });
-    }
-  } else if (inc.includes('DESCANSO') || (!day.horarioProgramado && day.hNormal === 0 && day.hExtra === 0 && !inc)) {
-    const r = rulesMap.get('DESCANSO');
-    if (r) matched.push({ rule: r, cantidad: 1 });
   } else if (inc.includes('RETARDO') || adv.includes('RETARDO')) {
     const rRet = rulesMap.get('RETARDO');
-    if (rRet) matched.push({ rule: rRet, cantidad: 1 });
-    // Si también tienen activa la exportación de Asistencia y asistió con retardo:
-    const rAsis = rulesMap.get('ASISTENCIA');
-    if (rAsis && rAsis.activa && (day.hNormal > 0 || day.entrada !== '--:--')) {
-      matched.push({ rule: rAsis, cantidad: 1 });
-    }
-  } else if (inc === 'ASISTENCIA' || day.hNormal > 0 || (day.entrada && day.entrada !== '--:--')) {
-    const rAsis = rulesMap.get('ASISTENCIA');
-    if (rAsis) matched.push({ rule: rAsis, cantidad: 1 });
-  }
-
-  // 3. Detección automática de Prima Dominical / Semana Reducida si laboró en Domingo
-  if (
-    cfg.detectarPrimaDominicalAuto &&
-    dayNameUpper.startsWith('DOM') &&
-    (day.hNormal > 0 || day.hExtra > 0 || (day.entrada && day.entrada !== '--:--')) &&
-    !inc.includes('FALTA') &&
-    !matched.some(m => m.rule.id === 'PRIMA_DOMINICAL')
-  ) {
-    const rPrima = rulesMap.get('PRIMA_DOMINICAL');
-    if (rPrima) {
-      matched.push({ rule: rPrima, cantidad: 1 });
+    if (rRet) {
+      const minRet = calcularMinutosRetardoDia(day);
+      matched.push({ rule: rRet, cantidad: 1, minutosRetardo: minRet });
     }
   }
 
   return matched;
 }
 
-/**
- * Construye tanto las filas horizontales del Formato de Incidencias (idéntico a la captura)
- * como las filas verticales de movimientos TDD.
- */
 export function buildContpaqiPayrollData(
   reports: EmployeeReport[],
   weekNumber: number,
@@ -543,7 +354,6 @@ export function buildContpaqiPayrollData(
       headerLabel: formatISOToHeaderDate(isoDate, cfg.formatoEncabezadoFecha),
     }));
 
-  // Mapa para agrupar por (Empleado + ReglaIncidencia) para construir la matriz horizontal exacta de la imagen
   const groupedFormatRows = new Map<string, ContpaqiFormatRow>();
 
   const registerRuleOccurrence = (
@@ -551,8 +361,9 @@ export function buildContpaqiPayrollData(
     day: ProcessedDay,
     rule: ContpaqiIncidenceRule,
     cantidad: number,
-    unidad: 'DÍAS' | 'HORAS',
-    estatusLiberacion: 'LIBERADO' | 'PENDIENTE'
+    unidad: 'DÍAS' | 'HORAS' | 'MINUTOS',
+    estatusLiberacion: 'LIBERADO' | 'PENDIENTE',
+    minutosRetardoDia = 0
   ) => {
     if (!rule.activa) return;
 
@@ -562,14 +373,31 @@ export function buildContpaqiPayrollData(
     const nombreColA = (rule.nombreColA || 'GENERAL').trim().toUpperCase();
     const observacionesColB = resolveObservacionesColB(rule, supName);
     const conceptoColC = (rule.conceptoColC || rule.etiquetaSistema).trim().toUpperCase();
-    const cellCode = buildCellCode(rule, cantidad);
+    const cellCode = buildCellCode(
+      rule,
+      cantidad,
+      minutosRetardoDia,
+      cfg.incluirMinutosEnCeldaRetardo
+    );
+
+    // Calcular el monto del día para esta incidencia
+    let montoEvento = Number(rule.montoColF || 0);
+    if (rule.id === 'RETARDO') {
+      if (cfg.modoDescuentoRetardo === 'POR_MINUTO') {
+        montoEvento = Number((minutosRetardoDia * (cfg.costoPorMinutoRetardo || 0)).toFixed(2));
+      } else if (cfg.modoDescuentoRetardo === 'POR_EVENTO') {
+        montoEvento = Number(rule.montoColF || 0);
+      } else {
+        montoEvento = 0;
+      }
+    }
 
     const rowKey = `${rule.id}__${empId5}`;
     let existing = groupedFormatRows.get(rowKey);
     if (!existing) {
       const emptyDates: Record<string, string> = {};
       datesInPeriod.forEach(dt => {
-        emptyDates[dt.isoDate] = '';
+        emptyDates[dt.isoDate] = ''; // Vacío = Asistencia normal
       });
       existing = {
         rowKey,
@@ -579,7 +407,9 @@ export function buildContpaqiPayrollData(
         conceptoColC,
         numEmpleadoColD: empId5,
         nombreEmpleadoColE: empNameUpper,
-        montoColF: Number(rule.montoColF || 0),
+        montoColF: 0,
+        minutosRetardoAcumulados: 0,
+        horasDescuentoRetardo: 0,
         supervisor: supName,
         estatusLiberacion,
         origenSupervisor: Boolean(day.modificadoPorSupervisor),
@@ -595,6 +425,16 @@ export function buildContpaqiPayrollData(
     existing.celdasPorFecha[day.isoDate] = cellCode;
     existing.totalOcurrenciasSemana += cantidad;
 
+    if (rule.id === 'RETARDO') {
+      existing.minutosRetardoAcumulados = (existing.minutosRetardoAcumulados || 0) + minutosRetardoDia;
+      existing.horasDescuentoRetardo = Number(((existing.minutosRetardoAcumulados || 0) / 60).toFixed(2));
+      existing.montoColF = Number((existing.montoColF + montoEvento).toFixed(2));
+      // Mostrar en CONCEPTO el detalle del tiempo a descontar
+      existing.conceptoColC = `${conceptoColC} (-${existing.minutosRetardoAcumulados} MIN / ${existing.horasDescuentoRetardo} HRS)`;
+    } else {
+      existing.montoColF = Number(rule.montoColF || 0);
+    }
+
     movements.push({
       codigoEmpleado: empId5,
       nombreEmpleado: empNameUpper,
@@ -608,10 +448,14 @@ export function buildContpaqiPayrollData(
       claveIncidencia: cellCode,
       nombreColA,
       observacionesColB,
-      conceptoDescripcion: conceptoColC,
-      monto: Number(rule.montoColF || 0),
-      valor: cantidad,
-      unidad,
+      conceptoDescripcion:
+        rule.id === 'RETARDO'
+          ? `${conceptoColC} (Descuento: ${minutosRetardoDia} min)`
+          : conceptoColC,
+      monto: montoEvento,
+      minutosRetardo: minutosRetardoDia > 0 ? minutosRetardoDia : undefined,
+      valor: rule.id === 'RETARDO' && minutosRetardoDia > 0 ? minutosRetardoDia : cantidad,
+      unidad: rule.id === 'RETARDO' && minutosRetardoDia > 0 ? 'MINUTOS' : unidad,
       origenSupervisor: Boolean(day.modificadoPorSupervisor),
       respaldoArchivo: day.formatoSubidoNombre,
     });
@@ -630,14 +474,21 @@ export function buildContpaqiPayrollData(
     let horasExtrasAcumuladasSemana = 0;
 
     rep.dias.forEach(d => {
-      // 1. Evaluar incidencias de día (Falta, Prima Dominical, Retardo, Asistencia, Vacaciones, Permisos, etc.)
+      // 1. Evaluar incidencias de día (Falta Injustificada, Retardo con cálculo de descuento y personalizadas)
       const dayMatches = matchDayRules(d, cfg, rulesMap);
-      dayMatches.forEach(({ rule, cantidad }) => {
-        registerRuleOccurrence(rep, d, rule, cantidad, 'DÍAS', estatusLiberacion);
+      dayMatches.forEach(({ rule, cantidad, minutosRetardo }) => {
+        registerRuleOccurrence(
+          rep,
+          d,
+          rule,
+          cantidad,
+          'DÍAS',
+          estatusLiberacion,
+          minutosRetardo || 0
+        );
       });
 
-      // 2. Evaluar Horas Extras (Dobles y Triples)
-      // Solo se exporta y genera clave a CONTPAQi si el supervisor / RH la autorizó explícitamente (horasExtrasAutorizadas === true)
+      // 2. Evaluar Horas Extras Autorizadas (Dobles ≤ 9h y Triples > 9h)
       if (d.hExtra > 0 && d.horasExtrasAutorizadas === true) {
         const prevExtra = horasExtrasAcumuladasSemana;
         const newExtraTotal = Number((prevExtra + d.hExtra).toFixed(2));
@@ -679,7 +530,6 @@ export function buildContpaqiPayrollData(
     });
   });
 
-  // Ordenar las filas primero por el orden del catálogo de reglas (ej. FALTA INJUSTIFICADA primero, luego PRIMA DOMINICAL, etc., como en la captura) y luego por NUM EMPLEADO
   const ruleOrderMap = new Map<string, number>();
   cfg.reglasIncidencias.forEach((r, idx) => ruleOrderMap.set(r.id, idx));
 
@@ -695,11 +545,6 @@ export function buildContpaqiPayrollData(
   return { formatRows, movements, datesInPeriod };
 }
 
-/**
- * Genera y descarga el archivo Excel (.xlsx) con el formato EXACTO solicitado en la captura:
- * Columnas:
- * NOMBRE | OBSERVACIONES | CONCEPTO | NUM EMPLEADO | NOMBRE | MONTO | 10/8/2026 | 10/9/2026 | ...
- */
 export async function exportContpaqiExcel(
   reports: EmployeeReport[],
   weekNumber: number,
@@ -717,10 +562,6 @@ export async function exportContpaqiExcel(
   workbook.creator = 'AttendancePRO — Módulo CONTPAQi Nóminas';
   workbook.created = new Date();
 
-  // =========================================================================
-  // PESTAÑA 1: FORMATO OFICIAL DE INCIDENCIAS (IDÉNTICO A LA CAPTURA DE USUARIO)
-  // NOMBRE | OBSERVACIONES | CONCEPTO | NUM EMPLEADO | NOMBRE | MONTO | Fechas...
-  // =========================================================================
   const wsFormat = workbook.addWorksheet('Incidencias_CONTPAQi', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
@@ -735,7 +576,6 @@ export async function exportContpaqiExcel(
     ...datesInPeriod.map(d => d.headerLabel),
   ];
 
-  // Fila 1: Encabezado gris (#C0C0C0) con texto negro centrado y bordes delgados
   const headerRow = wsFormat.getRow(1);
   headerRow.values = headers;
   headerRow.height = 22;
@@ -753,7 +593,6 @@ export async function exportContpaqiExcel(
 
   let currentRowIdx = 2;
 
-  // Fila 2: Fila vacía separadora opcional (idéntica a la imagen proporcionada)
   if (cfg.incluirFilaVaciaSeparadora) {
     const emptyRow = wsFormat.getRow(currentRowIdx);
     emptyRow.values = headers.map(() => '');
@@ -769,7 +608,6 @@ export async function exportContpaqiExcel(
     currentRowIdx++;
   }
 
-  // Filas de datos
   formatRows.forEach(row => {
     const r = wsFormat.getRow(currentRowIdx++);
     const montoVal: string | number = row.montoColF > 0 ? Number(row.montoColF.toFixed(2)) : '-';
@@ -803,11 +641,9 @@ export async function exportContpaqiExcel(
         right: { style: 'thin', color: { argb: 'FFD0D7DE' } },
       };
 
-      // Columna 4: NUM EMPLEADO siempre texto de 5 dígitos ('00227', '00615')
       if (colNumber === 4) {
         cell.numFmt = '@';
       }
-      // Columna 6: MONTO numérico con 2 decimales cuando es mayor a 0
       if (colNumber === 6 && typeof montoVal === 'number') {
         cell.numFmt = '#,##0.00';
       }
@@ -815,18 +651,15 @@ export async function exportContpaqiExcel(
   });
 
   wsFormat.columns = [
-    { width: 22 }, // NOMBRE (Ej. PAGO 0, GUARDIAS 12 HRS)
-    { width: 26 }, // OBSERVACIONES (Ej. PATRICIA CONSEJO, SEMANA REDUCIDA)
-    { width: 26 }, // CONCEPTO (Ej. FALTA INJUSTIFICADA, PRIMA DOMINICAL)
-    { width: 18 }, // NUM EMPLEADO (Ej. 00227)
-    { width: 42 }, // NOMBRE EMPLEADO
-    { width: 14 }, // MONTO
-    ...datesInPeriod.map(() => ({ width: 13 })), // 7 Fechas
+    { width: 22 },
+    { width: 26 },
+    { width: 32 },
+    { width: 18 },
+    { width: 42 },
+    { width: 14 },
+    ...datesInPeriod.map(() => ({ width: 14 })),
   ];
 
-  // =========================================================================
-  // PESTAÑA 2: DESGLOSE VERTICAL DE MOVIMIENTOS (TABLA TDD CONTPAQi)
-  // =========================================================================
   const wsTDD = workbook.addWorksheet('Movimientos_TDD_Vertical', {
     views: [{ state: 'frozen', ySplit: 1 }],
   });
@@ -841,7 +674,7 @@ export async function exportContpaqiExcel(
     'FECHA MOVIMIENTO',
     'VALOR',
     'UNIDAD',
-    'MONTO',
+    'MONTO DESCUENTO / PAGO',
     'ESTATUS SUPERVISOR',
   ];
 
@@ -885,12 +718,12 @@ export async function exportContpaqiExcel(
     { width: 38 },
     { width: 20 },
     { width: 24 },
-    { width: 26 },
+    { width: 32 },
     { width: 16 },
     { width: 18 },
     { width: 12 },
     { width: 12 },
-    { width: 14 },
+    { width: 22 },
     { width: 18 },
   ];
 
@@ -903,9 +736,6 @@ export async function exportContpaqiExcel(
   return fileName;
 }
 
-/**
- * Descarga archivo .TXT delimitado por tabuladores con la misma estructura de columnas
- */
 export function exportContpaqiTxt(
   reports: EmployeeReport[],
   weekNumber: number,

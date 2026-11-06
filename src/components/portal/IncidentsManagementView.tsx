@@ -4,22 +4,17 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Palmtree, 
-  Plus, 
-  CheckCircle2, 
-  XCircle, 
-  Clock, 
-  FileText, 
-  Filter, 
-  Calendar, 
-  User, 
-  ShieldCheck, 
-  MessageSquare,
-  Sparkles,
-  Info,
+import {
+  Palmtree,
+  Plus,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Calendar,
   Paperclip,
-  Download
+  Download,
+  Search,
+  FileText
 } from 'lucide-react';
 import { IncidentRequest, IncidentStatus, PortalUser } from '../../types/portal';
 import saveAs from 'file-saver';
@@ -43,13 +38,10 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
   const [statusFilter, setStatusFilter] = useState<string>('todos');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // Filtrado de incidencias
-  // Si es supervisor, ÚNICAMENTE ve las solicitudes que él mismo ingresó (aislamiento total entre supervisores)
   const userFiltered = incidents.filter((inc) => {
     if (isRHOrAdmin) return true;
     return inc.solicitanteId === currentUser.id;
   });
-
 
   const displayList = userFiltered.filter((inc) => {
     if (statusFilter !== 'todos' && inc.status !== statusFilter) return false;
@@ -58,7 +50,9 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
       const termNum = parseInt(term, 10);
       const termNumStr = !isNaN(termNum) ? termNum.toString() : '';
       const matchName = inc.empleadoNombre.toLowerCase().includes(term);
-      const matchId = inc.empleadoId.toLowerCase().includes(term) || (Boolean(termNumStr) && inc.empleadoId.includes(termNumStr));
+      const matchId =
+        inc.empleadoId.toLowerCase().includes(term) ||
+        (Boolean(termNumStr) && inc.empleadoId.includes(termNumStr));
       const matchMotivo = inc.motivo.toLowerCase().includes(term);
       const matchTipo = inc.tipo.toLowerCase().includes(term);
       return matchName || matchId || matchMotivo || matchTipo;
@@ -70,20 +64,20 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
     switch (status) {
       case 'aprobada':
         return (
-          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/35">
             <CheckCircle2 className="w-3 h-3" /> Aprobada por RH
           </span>
         );
       case 'rechazada':
         return (
-          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/35">
             <XCircle className="w-3 h-3" /> Rechazada
           </span>
         );
       case 'pendiente':
       default:
         return (
-          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-[#FEB95A]/15 text-[#FEB95A] border border-[#FEB95A]/35">
             <Clock className="w-3 h-3" /> Pendiente de Revisión
           </span>
         );
@@ -91,61 +85,88 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
   };
 
   const pendingCount = userFiltered.filter((i) => i.status === 'pendiente').length;
+  const approvedCount = userFiltered.filter((i) => i.status === 'aprobada').length;
+  const rejectedCount = userFiltered.filter((i) => i.status === 'rechazada').length;
 
   return (
-    <div className="space-y-6">
-      {/* Encabezado Principal */}
-      <div className="rounded-xl p-5 bg-slate-900/90 border border-slate-800 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
-              <Palmtree className="w-4 h-4" />
+    <div className="space-y-6 animate-fade-up">
+      {/* Encabezado Principal y Resumen Bento (#21222D / #171821 / #A9DFD8) */}
+      <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/35 flex items-center justify-center text-[#A9DFD8] shrink-0">
+              <FileText className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-100">
-                {isRHOrAdmin ? 'Bandeja de Incidencias y Vacaciones (RH)' : 'Mis Solicitudes de Vacaciones e Incidencias'}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
                 {isRHOrAdmin
-                  ? 'Gestiona, autoriza o rechaza solicitudes de supervisores. Al aprobarse, se integran en automático al motor de asistencia.'
-                  : 'Registra vacaciones para ti o para los colaboradores asignados a tu supervisión.'}
+                  ? 'Bandeja de Incidencias y Solicitudes (RH)'
+                  : 'Mis Solicitudes e Incidencias Registradas'}
+              </h2>
+              <p className="text-xs text-[#87888C] mt-0.5">
+                {isRHOrAdmin
+                  ? 'Autoriza o rechaza solicitudes de supervisores. Al aprobarse, se reflejan automáticamente en el cálculo de asistencia.'
+                  : 'Consulta el estatus de tus formatos de checada sin gafete, permisos y solicitudes enviadas a Recursos Humanos.'}
               </p>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onOpenNewModal}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-emerald-600/20"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-xs font-extrabold uppercase tracking-wider transition-all shadow-md shadow-[#A9DFD8]/15 cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Nueva Solicitud</span>
           </button>
         </div>
-      </div>
 
-      {/* Banner Informativo de Sincronización Automática */}
-      <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs flex items-center gap-2.5">
-        <Info className="w-4 h-4 shrink-0 text-blue-400" />
-        <div>
-          <span>
-            <strong>Sincronización Inteligente:</strong> Toda incidencia o vacación aprobada se refleja instantáneamente en el cálculo de horas, eliminando alertas de falta y marcando las checadas en el reporte Excel generado.
-          </span>
+        {/* 4 Tarjetas Internas Estilo "Today's Sales" */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
+          <div className="p-4 rounded-xl bg-[#171821] border border-white/[0.04]">
+            <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-white">
+              {userFiltered.length}
+            </p>
+            <p className="text-xs font-medium text-[#E8E8EA] mt-1">Total Solicitudes</p>
+            <p className="text-[10px] font-mono text-[#20AEF3] mt-1">Registradas en sistema</p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#171821] border border-white/[0.04]">
+            <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-[#FEB95A]">
+              {pendingCount}
+            </p>
+            <p className="text-xs font-medium text-[#E8E8EA] mt-1">Pendientes</p>
+            <p className="text-[10px] font-mono text-[#FEB95A] mt-1">Por validar en RH</p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#171821] border border-white/[0.04]">
+            <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-[#A9DFD8]">
+              {approvedCount}
+            </p>
+            <p className="text-xs font-medium text-[#E8E8EA] mt-1">Aprobadas</p>
+            <p className="text-[10px] font-mono text-[#A9DFD8] mt-1">Sincronizadas en nómina</p>
+          </div>
+
+          <div className="p-4 rounded-xl bg-[#171821] border border-white/[0.04]">
+            <p className="text-xl sm:text-2xl font-extrabold font-mono tabular-nums text-rose-400">
+              {rejectedCount}
+            </p>
+            <p className="text-xs font-medium text-[#E8E8EA] mt-1">Rechazadas</p>
+            <p className="text-[10px] font-mono text-rose-400 mt-1">No procedentes</p>
+          </div>
         </div>
       </div>
 
       {/* Barra de Filtros y Búsqueda */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-1 p-1 bg-slate-900/80 rounded-xl border border-slate-800 overflow-x-auto">
+      <div className="p-4 rounded-2xl bg-[#21222D] border border-white/[0.06] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 p-1 bg-[#171821] rounded-xl border border-white/[0.06] overflow-x-auto">
           <button
             type="button"
             onClick={() => setStatusFilter('todos')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'todos'
-                ? 'bg-slate-800 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#A9DFD8] text-[#171821] shadow-sm'
+                : 'text-[#87888C] hover:text-white'
             }`}
           >
             Todas ({userFiltered.length})
@@ -153,15 +174,15 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
           <button
             type="button"
             onClick={() => setStatusFilter('pendiente')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
               statusFilter === 'pendiente'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#FEB95A] text-[#171821] shadow-sm'
+                : 'text-[#87888C] hover:text-white'
             }`}
           >
             <span>Pendientes</span>
             {pendingCount > 0 && (
-              <span className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 font-black text-[9px] flex items-center justify-center">
+              <span className="px-1.5 py-0.2 rounded-full bg-[#171821] text-[#FEB95A] font-black text-[10px] font-mono">
                 {pendingCount}
               </span>
             )}
@@ -169,105 +190,106 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
           <button
             type="button"
             onClick={() => setStatusFilter('aprobada')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'aprobada'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-[#A9DFD8] text-[#171821] shadow-sm'
+                : 'text-[#87888C] hover:text-white'
             }`}
           >
-            Aprobadas
+            Aprobadas ({approvedCount})
           </button>
           <button
             type="button"
             onClick={() => setStatusFilter('rechazada')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'rechazada'
-                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'text-[#87888C] hover:text-white'
             }`}
           >
-            Rechazadas
+            Rechazadas ({rejectedCount})
           </button>
         </div>
 
-        <div className="relative">
+        <div className="relative w-full sm:w-72">
+          <Search className="w-3.5 h-3.5 text-[#87888C] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por colaborador, ID o motivo..."
-            className="w-full sm:w-64 rounded-xl px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-200 text-xs outline-none focus:border-blue-500"
+            placeholder="Buscar colaborador, #ID (00615) o motivo..."
+            className="w-full rounded-xl pl-8 pr-3 py-2 bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] text-xs outline-none focus:border-[#A9DFD8] font-mono"
           />
         </div>
       </div>
 
       {/* Lista de Solicitudes */}
       {displayList.length === 0 ? (
-        <div className="p-12 text-center rounded-xl bg-slate-900/40 border border-slate-800/80">
-          <Palmtree className="w-10 h-10 mx-auto text-slate-600 mb-2" />
-          <p className="text-sm font-bold text-slate-300">No hay incidencias para mostrar</p>
-          <p className="text-xs text-slate-500 mt-1">
-            Usa el botón "Nueva Solicitud" para registrar permisos o periodos vacacionales.
+        <div className="p-12 text-center rounded-2xl bg-[#21222D] border border-white/[0.06]">
+          <Palmtree className="w-10 h-10 mx-auto text-[#87888C] mb-2" />
+          <p className="text-sm font-bold text-white">No hay solicitudes para mostrar</p>
+          <p className="text-xs text-[#87888C] mt-1">
+            Usa el botón &ldquo;Nueva Solicitud&rdquo; para registrar permisos o incidencias justificadas.
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3">
+        <div className="grid grid-cols-1 gap-3.5">
           {displayList.map((inc) => (
             <div
               key={inc.id}
-              className={`p-4 rounded-xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+              className={`p-5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                 inc.status === 'aprobada'
-                  ? 'bg-slate-900/80 border-slate-800'
+                  ? 'bg-[#21222D] border-[#A9DFD8]/35'
                   : inc.status === 'rechazada'
-                  ? 'bg-slate-900/60 border-rose-950/40'
-                  : 'bg-slate-900/95 border-amber-500/30 shadow-sm'
+                  ? 'bg-[#21222D] border-rose-500/30'
+                  : 'bg-[#21222D] border-[#FEB95A]/40 shadow-lg'
               }`}
             >
-              <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                  <span className="text-xs font-bold text-slate-100">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-[#20AEF3]/15 text-[#20AEF3] border border-[#20AEF3]/30">
+                    #{inc.empleadoId}
+                  </span>
+                  <span className="text-sm font-bold text-white">
                     {inc.empleadoNombre}
                   </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950 text-slate-400 border border-slate-800">
-                    ID: #{inc.empleadoId}
-                  </span>
-                  <span className="text-[11px] font-semibold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded border border-blue-500/20">
+                  <span className="text-[11px] font-semibold text-[#A9DFD8] bg-[#A9DFD8]/12 px-2.5 py-0.5 rounded-md border border-[#A9DFD8]/30">
                     {inc.tipo === 'Otro' && inc.especificacionOtro
                       ? `Otra Justificación: ${inc.especificacionOtro}`
                       : inc.tipo}
                   </span>
                   {inc.entradaPropuesta && inc.salidaPropuesta && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-mono">
-                      🟣 Checada Supervisor: {inc.entradaPropuesta} - {inc.salidaPropuesta}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#F2C8ED]/15 text-[#F2C8ED] border border-[#F2C8ED]/35 font-mono">
+                      Checada Supervisor: {inc.entradaPropuesta} - {inc.salidaPropuesta}
                     </span>
                   )}
                   {getStatusBadge(inc.status)}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 mt-1">
-                  <span className="flex items-center gap-1 font-mono text-slate-300">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#87888C]">
+                  <span className="flex items-center gap-1 font-mono text-[#E8E8EA]">
+                    <Calendar className="w-3.5 h-3.5 text-[#FEB95A]" />
                     {inc.fechaInicio} al {inc.fechaFin}
                   </span>
                   <span>·</span>
                   <span>
-                    Solicitado por: <strong className="text-slate-300">{inc.solicitanteNombre}</strong> ({inc.supervisorNombre})
+                    Solicitado por: <strong className="text-white">{inc.solicitanteNombre}</strong> ({inc.supervisorNombre})
                   </span>
                   <span>·</span>
                   <span>{new Date(inc.fechaCreacion).toLocaleDateString('es-MX')}</span>
                 </div>
 
-                <div className="mt-2 text-xs text-slate-300 bg-slate-950/80 p-2.5 rounded-lg border border-slate-800/80">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                <div className="text-xs text-[#E8E8EA] bg-[#171821] p-3 rounded-xl border border-white/[0.06]">
+                  <span className="text-[10px] uppercase font-bold text-[#87888C] block">
                     Motivo / Justificación:
                   </span>
                   <p className="mt-0.5">{inc.motivo}</p>
                 </div>
 
                 {inc.archivoFormatoNombre && inc.archivoFormatoBase64 && (
-                  <div className="mt-2 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-purple-950/30 border border-purple-500/30 text-xs">
-                    <span className="flex items-center gap-1.5 text-purple-200 font-semibold truncate">
-                      <Paperclip className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#171821] border border-[#F2C8ED]/35 text-xs">
+                    <span className="flex items-center gap-1.5 text-[#F2C8ED] font-semibold truncate">
+                      <Paperclip className="w-3.5 h-3.5 shrink-0" />
                       Formato adjunto: <strong>{inc.archivoFormatoNombre}</strong>
                     </span>
                     <button
@@ -287,15 +309,15 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
                           console.error(err);
                         }
                       }}
-                      className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-[10px] font-extrabold flex items-center gap-1 shrink-0 cursor-pointer"
                     >
-                      <Download className="w-3 h-3" /> Descargar Formato
+                      <Download className="w-3 h-3" /> Descargar
                     </button>
                   </div>
                 )}
 
                 {inc.notasResolucion && (
-                  <div className="mt-1.5 text-xs text-emerald-400 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+                  <div className="text-xs text-[#A9DFD8] bg-[#A9DFD8]/10 p-2.5 rounded-xl border border-[#A9DFD8]/30">
                     <span className="text-[10px] uppercase font-bold block">
                       Resolución RH ({inc.revisadoPor}):
                     </span>
@@ -310,10 +332,9 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
                   <button
                     type="button"
                     onClick={() => {
-                      const notes = prompt('Notas de aprobación (opcional):', 'Aprobado conforme a políticas de la empresa') || '';
-                      onApproveIncident(inc.id, notes);
+                      onApproveIncident(inc.id, 'Aprobado conforme a políticas de la empresa');
                     }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-sm"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-xs font-extrabold transition-all shadow-sm cursor-pointer"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5" />
                     <span>Aprobar</span>
@@ -321,10 +342,9 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
                   <button
                     type="button"
                     onClick={() => {
-                      const notes = prompt('Motivo del rechazo:', 'No cuenta con saldo disponible o fecha improcedente') || '';
-                      onRejectIncident(inc.id, notes);
+                      onRejectIncident(inc.id, 'No procedente conforme a validación de RH');
                     }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-all"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/35 text-xs font-bold transition-all cursor-pointer"
                   >
                     <XCircle className="w-3.5 h-3.5" />
                     <span>Rechazar</span>
