@@ -10,7 +10,47 @@ export type PortalModule =
   | 'semaforo'      // Semáforo de Nóminas y Dispersión
   | 'incidencias'   // Bandeja de Incidencias
   | 'contpaqi'      // Exportador CONTPAQi® Nóminas
-  | 'usuarios';     // Administración de Usuarios y Permisos
+  | 'tiempo_limite' // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
+  | 'smtp_correo'   // Configuración de Credenciales SMTP para Correo Automático
+  | 'usuarios';     // Administración de Usuarios, Roles y Permisos
+
+export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: string; description: string }> = {
+  nomina: {
+    short: 'Nómina',
+    title: 'Nómina y Asistencia',
+    description: 'Trabajo de checadas, horarios y asistencias de listas',
+  },
+  semaforo: {
+    short: 'Semáforo',
+    title: 'Semáforo de Nóminas',
+    description: 'Monitoreo de liberación y dispersión semanal',
+  },
+  incidencias: {
+    short: 'Incidencias',
+    title: 'Bandeja de Incidencias',
+    description: 'Solicitudes, permisos y validación de formatos',
+  },
+  contpaqi: {
+    short: 'CONTPAQi',
+    title: 'CONTPAQi® Nóminas',
+    description: 'Exportador y layout con claves de incidencias',
+  },
+  tiempo_limite: {
+    short: 'Tiempo Límite',
+    title: 'Límite de Tiempo para Trabajar Lista',
+    description: 'Definir el plazo (por horas) para que supervisores liberen su nómina',
+  },
+  smtp_correo: {
+    short: 'Correo SMTP',
+    title: 'Credenciales de Correo SMTP',
+    description: 'Configurar servidor, puerto, usuario y clave para alertas por email',
+  },
+  usuarios: {
+    short: 'Usuarios y Accesos',
+    title: 'Administración de Usuarios y Roles',
+    description: 'Crear credenciales, asignar listas y otorgar accesos a módulos',
+  },
+};
 
 export interface PortalUser {
   id: string;
@@ -36,22 +76,37 @@ export interface PortalUser {
  * Obtiene los módulos permitidos para un usuario, garantizando defaults según su rol si no fueron configurados manualmente.
  */
 export function getUserAllowedModules(user: PortalUser): PortalModule[] {
+  if (user.id === 'user_admin') {
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo', 'usuarios'];
+  }
   if (Array.isArray(user.allowedModules) && user.allowedModules.length > 0) {
     return user.allowedModules;
   }
   if (user.role === 'admin') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'usuarios'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo', 'usuarios'];
   }
   if (user.role === 'rh') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo'];
   }
   return ['nomina', 'incidencias'];
 }
 
 export function userHasModuleAccess(user: PortalUser, module: PortalModule): boolean {
-  if (user.role === 'admin') return true;
+  if (user.id === 'user_admin' || user.role === 'admin') return true;
   const mods = getUserAllowedModules(user);
   return mods.includes(module);
+}
+
+/**
+ * Determina si el usuario tiene acceso a al menos una sección del panel Administrativo
+ * (Gestión de Usuarios, Configuración de Tiempo Límite de Liberación o Configuración de Servidor SMTP).
+ */
+export function userHasAnyAdminPanelAccess(user: PortalUser): boolean {
+  return (
+    userHasModuleAccess(user, 'usuarios') ||
+    userHasModuleAccess(user, 'tiempo_limite') ||
+    userHasModuleAccess(user, 'smtp_correo')
+  );
 }
 
 /**
@@ -179,6 +234,9 @@ export interface PayrollRelease {
   excelTrabajadoNombre?: string;
   excelTrabajadoBase64?: string;
   fechaSubidaExcelTrabajado?: string;
+  notasRevision?: string;
+  revisadoPor?: string;
+  fechaRevision?: string;
 }
 
 export interface DispersalEmailDispatch {
@@ -190,6 +248,15 @@ export interface DispersalEmailDispatch {
   subject: string;
 }
 
+export interface EmailServerConfig {
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpSecure?: boolean;
+  smtpFromName?: string;
+}
+
 export interface PayrollDispersal {
   id: string; // ej: "disp_semana_43"
   semanaNumero: number;
@@ -199,6 +266,13 @@ export interface PayrollDispersal {
   mensaje?: string;
   supervisoresNotificados: string[];
   emailDispatches?: DispersalEmailDispatch[];
+  horasLimite?: number;             // ej: 24 (horas para liberar)
+  limiteLiberacion?: string;        // ISO string de fecha y hora límite
+  cancelada?: boolean;              // Indica si la dispersión fue cancelada globalmente
+  fechaCancelacion?: string;        // ISO string
+  canceladoPor?: string;            // Nombre de quien canceló
+  motivoCancelacion?: string;       // Motivo (ej: "No trabajó su nómina", etc.)
+  supervisoresCancelados?: string[]; // Si se cancelaron listas específicas
 }
 
 export interface PortalNotification {

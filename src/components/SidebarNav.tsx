@@ -24,7 +24,7 @@ import {
   Calendar,
   X,
 } from 'lucide-react';
-import { UserRole, PortalUser, userHasModuleAccess } from '../types/portal';
+import { UserRole, PortalUser, PortalModule, userHasModuleAccess, userHasAnyAdminPanelAccess } from '../types/portal';
 
 interface SidebarNavProps {
   activeTab: string;
@@ -77,10 +77,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     if (onCloseMobile) onCloseMobile();
   };
 
-  const checkAccess = (mod: 'nomina' | 'semaforo' | 'incidencias' | 'contpaqi' | 'usuarios') => {
+  const checkAccess = (mod: PortalModule) => {
     if (!currentUser) return true;
     return userHasModuleAccess(currentUser, mod);
   };
+
+  const hasAdminPanelAccess = !currentUser || userHasAnyAdminPanelAccess(currentUser);
+  const adminTabLabel = checkAccess('usuarios')
+    ? 'Usuarios y Permisos'
+    : 'Tiempo Límite y SMTP';
 
   const primaryItems = [
     {
@@ -130,12 +135,12 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     },
     {
       id: 'usuarios',
-      label: 'Usuarios y Permisos',
+      label: adminTabLabel,
       icon: Users,
       onClick: () => handleAction(() => onTabChange('usuarios')),
       isActive: activeTab === 'usuarios',
       badge: 0,
-      show: checkAccess('usuarios'),
+      show: hasAdminPanelAccess,
     },
   ].filter(item => item.show);
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Play,
   FileSpreadsheet,
@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { PayrollWeekOption } from '../utils/calendarUtils';
 import { ReadingMode } from '../types/attendance';
+import { HeadlessSelect, SelectOption } from './ui/HeadlessSelect';
 
 interface ControlsBarProps {
   payrollWeeks: PayrollWeekOption[];
@@ -88,65 +89,76 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   isPayrollReleased,
   releaseTooltip,
 }) => {
+  const weekOptions: SelectOption[] = useMemo(() => {
+    return payrollWeeks.map((w) => ({
+      value: w.value,
+      label: w.label,
+      badge: `Sem ${w.weekNumber}`,
+    }));
+  }, [payrollWeeks]);
+
+  const readingModeOptions: SelectOption[] = useMemo(
+    () => [
+      {
+        value: 'checadas_reales',
+        label: 'Por Checadas Reales',
+        sublabel: 'Une RST + Horario programado',
+      },
+      {
+        value: 'jerarquia_eventos',
+        label: 'Por Eventos + Rescate RST',
+        sublabel: 'Respeta marcas con rescate automático',
+      },
+    ],
+    []
+  );
+
+  const supervisorOptions: SelectOption[] = useMemo(() => {
+    return [
+      {
+        value: '',
+        label: `Todos los supervisores (${supervisors.length})`,
+        sublabel: 'Vista global consolidada',
+      },
+      ...supervisors.map((sup) => ({
+        value: sup,
+        label: sup,
+      })),
+    ];
+  }, [supervisors]);
+
   return (
     <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg mb-6 no-print animate-fade-up">
       {/* Fila 1: Selectores de Periodo, Modo de Lectura, Supervisor y Búsqueda */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {/* Periodo de Nómina */}
-        <div>
-          <label className="text-xs font-semibold text-[#87888C] block mb-1.5 flex items-center gap-1.5">
-            <CalendarDays className="w-3.5 h-3.5 text-[#FEB95A]" />
-            Periodo de Nómina
-          </label>
-          <select
-            value={selectedWeek}
-            onChange={(e) => onSelectWeek(e.target.value)}
-            className="w-full rounded-xl px-3 py-2 text-xs font-medium bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8] transition-all"
-          >
-            {payrollWeeks.map((w) => (
-              <option key={w.value} value={w.value}>
-                {w.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        <HeadlessSelect
+          label="Periodo de Nómina"
+          icon={<CalendarDays className="w-3.5 h-3.5 text-[#FEB95A]" />}
+          value={selectedWeek}
+          onChange={onSelectWeek}
+          options={weekOptions}
+          searchable={payrollWeeks.length > 6}
+        />
 
         {/* Modo de Lectura (Checadas vs Eventos) */}
-        <div>
-          <label className="text-xs font-semibold text-[#87888C] block mb-1.5 flex items-center gap-1.5">
-            <Cpu className="w-3.5 h-3.5 text-[#A9DFD8]" />
-            Modo de Lectura Biométrica
-          </label>
-          <select
-            value={readingMode}
-            onChange={(e) => onReadingModeChange(e.target.value as ReadingMode)}
-            className="w-full rounded-xl px-3 py-2 text-xs font-medium bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8] transition-all"
-            title="Elige cómo emparejar las entradas y salidas cuando existen eventos RST o múltiples marcas"
-          >
-            <option value="checadas_reales">Por Checadas Reales (Une RST + Horario)</option>
-            <option value="jerarquia_eventos">Por Eventos + Rescate RST</option>
-          </select>
-        </div>
+        <HeadlessSelect
+          label="Modo de Lectura Biométrica"
+          icon={<Cpu className="w-3.5 h-3.5 text-[#A9DFD8]" />}
+          value={readingMode}
+          onChange={(val) => onReadingModeChange(val as ReadingMode)}
+          options={readingModeOptions}
+        />
 
         {/* Filtrar por Supervisor */}
-        <div>
-          <label className="text-xs font-semibold text-[#87888C] block mb-1.5 flex items-center gap-1.5">
-            <UserCheck className="w-3.5 h-3.5 text-[#20AEF3]" />
-            Filtrar por Supervisor
-          </label>
-          <select
-            value={selectedSupervisor}
-            onChange={(e) => onSelectSupervisor(e.target.value)}
-            className="w-full rounded-xl px-3 py-2 text-xs font-medium bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8] transition-all"
-          >
-            <option value="">Todos los supervisores ({supervisors.length})</option>
-            {supervisors.map((sup) => (
-              <option key={sup} value={sup}>
-                {sup}
-              </option>
-            ))}
-          </select>
-        </div>
+        <HeadlessSelect
+          label="Filtrar por Supervisor"
+          icon={<UserCheck className="w-3.5 h-3.5 text-[#20AEF3]" />}
+          value={selectedSupervisor}
+          onChange={onSelectSupervisor}
+          options={supervisorOptions}
+          searchable={supervisors.length > 5}
+        />
 
         {/* Búsqueda rápida */}
         <div>

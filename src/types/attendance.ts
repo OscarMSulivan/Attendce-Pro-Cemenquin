@@ -116,6 +116,7 @@ export interface AppConfig {
   comidaDefault: number; // minutos (default: 60)
   modoLectura: ReadingMode; // 'checadas_reales' (recomendado) | 'jerarquia_eventos'
   minutosRebote: number; // minutos mínimos para no duplicar la misma checada (default: 15)
+  horasLimiteLiberacion: number; // horas permitidas para que supervisores liberen nómina tras dispersión (default: 24)
   theme: 'dark' | 'light';
 }
 

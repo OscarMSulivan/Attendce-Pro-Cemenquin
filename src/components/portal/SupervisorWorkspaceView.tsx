@@ -22,7 +22,8 @@ import {
   CalendarClock,
   Sparkles,
   Paperclip,
-  Filter
+  Filter,
+  Ban
 } from 'lucide-react';
 import { 
   PortalUser, 
@@ -40,6 +41,7 @@ import {
   MissingPunchFormatModal,
   ResolutionMode
 } from './MissingPunchFormatModal';
+import { DispersalCountdownTimer } from './DispersalCountdownTimer';
 import { Bell, Mail } from 'lucide-react';
 
 interface SupervisorWorkspaceViewProps {
@@ -69,6 +71,7 @@ interface SupervisorWorkspaceViewProps {
   onResolveMissingPunchDay: (payload: DayResolutionPayload) => void;
   onQuickConfirmFalta: (employeeId: string, isoDate: string) => void;
   onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
+  horasLimiteLiberacion?: number;
 }
 
 export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = ({
@@ -92,6 +95,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   onResolveMissingPunchDay,
   onQuickConfirmFalta,
   onToggleOvertimeApproval,
+  horasLimiteLiberacion = 24,
 }) => {
   const [activeModule, setActiveModule] = useState<'nominas' | 'equipo' | 'solicitudes'>('nominas');
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
@@ -149,12 +153,38 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
   // Buscar si RH dispersó la semana actual específicamente para esta lista de supervisor
   const currentDispersal = dispersals.find(d => d.semanaNumero === currentWeekNumber);
+
+  // Verificar si la dispersión fue cancelada globalmente o para este supervisor
+  const isCancelledForSupervisor = Boolean(
+    currentDispersal && (
+      currentDispersal.cancelada ||
+      currentDispersal.supervisoresCancelados?.some(
+        s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
+      )
+    )
+  );
+
   const isDispersedToSupervisor = Boolean(
     currentDispersal &&
+      !isCancelledForSupervisor &&
       currentDispersal.supervisoresNotificados.some(
         s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
       )
   ) && activeListWeeklyReports.length > 0;
+
+  // Calcular fecha límite efectiva a partir del plazo en horas configurado por Administración
+  const effectiveHorasLimite = currentDispersal?.horasLimite ?? horasLimiteLiberacion;
+  const effectiveLimiteLiberacion = useMemo(() => {
+    if (!currentDispersal) return undefined;
+    if (currentDispersal.limiteLiberacion) return currentDispersal.limiteLiberacion;
+    if (currentDispersal.fechaDispersion && effectiveHorasLimite > 0) {
+      const dispTime = new Date(currentDispersal.fechaDispersion).getTime();
+      if (!isNaN(dispTime)) {
+        return new Date(dispTime + effectiveHorasLimite * 3600000).toISOString();
+      }
+    }
+    return undefined;
+  }, [currentDispersal, effectiveHorasLimite]);
 
   // Notificación activa de dispersión para esta lista
   const activeListNotification = useMemo(() => {
@@ -435,7 +465,11 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                   ID: #{currentUser.employeeId}
                 </span>
               )}
-              {isDispersedToSupervisor ? (
+              {isCancelledForSupervisor ? (
+                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                  <Ban className="w-3 h-3 text-rose-400" /> Semana {currentWeekNumber} Dispersión Cancelada
+                </span>
+              ) : isDispersedToSupervisor ? (
                 <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                   <Send className="w-3 h-3 text-emerald-400" /> Semana {currentWeekNumber} Dispersada por Nóminas / RH
                 </span>
@@ -443,6 +477,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
                   <Clock className="w-3 h-3 text-slate-400" /> En espera de dispersión por Nóminas / RH
                 </span>
+              )}
+              {currentDispersal && (
+                <DispersalCountdownTimer
+                  limiteLiberacion={effectiveLimiteLiberacion}
+                  isReleased={isLiberada}
+                  isCancelled={isCancelledForSupervisor}
+                />
               )}
             </div>
             <h1 className="text-xl font-extrabold text-slate-100 mt-2">
@@ -476,7 +517,19 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
           {/* Estado de la Nómina Activa */}
           <div className="flex items-center gap-3">
-            {!isDispersedToSupervisor ? (
+            {isCancelledForSupervisor ? (
+              <div className="px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400">
+                  <Ban className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-rose-400 block">
+                    Nómina Semana {currentWeekNumber}
+                  </span>
+                  <span className="text-xs font-bold text-rose-300">Dispersión Cancelada</span>
+                </div>
+              </div>
+            ) : !isDispersedToSupervisor ? (
               <div className="px-4 py-3 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
                   <Clock className="w-5 h-5" />
@@ -588,7 +641,36 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       {/* MÓDULO 1: TRABAJAR LISTA DE NÓMINA EN EL SISTEMA Y LIBERAR */}
       {activeModule === 'nominas' && (
         <div className="space-y-6">
-          {!isDispersedToSupervisor ? (
+          {isCancelledForSupervisor ? (
+            <div className="p-8 rounded-2xl bg-rose-950/20 border border-rose-500/40 shadow-xl text-center max-w-2xl mx-auto my-4 animate-scale-in">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mx-auto mb-3">
+                <Ban className="w-6 h-6" />
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Dispersión Cancelada
+              </span>
+              <h2 className="text-base font-bold text-slate-100 mt-2">
+                Dispersión de Nómina Cancelada — Semana {currentWeekNumber}
+              </h2>
+              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                La dispersión de la lista de nómina para <strong>{targetSupervisor}</strong> fue cancelada por el área de Nóminas / RH.
+              </p>
+              {currentDispersal?.motivoCancelacion && (
+                <div className="mt-4 p-3.5 rounded-xl bg-slate-950/80 border border-rose-500/30 text-xs text-rose-200 text-left">
+                  <span className="font-bold text-rose-300 block mb-1">Motivo especificado por RH:</span>
+                  <span className="italic leading-relaxed block">&ldquo;{currentDispersal.motivoCancelacion}&rdquo;</span>
+                  {currentDispersal.fechaCancelacion && (
+                    <span className="block text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800">
+                      Cancelado el {new Date(currentDispersal.fechaCancelacion).toLocaleString('es-MX')} {currentDispersal.canceladoPor ? `por ${currentDispersal.canceladoPor}` : ''}
+                    </span>
+                  )}
+                </div>
+              )}
+              <p className="text-[11px] text-slate-400 mt-4">
+                La liberación de esta lista se encuentra bloqueada hasta que Nóminas vuelva a realizar una nueva dispersión autorizada.
+              </p>
+            </div>
+          ) : !isDispersedToSupervisor ? (
             <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl text-center max-w-2xl mx-auto my-4">
               <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto mb-3">
                 <Send className="w-6 h-6" />
@@ -617,6 +699,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                         Dispersada por {currentDispersal?.dispersadoPor || 'RH / Nóminas'}
                       </span>
+                      {effectiveLimiteLiberacion && (
+                        <DispersalCountdownTimer
+                          limiteLiberacion={effectiveLimiteLiberacion}
+                          isReleased={isLiberada}
+                          isCancelled={isCancelledForSupervisor}
+                        />
+                      )}
                     </div>
                     <h2 className="text-base font-bold text-slate-100 mt-1">
                       Mesa de Trabajo de Nómina — {targetSupervisor}
@@ -624,6 +713,23 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                     <p className="text-xs text-slate-400 mt-0.5">
                       Trabaja tu lista directamente aquí en el sistema: agrega checadas faltantes con su formato, registra permisos o confirma faltas según el horario programado, y libérala a RH.
                     </p>
+                    {effectiveLimiteLiberacion && !isLiberada && !isCancelledForSupervisor && (
+                      <div className="mt-2.5 inline-flex flex-wrap items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200">
+                        <CalendarClock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>
+                          Tiempo permitido por Administración: <strong>{effectiveHorasLimite} horas</strong> tras dispersión · Fecha límite:{' '}
+                          <strong className="font-mono">
+                            {new Date(effectiveLimiteLiberacion).toLocaleString('es-MX', {
+                              weekday: 'short',
+                              day: '2-digit',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </strong>
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Botones de Acción Principales (Sin acceso al catálogo ni asignación de horarios para el supervisor) */}

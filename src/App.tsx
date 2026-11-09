@@ -65,8 +65,10 @@ import {
   PortalNotification,
   PayrollModificationLog,
   IncidentType,
+  EmailServerConfig,
   getUserAllowedLists,
   userHasModuleAccess,
+  userHasAnyAdminPanelAccess,
 } from './types/portal';
 import { ListChecks, Send, Mail, CheckCircle2 } from 'lucide-react';
 import { ToastContainer, ToastItem, ToastType } from './components/Toast';
@@ -135,6 +137,7 @@ export default function App() {
   const [releases, setReleases] = useState<Record<string, PayrollRelease>>(() => PortalService.loadReleases());
   const [dispersals, setDispersals] = useState<PayrollDispersal[]>(() => PortalService.loadDispersals());
   const [notifications, setNotifications] = useState<PortalNotification[]>(() => PortalService.loadNotifications());
+  const [emailConfig, setEmailConfig] = useState<EmailServerConfig>(() => PortalService.loadEmailConfig());
   const [isNewIncidentModalOpen, setIsNewIncidentModalOpen] = useState<boolean>(false);
   const [initialIncidentEmployeeId, setInitialIncidentEmployeeId] = useState<string | undefined>(undefined);
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState<boolean>(false);
@@ -174,6 +177,10 @@ export default function App() {
           }
           if (serverData.config && Object.keys(serverData.config).length > 0) {
             setConfig(prev => ({ ...prev, ...serverData.config }));
+            if (serverData.config.emailServer) {
+              setEmailConfig(serverData.config.emailServer);
+              PortalService.saveEmailConfig(serverData.config.emailServer);
+            }
           }
           if (serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0) {
             setEmpleadosDB(serverData.empleadosDB);
@@ -443,19 +450,29 @@ export default function App() {
     };
   }, []);
 
-  // Manejar cambio de tema
-  const handleToggleTheme = () => {
-    const newTheme: 'dark' | 'light' = config.theme === 'dark' ? 'light' : 'dark';
-    const updated: AppConfig = { ...config, theme: newTheme };
-    setConfig(updated);
-    StorageService.saveConfig(updated);
-    if (newTheme === 'dark') {
+  // Sincronizar tema dual (dark / light) amigable en mount y al cambiar
+  useEffect(() => {
+    const isDark = config.theme !== 'light';
+    if (isDark) {
       document.documentElement.classList.add('dark');
       document.body.classList.remove('light-mode');
     } else {
       document.documentElement.classList.remove('dark');
       document.body.classList.add('light-mode');
     }
+  }, [config.theme]);
+
+  // Manejar cambio de tema con feedback Toast
+  const handleToggleTheme = () => {
+    const newTheme: 'dark' | 'light' = config.theme === 'dark' ? 'light' : 'dark';
+    const updated: AppConfig = { ...config, theme: newTheme };
+    setConfig(updated);
+    StorageService.saveConfig(updated);
+    showToast(
+      newTheme === 'dark' ? 'Tema Bento Oscuro activado (modo nocturno)' : 'Tema Ejecutivo Claro activado (modo diurno)',
+      'info',
+      'Tema Actualizado'
+    );
   };
 
   // Manejar cambio de Modo de Lectura (Checadas Reales vs Jerarquía con rescate RST)
@@ -1718,49 +1735,156 @@ Saludos.`
     }
   };
 
-  // Dispersar semana de nómina a los supervisores (soporta Dispersar Lista por Lista o Dispersar Todas)
+  // Guardar límite de horas de liberación configurado por el Administrador y opcionalmente actualizar semana activa
+  const handleSaveHorasLimiteLiberacion = (
+    horas: number,
+    applyToCurrentWeek = true,
+    resetFromNow = false
+  ) => {
+    const safeHoras = Math.max(1, Math.min(336, Number(horas) || 24));
+    const updatedConfig: AppConfig = { ...config, horasLimiteLiberacion: safeHoras };
+    setConfig(updatedConfig);
+    StorageService.saveConfig(updatedConfig);
+
+    if (applyToCurrentWeek && currentWeekDispersalObj) {
+      const updatedDisp = PortalService.updateDispersalDeadlineHours(
+        currentWeekNumber,
+        safeHoras,
+        resetFromNow
+      );
+      setDispersals(PortalService.loadDispersals());
+      if (updatedDisp?.limiteLiberacion) {
+        const formatted = new Date(updatedDisp.limiteLiberacion).toLocaleString([], {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        setStatusMessage(
+          `✓ Límite de liberación actualizado a ${safeHoras}h (Semana ${currentWeekNumber} vence: ${formatted})`
+        );
+        setStatusType('success');
+        showToast(
+          `Plazo límite de liberación configurado en ${safeHoras} horas. La cuenta regresiva de la Semana ${currentWeekNumber} vence el ${formatted}.`,
+          'success',
+          'Límite de Liberación Actualizado'
+        );
+        return;
+      }
+    }
+
+    setStatusMessage(`✓ Plazo límite de liberación por defecto actualizado a ${safeHoras} horas`);
+    setStatusType('success');
+    showToast(
+      `El límite permitido para liberar nóminas después de dispersar se estableció en ${safeHoras} horas.`,
+      'success',
+      'Plazo por Horas Guardado'
+    );
+  };
+
+  // Guardar credenciales del servidor SMTP de manera segura y sincronizar con el backend
+  const handleSaveEmailConfig = (newEmailCfg: EmailServerConfig) => {
+    setEmailConfig(newEmailCfg);
+    PortalService.saveEmailConfig(newEmailCfg);
+    setStatusMessage(
+      `✓ Credenciales SMTP actualizadas (${newEmailCfg.smtpHost}:${newEmailCfg.smtpPort} — ${newEmailCfg.smtpUser || 'sin usuario'})`
+    );
+    setStatusType('success');
+    showToast(
+      `Credenciales SMTP (${newEmailCfg.smtpHost}:${newEmailCfg.smtpPort}) guardadas de manera segura para el envío automático de correos de dispersión.`,
+      'success',
+      'Credenciales SMTP Guardadas'
+    );
+  };
+
+  // Dispersar semana de nómina a los supervisores (soporta Dispersar Lista por Lista o Dispersar Todas con plazo y SMTP)
   const handleDisperseWeek = (
     semanaNum: number,
     semanaPer: string,
     mensaje?: string,
     targetSupervisors?: string[],
-    sendCorporateEmail = true
+    sendCorporateEmail = true,
+    horasLimite?: number,
+    limiteLiberacion?: string
   ) => {
     if (reportes.length === 0) {
       setStatusMessage('Primero debes hacer clic en "Generar Reporte" antes de dispersar las nóminas a los supervisores.');
       setStatusType('warning');
       return;
     }
+    const effectiveHorasLimite =
+      horasLimite !== undefined ? horasLimite : config.horasLimiteLiberacion ?? 24;
     const targets = targetSupervisors && targetSupervisors.length > 0 ? targetSupervisors : supervisorsList;
-    const { emailDispatches } = PortalService.recordDispersal(
+    const { dispersal, emailDispatches } = PortalService.recordDispersal(
       semanaNum,
       semanaPer,
       currentUser.name,
       targets,
       mensaje,
       portalUsers,
-      sendCorporateEmail
+      sendCorporateEmail,
+      effectiveHorasLimite,
+      limiteLiberacion
     );
     setDispersals(PortalService.loadDispersals());
     setNotifications(PortalService.loadNotifications());
 
     const emailsList = emailDispatches.map(e => e.recipientEmail).join(', ');
+    const finalDeadline = dispersal.limiteLiberacion || limiteLiberacion;
+    const limiteInfo = finalDeadline
+      ? ` · Plazo (${effectiveHorasLimite}h): ${new Date(finalDeadline).toLocaleString([], {
+          day: '2-digit',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        })}`
+      : '';
     if (targets.length === 1) {
       setStatusMessage(
-        `✓ Lista de ${targets[0]} (Semana ${semanaNum}) dispersada. Notificación enviada en Sistema${sendCorporateEmail ? ` y al correo empresarial (${emailsList})` : ''}.`
+        `✓ Lista de ${targets[0]} (Semana ${semanaNum}) dispersada${limiteInfo}. Notificación enviada en Sistema${sendCorporateEmail ? ` y al correo empresarial (${emailsList})` : ''}.`
       );
     } else {
       setStatusMessage(
-        `✓ Todas las listas (${targets.length}) de Semana ${semanaNum} dispersadas. Notificaciones enviadas en Sistema${sendCorporateEmail ? ` y por correo empresarial (${emailsList})` : ''}.`
+        `✓ Todas las listas (${targets.length}) de Semana ${semanaNum} dispersadas${limiteInfo}. Notificaciones enviadas en Sistema${sendCorporateEmail ? ` y por correo empresarial (${emailsList})` : ''}.`
       );
     }
     setStatusType('success');
     showToast(
       targets.length === 1
-        ? `Nómina dispersada para ${targets[0]} (Semana ${semanaNum}). Notificaciones enviadas.`
-        : `Dispersión completada: ${targets.length} listas enviadas a los supervisores (Semana ${semanaNum}).`,
+        ? `Nómina dispersada para ${targets[0]} (Semana ${semanaNum})${limiteInfo}.`
+        : `Dispersión completada: ${targets.length} listas enviadas a supervisores${limiteInfo}.`,
       'success',
       'Nómina Dispersada'
+    );
+  };
+
+  // Cancelar nóminas dispersadas (por supervisor o global)
+  const handleCancelDispersal = (
+    semanaNum: number,
+    targetSupervisors?: string[],
+    motivo?: string
+  ) => {
+    PortalService.cancelDispersal(
+      semanaNum,
+      currentUser.name,
+      targetSupervisors,
+      motivo
+    );
+    setDispersals(PortalService.loadDispersals());
+    setNotifications(PortalService.loadNotifications());
+    setReleases(PortalService.loadReleases());
+
+    const affected = targetSupervisors && targetSupervisors.length > 0
+      ? targetSupervisors.join(', ')
+      : 'Todas las listas';
+
+    setStatusMessage(`⚠️ Dispersión de la Semana ${semanaNum} cancelada para: ${affected}. ${motivo ? `Motivo: ${motivo}` : ''}`);
+    setStatusType('warning');
+    showToast(
+      `Dispersión cancelada para ${affected} (Semana ${semanaNum}). Notificación enviada a supervisores.`,
+      'warning',
+      'Dispersión Cancelada'
     );
   };
 
@@ -2048,6 +2172,8 @@ Saludos.`
             assignedSupervisorList={allowedSupervisors[0] || currentUser.supervisorName}
             onOpenSchedules={() => setIsSchedulesOpen(true)}
             onOpenAssign={() => setIsAssignOpen(true)}
+            activeDispersal={currentWeekDispersalObj}
+            horasLimiteLiberacion={config.horasLimiteLiberacion}
           />
         )}
 
@@ -2075,6 +2201,7 @@ Saludos.`
             horarios={horarios}
             currentWeekNumber={currentWeekNumber}
             currentWeekPeriod={selectedWeek}
+            horasLimiteLiberacion={config.horasLimiteLiberacion}
             onDownloadProcessedExcel={handleDownloadSupervisorExcel}
             onLiberarNomina={handleSupervisorLiberarNomina}
             onOpenNewIncidentModal={handleOpenIncidentModalForEmp}
@@ -2095,13 +2222,19 @@ Saludos.`
               <StatsPanel summary={activeSummary} reports={filteredReports} />
             )}
 
-            {/* Resumen Ejecutivo (Top Products + Customer Fulfilment + Earnings Gauge) */}
+            {/* Resumen Ejecutivo (Listas y Estado de Dispersión + Pendientes y Límite de Tiempo + Incidencias) */}
             {activeSummary && (
               <ExecutiveSummary
                 summary={activeSummary}
                 reports={reportes}
                 selectedSupervisor={selectedSupervisor}
                 onSelectSupervisor={setSelectedSupervisor}
+                dispersals={dispersals}
+                releases={releases}
+                supervisors={supervisorsList}
+                semanaNumero={currentWeekNumber}
+                semanaPeriodo={selectedWeek}
+                onNavigateToMonitor={() => setPortalTab('semaforo')}
               />
             )}
 
@@ -2193,12 +2326,14 @@ Saludos.`
             semanaPeriodo={selectedWeek}
             semanaNumero={currentWeekNumber}
             currentUser={currentUser}
+            defaultHorasLimite={config.horasLimiteLiberacion}
             onDownloadExcel={handleDownloadSupervisorExcel}
             onInspectSupervisor={(sup) => {
               setSelectedSupervisor(sup);
               setPortalTab('nomina');
             }}
             onDisperseWeek={handleDisperseWeek}
+            onCancelDispersal={handleCancelDispersal}
             onDownloadSupervisorReturnedExcel={handleDownloadSupervisorReturnedExcel}
             onOpenContpaqiModule={() => setPortalTab('contpaqi')}
           />
@@ -2224,12 +2359,19 @@ Saludos.`
           />
         )}
 
-        {portalTab === 'usuarios' && userHasModuleAccess(currentUser, 'usuarios') && (
+        {portalTab === 'usuarios' && userHasAnyAdminPanelAccess(currentUser) && (
           <AdminUsersView
             users={portalUsers}
             supervisorsInCatalog={supervisorsList}
             onSaveUser={handleSavePortalUser}
             onDeleteUser={handleDeletePortalUser}
+            horasLimiteLiberacion={config.horasLimiteLiberacion}
+            onSaveHorasLimiteLiberacion={handleSaveHorasLimiteLiberacion}
+            activeDispersal={currentWeekDispersalObj}
+            currentWeekNumber={currentWeekNumber}
+            currentUser={currentUser}
+            emailConfig={emailConfig}
+            onSaveEmailConfig={handleSaveEmailConfig}
           />
         )}
         </main>
@@ -2270,6 +2412,9 @@ Saludos.`
         onClose={() => setIsConfigOpen(false)}
         config={config}
         onSaveConfig={handleSaveConfig}
+        currentUser={currentUser}
+        emailConfig={emailConfig}
+        onSaveEmailConfig={handleSaveEmailConfig}
       />
 
       {/* Modales del Portal Multirrol */}

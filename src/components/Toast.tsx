@@ -71,18 +71,20 @@ const SingleToastItem: React.FC<SingleToastProps> = ({ toast, onDismiss }) => {
     const timer = setInterval(() => {
       if (!isPaused) {
         setProgress(prev => {
-          if (prev <= step) {
-            clearInterval(timer);
-            onDismiss(toast.id);
-            return 0;
-          }
-          return prev - step;
+          const next = prev - step;
+          return next <= 0 ? 0 : next;
         });
       }
     }, intervalTime);
 
     return () => clearInterval(timer);
-  }, [duration, isPaused, onDismiss, toast.id]);
+  }, [duration, isPaused]);
+
+  useEffect(() => {
+    if (progress <= 0) {
+      onDismiss(toast.id);
+    }
+  }, [progress, onDismiss, toast.id]);
 
   // Paleta y estilos Bento según el tipo
   const typeConfig = {

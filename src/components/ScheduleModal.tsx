@@ -4,9 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { createPortal } from 'react-dom';
 import {
-  X,
   Clock,
   Plus,
   Edit2,
@@ -25,6 +23,7 @@ import {
 import { DaySchedule, ScheduleConfig } from '../types/attendance';
 import { NOMBRES_DIAS_CORTO, formatScheduleHoursSummary } from '../utils/calendarUtils';
 import { normalizarHorarioDia } from '../core/eventsHierarchy';
+import { HeadlessModal } from './ui/HeadlessModal';
 
 function timeToMinutes(t: string): number | null {
   if (!t || !t.includes(':')) return null;
@@ -395,64 +394,59 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     });
   };
 
-  return createPortal(
-    <div className="fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-      <div className="bg-[#21222D] border border-white/[0.08] rounded-2xl w-full max-w-4xl max-h-[92vh] my-auto flex flex-col shadow-2xl animate-scale-in text-slate-100">
-        {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FEB95A]/15 border border-[#FEB95A]/35 flex items-center justify-center text-[#FEB95A]">
-              <CalendarClock className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm sm:text-base font-bold text-white tracking-tight">
-                Catálogo y Creador Inteligente de Horarios
-              </h3>
-              <p className="text-xs text-[#87888C]">
-                Usa plantillas de 1 clic, ajusta días individuales o clona horarios existentes
-              </p>
-            </div>
+  return (
+    <HeadlessModal
+      isOpen={isOpen}
+      onClose={onClose}
+      maxWidth="max-w-5xl"
+      title={
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 dark:bg-[#FEB95A]/15 border border-amber-500/35 dark:border-[#FEB95A]/35 flex items-center justify-center text-amber-600 dark:text-[#FEB95A]">
+            <CalendarClock className="w-5 h-5" />
           </div>
-
-          <div className="flex items-center gap-2">
-            {onSwitchToAssign && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onSwitchToAssign();
-                }}
-                className="px-3.5 py-1.5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-xs font-extrabold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Asignar a Empleados</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 rounded-xl text-[#87888C] hover:text-white hover:bg-[#171821] transition-colors cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white tracking-tight">
+              Catálogo y Creador Inteligente de Horarios
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-[#87888C]">
+              Usa plantillas de 1 clic, ajusta días individuales o clona horarios existentes
+            </p>
           </div>
         </div>
-
-        {/* Body en 2 columnas en escritorio para trabajar mucho más cómodo */}
-        <div className="p-4 sm:p-5 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-5">
+      }
+      subtitle={
+        onSwitchToAssign ? (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onSwitchToAssign();
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-teal-500 dark:bg-[#A9DFD8] hover:bg-teal-600 dark:hover:bg-[#95d2ca] text-white dark:text-[#171821] text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Asignar a Empleados</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="space-y-4">
+        <div className="overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* COLUMNA IZQUIERDA (5 cols): Catálogo de Horarios Registrados + Respaldo */}
           <div className="lg:col-span-5 space-y-4">
             <div className="flex items-center justify-between">
-              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 Horarios Activos ({Object.keys(horarios).length})
               </h4>
               {editingCode && (
                 <button
                   type="button"
                   onClick={handleResetForm}
-                  className="text-[11px] font-bold text-amber-400 hover:underline cursor-pointer"
+                  className="text-[11px] font-bold text-amber-700 dark:text-amber-400 hover:underline cursor-pointer"
                 >
                   + Crear Nuevo
                 </button>
@@ -461,7 +455,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
             <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
               {Object.keys(horarios).length === 0 ? (
-                <p className="text-xs text-slate-500 py-6 text-center border border-dashed border-slate-800 rounded-xl">
+                <p className="text-xs text-slate-500 py-6 text-center border border-dashed border-slate-300 dark:border-slate-800 rounded-xl">
                   No hay horarios configurados. Usa una plantilla rápida a la derecha.
                 </p>
               ) : (
@@ -475,34 +469,34 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                       key={cod}
                       className={`p-3 rounded-xl border transition-all ${
                         isBeingEdited
-                          ? 'bg-amber-500/15 border-amber-500 shadow-md'
-                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                          ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-400 dark:border-amber-500 shadow-md'
+                          : 'bg-slate-50 dark:bg-[#171821] border-slate-200 dark:border-white/[0.08] hover:border-slate-300 dark:hover:border-slate-700'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[10px] font-mono font-extrabold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            <span className="text-[10px] font-mono font-extrabold px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
                               {cod}
                             </span>
-                            <span className="text-xs font-bold text-slate-100 truncate">
+                            <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
                               {h.nombre}
                             </span>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 font-mono font-bold">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-100 dark:bg-blue-500/15 text-sky-800 dark:text-blue-300 border border-sky-200 dark:border-blue-500/30 font-mono font-bold">
                               {asignados} colab.
                             </span>
                           </div>
-                          <p className="text-[11px] text-amber-300 font-mono mt-1">
+                          <p className="text-[11px] text-amber-800 dark:text-amber-300 font-mono font-semibold mt-1">
                             {hoursSummary}
                           </p>
                           <div className="flex items-center gap-1 mt-1.5 font-mono text-[10px]">
                             {NOMBRES_DIAS_CORTO.map((name, idx) => (
                               <span
                                 key={name}
-                                className={`px-1.5 py-0.2 rounded ${
+                                className={`px-1.5 py-0.5 rounded ${
                                   h.dias[idx]
-                                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold'
-                                    : 'text-slate-500 line-through opacity-60'
+                                    ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 font-bold'
+                                    : 'text-slate-400 dark:text-slate-500 line-through opacity-75'
                                 }`}
                               >
                                 {name}
@@ -515,7 +509,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleStartEdit(cod)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-transparent cursor-pointer shadow-xs"
                             title="Editar este horario"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -523,7 +517,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDuplicateSchedule(cod)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-300 cursor-pointer"
+                            className="p-1.5 rounded-lg bg-white hover:bg-sky-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-sky-700 dark:text-blue-300 border border-slate-200 dark:border-transparent cursor-pointer shadow-xs"
                             title="Duplicar horario como base para uno nuevo"
                           >
                             <Copy className="w-3.5 h-3.5" />
@@ -545,7 +539,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                             <button
                               type="button"
                               onClick={() => setConfirmDeleteCode(cod)}
-                              className="p-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 cursor-pointer"
+                              className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/15 dark:hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-transparent cursor-pointer"
                               title="Eliminar horario"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -560,19 +554,19 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             </div>
 
             {/* Respaldo JSON */}
-            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2 text-xs">
-              <span className="text-slate-400 text-[11px] font-semibold block">
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.08] space-y-2 text-xs">
+              <span className="text-slate-700 dark:text-slate-300 text-[11px] font-bold block">
                 Respaldo de Catálogo y Asignaciones (.JSON)
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={onExportBackup}
-                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="flex-1 py-1.5 px-2.5 rounded-lg bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <Download className="w-3.5 h-3.5 text-amber-400" /> Exportar
+                  <Download className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> Exportar
                 </button>
-                <label className="flex-1 py-1.5 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
+                <label className="flex-1 py-1.5 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-extrabold uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-xs">
                   <Upload className="w-3.5 h-3.5" /> Importar
                   <input
                     type="file"
@@ -591,17 +585,17 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
           </div>
 
           {/* COLUMNA DERECHA (7 cols): Editor Inteligente con Plantillas de 1 Clic */}
-          <div className="lg:col-span-7 space-y-4 bg-slate-950/40 p-4 rounded-2xl border border-slate-800">
+          <div className="lg:col-span-7 space-y-4 bg-slate-50 dark:bg-[#171821]/80 p-4 rounded-2xl border border-slate-200 dark:border-white/[0.08]">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-200 flex items-center gap-1.5">
-                <Plus className="w-4 h-4 text-amber-400" />
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                 {editingCode ? `Editando Horario: ${editingCode}` : 'Configurar Nuevo Horario'}
               </h4>
               <div className="flex items-center gap-2 text-[11px] font-mono">
-                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 font-bold">
                   {weeklySummary.activeDaysCount} días activos
                 </span>
-                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 font-bold">
                   Total: {weeklySummary.totalWeeklyHours} hrs netas/sem
                 </span>
               </div>
@@ -611,8 +605,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
               <div
                 className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 ${
                   feedbackMsg.type === 'ok'
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
+                    : 'bg-rose-50 dark:bg-rose-500/15 border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300'
                 }`}
               >
                 <span className="flex items-center gap-1.5">
@@ -631,8 +625,8 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
             {/* 1. Plantillas Preconfiguradas de 1 Clic */}
             <div>
-              <label className="text-[10px] font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1 mb-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <label className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1 mb-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 1. Cargar Plantilla Preconfigurada en 1 Clic (Opcional):
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
@@ -641,10 +635,10 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                     key={p.id}
                     type="button"
                     onClick={() => handleApplyPreset(p)}
-                    className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 text-left transition-all cursor-pointer"
+                    className="p-2.5 rounded-xl bg-white hover:bg-amber-50/60 dark:bg-[#21222D] dark:hover:bg-slate-800 border border-slate-200 dark:border-white/[0.08] hover:border-amber-400 dark:hover:border-amber-500/40 text-left transition-all cursor-pointer shadow-2xs"
                   >
-                    <div className="text-[11px] font-bold text-slate-100">{p.label}</div>
-                    <div className="text-[9px] text-slate-400 font-mono truncate">{p.sublabel}</div>
+                    <div className="text-[11px] font-bold text-slate-900 dark:text-slate-100">{p.label}</div>
+                    <div className="text-[9px] text-slate-600 dark:text-slate-400 font-mono truncate mt-0.5">{p.sublabel}</div>
                   </button>
                 ))}
               </div>
@@ -653,7 +647,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             {/* 2. Código y Nombre */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
                   Código Corto *
                 </label>
                 <input
@@ -662,13 +656,13 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
                   disabled={Boolean(editingCode)}
                   placeholder="Ej: ADMO, T1"
-                  className="w-full text-xs rounded-lg px-3 py-2 bg-slate-900 border border-slate-800 text-slate-100 outline-none focus:border-amber-500 font-mono font-bold disabled:opacity-50"
+                  className="w-full text-xs rounded-lg px-3 py-2 bg-white dark:bg-[#21222D] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 font-mono font-bold disabled:opacity-50"
                   maxLength={12}
                 />
               </div>
 
               <div className="sm:col-span-2">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
                   Nombre Descriptivo del Horario *
                 </label>
                 <input
@@ -676,7 +670,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
                   placeholder="Ej: Administrativo Lunes a Viernes"
-                  className="w-full text-xs rounded-lg px-3 py-2 bg-slate-900 border border-slate-800 text-slate-100 outline-none focus:border-amber-500 font-semibold"
+                  className="w-full text-xs rounded-lg px-3 py-2 bg-white dark:bg-[#21222D] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 outline-none focus:border-amber-500 font-semibold"
                 />
               </div>
             </div>
@@ -684,28 +678,28 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             {/* 3. Selección de días laborables + Botones rápidos */}
             <div>
               <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   2. Días Laborados (Clic para activar o descansar):
                 </label>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => handleQuickSelectDays('lv')}
-                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold cursor-pointer"
+                    className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[10px] font-bold cursor-pointer"
                   >
                     Lun a Vie
                   </button>
                   <button
                     type="button"
                     onClick={() => handleQuickSelectDays('ls')}
-                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold cursor-pointer"
+                    className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[10px] font-bold cursor-pointer"
                   >
                     Lun a Sáb
                   </button>
                   <button
                     type="button"
                     onClick={() => handleQuickSelectDays('all')}
-                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold cursor-pointer"
+                    className="px-2 py-0.5 rounded bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-[10px] font-bold cursor-pointer"
                   >
                     Todos
                   </button>
@@ -723,7 +717,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                       className={`py-2 rounded-lg text-xs font-extrabold uppercase tracking-wider transition-all border cursor-pointer ${
                         isActive
                           ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-sm'
-                          : 'bg-slate-900 text-slate-500 border-slate-800 hover:border-slate-700'
+                          : 'bg-white dark:bg-[#21222D] text-slate-600 dark:text-slate-400 border-slate-300 dark:border-white/10 hover:border-amber-400'
                       }`}
                     >
                       {name}
@@ -734,45 +728,45 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
             </div>
 
             {/* 4. Aplicar Hora Masiva a los Días Seleccionados */}
-            <div className="p-3 rounded-xl bg-slate-900 border border-slate-800">
-              <div className="flex items-center gap-1.5 mb-2 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <div className="p-3 rounded-xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.08] shadow-2xs">
+              <div className="flex items-center gap-1.5 mb-2 text-amber-800 dark:text-amber-300 text-[10px] font-bold uppercase tracking-wider">
+                <Zap className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 Aplicar misma Entrada / Salida a todos los días activos:
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
                 <div>
-                  <span className="text-[9px] text-slate-400 uppercase font-bold block mb-1">Entrada</span>
+                  <span className="text-[9px] text-slate-600 dark:text-slate-400 uppercase font-bold block mb-1">Entrada</span>
                   <input
                     type="time"
                     value={plantillaEntrada}
                     onChange={(e) => setPlantillaEntrada(e.target.value)}
-                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-950 border border-slate-800 text-slate-100 font-mono"
+                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"
                   />
                 </div>
                 <div>
-                  <span className="text-[9px] text-slate-400 uppercase font-bold block mb-1">Salida</span>
+                  <span className="text-[9px] text-slate-600 dark:text-slate-400 uppercase font-bold block mb-1">Salida</span>
                   <input
                     type="time"
                     value={plantillaSalida}
                     onChange={(e) => setPlantillaSalida(e.target.value)}
-                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-950 border border-slate-800 text-slate-100 font-mono"
+                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"
                   />
                 </div>
                 <div>
-                  <span className="text-[9px] text-slate-400 uppercase font-bold block mb-1">Comida (min)</span>
+                  <span className="text-[9px] text-slate-600 dark:text-slate-400 uppercase font-bold block mb-1">Comida (min)</span>
                   <input
                     type="number"
                     value={plantillaComida}
                     onChange={(e) => setPlantillaComida(parseInt(e.target.value, 10) || 0)}
                     min={0}
                     step={5}
-                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-950 border border-slate-800 text-slate-100 font-mono"
+                    className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={handleApplyTemplate}
-                  className="py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all cursor-pointer"
+                  className="py-1.5 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all cursor-pointer shadow-xs"
                 >
                   Aplicar a Todos
                 </button>
@@ -781,7 +775,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
 
             {/* 5. Detalle por Día Individual */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block">
                 3. Ajuste Fino por Día (Ej. Sábado sale más temprano):
               </label>
               <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -794,9 +788,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                     return (
                       <div
                         key={idx}
-                        className="p-2 rounded-xl bg-slate-900 border border-slate-800 flex items-center gap-2 flex-wrap text-xs"
+                        className="p-2.5 rounded-xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.08] flex items-center gap-2 flex-wrap text-xs shadow-2xs"
                       >
-                        <span className="w-11 text-center font-extrabold text-amber-300 uppercase text-[10px] py-1 bg-amber-500/15 rounded-lg border border-amber-500/30">
+                        <span className="w-11 text-center font-extrabold text-amber-800 dark:text-amber-300 uppercase text-[10px] py-1 bg-amber-100 dark:bg-amber-500/15 rounded-lg border border-amber-300 dark:border-amber-500/30">
                           {NOMBRES_DIAS_CORTO[idx]}
                         </span>
                         <input
@@ -817,9 +811,9 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                               };
                             });
                           }}
-                          className="rounded-lg px-2 py-1 bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs"
+                          className="rounded-lg px-2 py-1 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono text-xs"
                         />
-                        <span className="text-slate-500 text-[10px]">a</span>
+                        <span className="text-slate-500 text-[10px] font-semibold">a</span>
                         <input
                           type="time"
                           value={d.salida}
@@ -838,7 +832,7 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                               };
                             });
                           }}
-                          className="rounded-lg px-2 py-1 bg-slate-950 border border-slate-800 text-slate-100 font-mono text-xs"
+                          className="rounded-lg px-2 py-1 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono text-xs"
                         />
                         <div className="flex items-center gap-1">
                           <input
@@ -849,16 +843,16 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                               const val = parseInt(e.target.value, 10) || 0;
                               setDiasState(prev => ({ ...prev, [idx]: { ...prev[idx]!, comida: val } }));
                             }}
-                            className="w-14 rounded-lg px-1.5 py-1 bg-slate-950 border border-slate-800 text-slate-100 text-center font-mono text-xs"
+                            className="w-14 rounded-lg px-1.5 py-1 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 text-center font-mono text-xs"
                           />
-                          <span className="text-[10px] text-slate-400">m com.</span>
+                          <span className="text-[10px] text-slate-600 dark:text-slate-400 font-medium">m com.</span>
                         </div>
 
-                        <span className="text-[10px] font-mono font-bold text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/25">
+                        <span className="text-[10px] font-mono font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-500/25">
                           {netHrs}h netas
                         </span>
 
-                        <label className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-amber-300 cursor-pointer ml-auto">
+                        <label className="flex items-center gap-1 text-[10px] text-slate-700 dark:text-slate-300 hover:text-amber-700 dark:hover:text-amber-300 cursor-pointer ml-auto font-semibold">
                           <input
                             type="checkbox"
                             checked={Boolean(d.cruzaMedianoche)}
@@ -866,16 +860,16 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                               const checked = e.target.checked;
                               setDiasState(prev => ({ ...prev, [idx]: { ...prev[idx]!, cruzaMedianoche: checked } }));
                             }}
-                            className="rounded border-slate-700 bg-slate-900 text-amber-500"
+                            className="rounded border-slate-300 dark:border-slate-700 text-amber-500"
                           />
-                          <Moon className="w-3 h-3 text-amber-400 inline" />
+                          <Moon className="w-3 h-3 text-amber-600 dark:text-amber-400 inline" />
                           <span>Nocturno</span>
                         </label>
 
                         <button
                           type="button"
                           onClick={() => handleCopyDayToAllActive(idx)}
-                          className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-blue-300 cursor-pointer"
+                          className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-sky-700 dark:text-blue-300 border border-sky-200 dark:border-slate-700 cursor-pointer transition-colors"
                           title="Copiar el horario de este día al resto de los días activos"
                         >
                           Copiar a demás
@@ -889,29 +883,28 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 border-t border-white/[0.06] flex items-center justify-between gap-3 bg-[#171821]/80 rounded-b-2xl">
-          <span className="text-[11px] text-[#87888C]">
+        <div className="pt-4 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between gap-3">
+          <span className="text-[11px] text-slate-500 dark:text-[#87888C]">
             Los cambios se aplican y recalculan en automático sobre el reporte activo.
           </span>
           <div className="flex items-center gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-semibold text-[#87888C] hover:text-white cursor-pointer"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white cursor-pointer"
             >
               Cerrar
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] shadow-md transition-all cursor-pointer"
+              className="px-5 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider bg-teal-600 dark:bg-[#A9DFD8] hover:bg-teal-500 dark:hover:bg-[#95d2ca] text-white dark:text-[#171821] shadow-md transition-all cursor-pointer"
             >
               {editingCode ? `Actualizar Horario (${editingCode})` : 'Guardar Nuevo Horario'}
             </button>
           </div>
         </div>
       </div>
-    </div>,
-    document.body
+    </HeadlessModal>
   );
 };

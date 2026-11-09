@@ -5,6 +5,7 @@
 
 import {
   DispersalEmailDispatch,
+  EmailServerConfig,
   IncidentRequest,
   PayrollDispersal,
   PayrollRelease,
@@ -22,6 +23,7 @@ const STORAGE_KEYS = {
   RELEASES: 'attendancePro_portal_releases_v1',
   DISPERSALS: 'attendancePro_portal_dispersals_v1',
   NOTIFICATIONS: 'attendancePro_portal_notifications_v1',
+  EMAIL_CONFIG: 'attendancePro_portal_email_config_v1',
 };
 
 export const DEFAULT_USERS: PortalUser[] = [
@@ -459,6 +461,28 @@ export class PortalService {
     this.pushToServer({ notifications });
   }
 
+  static loadEmailConfig(): EmailServerConfig {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.EMAIL_CONFIG);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return {
+      smtpHost: 'smtp.gmail.com',
+      smtpPort: 587,
+      smtpUser: 'nominas@empresa.com',
+      smtpPass: '',
+      smtpSecure: false,
+      smtpFromName: 'AttendancePRO Nóminas',
+    };
+  }
+
+  static saveEmailConfig(cfg: EmailServerConfig): void {
+    localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(cfg));
+    this.pushToServer({ config: { emailServer: cfg } });
+  }
+
   /**
    * Registra la dispersión de una o varias listas de nómina (soporta Dispersión Lista por Lista o Dispersar Todas),
    * y genera automáticamente notificaciones tanto en el Sistema como al Correo Electrónico Empresarial del supervisor.
@@ -470,7 +494,9 @@ export class PortalService {
     targetSupervisors: string[],
     mensaje?: string,
     users?: PortalUser[],
-    sendCorporateEmail = true
+    sendCorporateEmail = true,
+    horasLimite?: number,
+    limiteLiberacion?: string
   ): {
     dispersal: PayrollDispersal;
     newNotifications: PortalNotification[];
@@ -548,6 +574,15 @@ export class PortalService {
       ),
     ];
 
+    const effectiveHorasLimite =
+      horasLimite !== undefined ? horasLimite : existingDispersal?.horasLimite;
+
+    const effectiveLimiteLiberacion =
+      limiteLiberacion ||
+      (effectiveHorasLimite && effectiveHorasLimite > 0
+        ? new Date(Date.now() + effectiveHorasLimite * 3600000).toISOString()
+        : existingDispersal?.limiteLiberacion);
+
     const newDispersal: PayrollDispersal = {
       id: existingDispersal?.id || `disp_semana_${semanaNumero}_${Date.now()}`,
       semanaNumero,
@@ -557,6 +592,12 @@ export class PortalService {
       mensaje: customMsg,
       supervisoresNotificados: mergedSupervisors,
       emailDispatches: combinedEmailDispatches,
+      horasLimite: effectiveHorasLimite,
+      limiteLiberacion: effectiveLimiteLiberacion,
+      cancelada: false,
+      supervisoresCancelados: (existingDispersal?.supervisoresCancelados || []).filter(
+        s => !normalizedTargets.includes(s.toUpperCase())
+      ),
     };
 
     if (existingIndex >= 0) {
@@ -567,7 +608,7 @@ export class PortalService {
 
     this.saveDispersals(dispersals);
 
-    // Guardar notificaciones en el sistema (reemplazando notificaciones no leídas duplicadas de la misma semana y lista)
+    // Guardar notificaciones en el sistema
     const currentNotifications = this.loadNotifications();
     const filteredExisting = currentNotifications.filter(
       n =>
@@ -580,8 +621,9 @@ export class PortalService {
     const updatedNotifications = [...newNotifications, ...filteredExisting].slice(0, 100);
     this.saveNotifications(updatedNotifications);
 
-    // Disparar registro y envío en el servidor Express (/api/notifications/send-email)
+    // Disparar envío automático en servidor Express con credenciales SMTP
     if (sendCorporateEmail && typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      const emailCfg = this.loadEmailConfig();
       fetch('/api/notifications/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -590,6 +632,10 @@ export class PortalService {
           semanaPeriodo,
           dispersadoPor,
           dispatches: emailDispatches,
+          emailConfig: emailCfg,
+          limiteLiberacion: newDispersal.limiteLiberacion,
+          horasLimite: newDispersal.horasLimite,
+          mensaje: customMsg,
         }),
       }).catch(() => {
         // Fallback silencioso en modo local
@@ -600,6 +646,139 @@ export class PortalService {
       dispersal: newDispersal,
       newNotifications,
       emailDispatches,
+    };
+  }
+
+  /**
+   * Actualiza el límite de tiempo en horas sobre una dispersión activa (o sobre todas las dispersiones activas).
+   */
+  static updateDispersalDeadlineHours(
+    semanaNumero: number,
+    horasLimite: number,
+    resetFromNow = false
+  ): PayrollDispersal | undefined {
+    const dispersals = this.loadDispersals();
+    const idx = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
+    if (idx < 0) return undefined;
+
+    const current = dispersals[idx];
+    const baseTime = resetFromNow
+      ? Date.now()
+      : current.fechaDispersion
+      ? new Date(current.fechaDispersion).getTime()
+      : Date.now();
+
+    const updated: PayrollDispersal = {
+      ...current,
+      horasLimite: horasLimite > 0 ? horasLimite : undefined,
+      limiteLiberacion:
+        horasLimite > 0 ? new Date(baseTime + horasLimite * 3600000).toISOString() : undefined,
+    };
+
+    dispersals[idx] = updated;
+    this.saveDispersals(dispersals);
+    return updated;
+  }
+
+  /**
+   * Cancela la dispersión de una nómina completa o de listas específicas seleccionadas.
+   */
+  static cancelDispersal(
+    semanaNumero: number,
+    canceladoPor: string,
+    targetSupervisors?: string[],
+    motivo?: string
+  ): {
+    dispersal?: PayrollDispersal;
+    newNotifications: PortalNotification[];
+  } {
+    const dispersals = this.loadDispersals();
+    const existingIndex = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
+    if (existingIndex < 0) return { newNotifications: [] };
+
+    const disp = dispersals[existingIndex];
+    const nowISO = new Date().toISOString();
+    const isGlobal =
+      !targetSupervisors ||
+      targetSupervisors.length === 0 ||
+      targetSupervisors.length >= disp.supervisoresNotificados.length;
+
+    const normalizedTargets = (targetSupervisors || disp.supervisoresNotificados).map(s =>
+      normalizeSupervisorName(s).toUpperCase()
+    );
+
+    const updatedCancelled = Array.from(
+      new Set([...(disp.supervisoresCancelados || []), ...normalizedTargets])
+    );
+
+    const updatedNotified = disp.supervisoresNotificados.filter(
+      s => !normalizedTargets.includes(s.toUpperCase())
+    );
+
+    const updatedDispersal: PayrollDispersal = {
+      ...disp,
+      supervisoresNotificados: updatedNotified,
+      supervisoresCancelados: updatedCancelled,
+      cancelada: isGlobal || updatedNotified.length === 0,
+      fechaCancelacion: nowISO,
+      canceladoPor,
+      motivoCancelacion: motivo || 'Cancelada por Recursos Humanos / Administración',
+    };
+
+    dispersals[existingIndex] = updatedDispersal;
+    this.saveDispersals(dispersals);
+
+    // Revocar cualquier release existente para que no quede liberada
+    const releases = this.loadReleases();
+    let releasesChanged = false;
+    normalizedTargets.forEach(sup => {
+      const releaseKey = `${semanaNumero}_${sup}`;
+      if (releases[releaseKey]) {
+        releases[releaseKey].status = 'en_revision';
+        releases[releaseKey].notasRevision = `[CANCELACIÓN DE DISPERSIÓN] ${motivo || 'Dispersión cancelada por RH'}`;
+        releasesChanged = true;
+      }
+    });
+    if (releasesChanged) {
+      this.saveReleases(releases);
+    }
+
+    // Generar notificaciones en el sistema
+    const newNotifications: PortalNotification[] = normalizedTargets.map(sup => ({
+      id: `notif_canc_${semanaNumero}_${sup.replace(/\s+/g, '_')}_${Date.now()}`,
+      targetSupervisor: sup,
+      semanaNumero,
+      semanaPeriodo: disp.semanaPeriodo,
+      titulo: `⚠️ Dispersión Cancelada — Lista ${sup}`,
+      mensaje: `La dispersión de tu nómina para la Semana ${semanaNumero} ha sido cancelada por ${canceladoPor}.${
+        motivo ? ` Motivo: ${motivo}` : ''
+      } La lista queda bloqueada para liberación hasta nueva indicación.`,
+      enviadoPor: canceladoPor,
+      fechaEnvio: nowISO,
+      leida: false,
+      emailEnviado: true,
+    }));
+
+    const currentNotifications = this.loadNotifications();
+    this.saveNotifications([...newNotifications, ...currentNotifications].slice(0, 100));
+
+    // Notificar al servidor Express
+    if (typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      fetch('/api/notifications/cancel-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          semanaNumero,
+          canceladoPor,
+          targetSupervisors: normalizedTargets,
+          motivo,
+        }),
+      }).catch(() => {});
+    }
+
+    return {
+      dispersal: updatedDispersal,
+      newNotifications,
     };
   }
 

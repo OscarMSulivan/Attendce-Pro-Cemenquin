@@ -60,6 +60,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   comidaDefault: 60,
   modoLectura: 'checadas_reales',
   minutosRebote: 15,
+  horasLimiteLiberacion: 24,
   theme: 'dark'
 };
 

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { EmployeeReport } from '../../types/attendance';
 import { PayrollRelease } from '../../types/portal';
+import { HeadlessSelect, SelectOption } from '../ui/HeadlessSelect';
 import {
   ContpaqiConfig,
   ContpaqiIncidenceRule,
@@ -124,6 +125,16 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     formatRows.forEach(r => set.add(r.conceptoColC));
     return Array.from(set);
   }, [formatRows]);
+
+  const supervisorSelectOptions: SelectOption[] = useMemo(() => [
+    { value: '', label: `Todas las Listas`, badge: `${supervisors.length}` },
+    ...supervisors.map(s => ({ value: s, label: s }))
+  ], [supervisors]);
+
+  const conceptoSelectOptions: SelectOption[] = useMemo(() => [
+    { value: '', label: 'Todos los Conceptos' },
+    ...availableConcepts.map(c => ({ value: c, label: c }))
+  ], [availableConcepts]);
 
   // Filtrado de filas del formato horizontal
   const filteredFormatRows = useMemo(() => {
@@ -436,32 +447,25 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-2.5">
               {/* Filtro por Supervisor */}
-              <select
-                value={selectedSupervisor}
-                onChange={(e) => setSelectedSupervisor(e.target.value)}
-                className="rounded-xl px-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8]"
-              >
-                <option value="">Todas las Listas / Supervisores ({supervisors.length})</option>
-                {supervisors.map(s => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
+              <div className="w-52">
+                <HeadlessSelect
+                  value={selectedSupervisor}
+                  onChange={setSelectedSupervisor}
+                  options={supervisorSelectOptions}
+                  searchable={supervisors.length > 4}
+                  placeholder="Todas las listas"
+                />
+              </div>
 
               {/* Filtro por Concepto */}
-              <select
-                value={selectedConcepto}
-                onChange={(e) => setSelectedConcepto(e.target.value)}
-                className="rounded-xl px-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white outline-none focus:border-[#A9DFD8] font-mono"
-              >
-                <option value="">Todos los Conceptos</option>
-                {availableConcepts.map(c => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
+              <div className="w-48">
+                <HeadlessSelect
+                  value={selectedConcepto}
+                  onChange={setSelectedConcepto}
+                  options={conceptoSelectOptions}
+                  placeholder="Todos los conceptos"
+                />
+              </div>
 
               {/* Buscador */}
               <div className="relative w-full sm:w-56">
