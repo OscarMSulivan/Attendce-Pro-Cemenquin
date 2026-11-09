@@ -3,14 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
-import {
-  Dialog,
-  DialogBackdrop,
-  DialogPanel,
-  DialogTitle,
-  DialogDescription
-} from '@headlessui/react';
+import React, { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface HeadlessModalProps {
@@ -32,34 +25,62 @@ export const HeadlessModal: React.FC<HeadlessModalProps> = ({
   maxWidth = 'max-w-lg',
   showCloseButton = true,
 }) => {
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Bloquear scroll de la página mientras el modal está activo
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Cerrar al presionar la tecla Escape
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
   return (
-    <Dialog open={isOpen} onClose={onClose} className="relative z-50">
+    <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
       {/* Backdrop con blur suave y tono amigable */}
-      <DialogBackdrop
-        transition
-        className="fixed inset-0 bg-slate-950/60 dark:bg-black/75 backdrop-blur-sm transition-opacity duration-200 ease-out data-[closed]:opacity-0"
+      <div
+        className="fixed inset-0 bg-slate-950/60 dark:bg-black/75 backdrop-blur-sm transition-opacity animate-fade-in"
+        onClick={onClose}
+        aria-hidden="true"
       />
 
-      <div className="fixed inset-0 z-50 w-screen overflow-y-auto p-4 flex min-h-full items-center justify-center">
-        <DialogPanel
-          transition
-          className={`w-full ${maxWidth} transform overflow-hidden rounded-2xl p-5 sm:p-6 text-left align-middle shadow-2xl transition-all duration-200 ease-out data-[closed]:scale-95 data-[closed]:opacity-0 border
+      <div className="flex min-h-full items-center justify-center p-4 text-center">
+        <div
+          ref={modalRef}
+          onClick={(e) => e.stopPropagation()}
+          className={`w-full ${maxWidth} relative transform overflow-hidden rounded-2xl p-5 sm:p-6 text-left align-middle shadow-2xl transition-all border
             bg-white dark:bg-[#21222D]
             border-slate-200 dark:border-white/[0.08]
-            text-slate-900 dark:text-slate-100`}
+            text-slate-900 dark:text-slate-100
+            animate-scale-in`}
         >
           {(title || showCloseButton) && (
             <div className="flex items-start justify-between gap-4 pb-4 mb-4 border-b border-slate-100 dark:border-white/[0.06]">
-              <div>
+              <div className="min-w-0 flex-1">
                 {title && (
-                  <DialogTitle as="div" className="text-base font-bold text-slate-900 dark:text-white leading-tight">
+                  <div className="text-base font-bold text-slate-900 dark:text-white leading-tight">
                     {title}
-                  </DialogTitle>
+                  </div>
                 )}
                 {subtitle && (
-                  <DialogDescription as="div" className="text-xs text-slate-500 dark:text-[#87888C] mt-1">
+                  <div className="text-xs text-slate-500 dark:text-[#87888C] mt-1">
                     {subtitle}
-                  </DialogDescription>
+                  </div>
                 )}
               </div>
 
@@ -77,8 +98,8 @@ export const HeadlessModal: React.FC<HeadlessModalProps> = ({
           )}
 
           <div>{children}</div>
-        </DialogPanel>
+        </div>
       </div>
-    </Dialog>
+    </div>
   );
 };

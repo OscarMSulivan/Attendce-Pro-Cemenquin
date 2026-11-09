@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
-    "@headlessui/react": "^2.2.10",
     "@tailwindcss/vite": "^4.3.3",
     "@types/nodemailer": "^8.0.2",
     "@vitejs/plugin-react": "^6.1.1",
