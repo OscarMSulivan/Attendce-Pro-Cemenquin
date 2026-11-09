@@ -373,43 +373,63 @@ export function calcularMetricasDia(
       totalDelDia -= tiempoComida;
     }
 
-    const jornadaEsperada = calcularJornadaEsperadaHrs(normHorario, tiempoComida, jornadaBase);
-    hNormal = Math.max(0, Math.min(totalDelDia, jornadaEsperada));
-    hExtra = Math.max(0, totalDelDia - jornadaEsperada);
-    inc = 'Asistencia';
-    cls = 'row-success';
+    const esDiaDescanso = normHorario === null;
 
-    if (isRST && normHorario) {
-      const mSalEsperada = timeToMinutes(normHorario.salida);
-      const mSalReal = timeToMinutes(sal);
-      let diffMin = mSalReal - mSalEsperada;
-      if (diffMin < -720) diffMin += 1440;
+    if (esDiaDescanso) {
+      inc = 'Descanso';
+      cls = 'row-success';
+      msg = `⭐ El empleado laboró en su día de descanso (+${totalDelDia.toFixed(2)} hrs)`;
+      hExtra = totalDelDia;
+      hNormal = 0;
+    } else {
+      const jornadaEsperada = calcularJornadaEsperadaHrs(normHorario, tiempoComida, jornadaBase);
+      hNormal = Math.max(0, Math.min(totalDelDia, jornadaEsperada));
+      hExtra = Math.max(0, totalDelDia - jornadaEsperada);
+      inc = 'Asistencia';
+      cls = 'row-success';
 
-      if (diffMin > 40) {
-        const hExceso = Math.floor(diffMin / 60);
-        const mExceso = diffMin % 60;
-        const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
-        msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida})`;
+      if (isRST && normHorario) {
+        const mSalEsperada = timeToMinutes(normHorario.salida);
+        const mSalReal = timeToMinutes(sal);
+        let diffMin = mSalReal - mSalEsperada;
+        if (diffMin < -720) diffMin += 1440;
+
+        if (diffMin > 40) {
+          const hExceso = Math.floor(diffMin / 60);
+          const mExceso = diffMin % 60;
+          const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
+          msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida})`;
+        }
+      } else if (hExtra >= 0.5) {
+        msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
       }
-    } else if (hExtra >= 0.5) {
-      msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
     }
   } else if (tieneEnt !== tieneSal) {
-    huerfana = true;
-    inc = 'Asistencia';
-    cls = 'row-warning';
-    const refHorario = normHorario ? ` (Horario: ${normHorario.entrada}-${normHorario.salida})` : '';
-    msg = !tieneEnt
-      ? `⚠️ Falta checada de entrada${refHorario} — requiere Formato de Checada`
-      : `⚠️ Falta checada de salida${refHorario} — requiere Formato de Checada`;
+    if (normHorario === null) {
+      // Checada en día de descanso
+      huerfana = false;
+      inc = 'Descanso';
+      cls = 'row-warning';
+      msg = `⭐ Checada registrada en día de descanso (${tieneEnt ? `Entrada ${ent}` : `Salida ${sal}`})`;
+    } else {
+      huerfana = true;
+      inc = 'Asistencia';
+      cls = 'row-warning';
+      const refHorario = ` (Horario: ${normHorario.entrada}-${normHorario.salida})`;
+      msg = !tieneEnt
+        ? `⚠️ Falta checada de entrada${refHorario} — requiere Formato de Checada`
+        : `⚠️ Falta checada de salida${refHorario} — requiere Formato de Checada`;
+    }
   } else {
     // Sin ninguna de las 2 checadas
     if (isoDate && FESTIVOS_OFICIALES[isoDate]) {
       inc = 'Festivo';
       cls = 'row-default';
+      msg = '';
     } else if (normHorario === null) {
       inc = 'Descanso';
       cls = 'row-default';
+      msg = '';
     } else if (normHorario) {
       // Es un día laboral según la programación de horarios y no tiene ninguna de las 2 checadas
       cls = 'row-warning';

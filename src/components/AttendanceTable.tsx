@@ -445,6 +445,29 @@ const DayRow: React.FC<DayRowProps> = ({
     }
   };
 
+  // REGLAS DE BLOQUEO DE ENTRADA Y SALIDA:
+  // 1) Si es día de Descanso programado (horarioProgramado === null) y no tiene checadas, bloquear ambas (el empleado descansó).
+  // 2) Si el trabajador ya tiene sus entradas y salidas bien, bloquear ambas.
+  // 3) Si le falta 1, bloquear la que sí tenga y permitir hacer switch (flechas) o agregar la faltante.
+  const esDiaDescanso = day.horarioProgramado === null;
+  const tieneEntradaValida = Boolean(day.entrada && day.entrada !== '--:--');
+  const tieneSalidaValida = Boolean(day.salida && day.salida !== '--:--');
+
+  // Si ambas checadas están completas y válidas (sea originalmente o ya resueltas), no se pueden alterar arbitrariamente
+  const ambasCompletas = tieneEntradaValida && tieneSalidaValida;
+
+  // Entrada bloqueada si:
+  // 1) Es descanso y no checó, o
+  // 2) Ambas están completas, o
+  // 3) Tenía entrada válida (bloquear la que sí tenga)
+  const isEntradaBloqueada = (esDiaDescanso && !tieneEntradaValida) || ambasCompletas || tieneEntradaValida;
+
+  // Salida bloqueada si:
+  // 1) Es descanso y no checó, o
+  // 2) Ambas están completas, o
+  // 3) Tenía salida válida (bloquear la que sí tenga)
+  const isSalidaBloqueada = (esDiaDescanso && !tieneSalidaValida) || ambasCompletas || tieneSalidaValida;
+
   return (
     <tr className={rowBg}>
       {/* Fecha */}
@@ -481,32 +504,30 @@ const DayRow: React.FC<DayRowProps> = ({
         )}
       </td>
 
-      {/* Entrada (Editable) */}
+      {/* Entrada (Bloqueada si ya tiene valor; editable solo si falta) */}
       <td className="p-3 whitespace-nowrap align-top">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
-            <input
-              type="time"
-              value={day.entrada === '--:--' ? '' : day.entrada}
-              onChange={(e) => onChangeTimes(e.target.value || '--:--', day.salida)}
-              className={`w-24 rounded px-1.5 py-0.5 text-xs bg-slate-950/90 border outline-none ${
-                day.modificadoPorSupervisor && day.entrada !== day.entradaOriginal
-                  ? 'border-purple-500 text-purple-200 font-bold ring-1 ring-purple-500/30'
-                  : day.entrada === '--:--'
-                  ? 'border-slate-800 text-rose-400'
-                  : 'border-slate-800 text-slate-100 font-semibold focus:border-amber-500'
-              }`}
-              title="Haz clic para ajustar o agregar manualmente la hora de Entrada"
-            />
-            {day.entrada !== '--:--' && (
-              <button
-                type="button"
-                onClick={() => onChangeTimes('--:--', day.salida)}
-                className="text-[10px] text-slate-600 hover:text-rose-400 no-print cursor-pointer"
-                title="Limpiar entrada"
+            {isEntradaBloqueada ? (
+              <div
+                className={`w-24 rounded px-2 py-1 text-xs font-mono font-bold flex items-center justify-between border select-none ${
+                  day.modificadoPorSupervisor && day.entrada !== day.entradaOriginal
+                    ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-200'
+                }`}
+                title="Checada de entrada registrada y protegida contra edición"
               >
-                ×
-              </button>
+                <span>{day.entrada}</span>
+                <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+              </div>
+            ) : (
+              <input
+                type="time"
+                value={day.entrada === '--:--' ? '' : day.entrada}
+                onChange={(e) => onChangeTimes(e.target.value || '--:--', day.salida)}
+                className="w-24 rounded px-1.5 py-0.5 text-xs bg-slate-950/90 border border-amber-500/60 text-amber-200 font-mono outline-none focus:border-amber-400"
+                title="Falta checada de entrada: ingresa la hora correspondiente"
+              />
             )}
           </div>
           {day.modificadoPorSupervisor && day.entrada !== (day.entradaOriginal || '--:--') && (
@@ -517,7 +538,7 @@ const DayRow: React.FC<DayRowProps> = ({
         </div>
       </td>
 
-      {/* Salida (Editable + Botón intercambiar si es huérfana) */}
+      {/* Salida (Bloqueada si ya tiene valor; switch habilitado si solo hay 1 checada) */}
       <td className="p-3 whitespace-nowrap align-top">
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
@@ -525,34 +546,33 @@ const DayRow: React.FC<DayRowProps> = ({
               <button
                 type="button"
                 onClick={handleSwapTimes}
-                className="p-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 transition-all no-print cursor-pointer"
-                title="Mover checada entre Entrada ⇄ Salida"
+                className="p-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all no-print cursor-pointer flex items-center gap-1 shadow-sm"
+                title="Mover checada física única entre Entrada ⇄ Salida (Switch de RST / Huérfana)"
               >
-                <ArrowLeftRight className="w-3 h-3" />
+                <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400" />
+                <span className="text-[9px] font-bold font-sans hidden sm:inline">Switch</span>
               </button>
             )}
-            <input
-              type="time"
-              value={day.salida === '--:--' ? '' : day.salida}
-              onChange={(e) => onChangeTimes(day.entrada, e.target.value || '--:--')}
-              className={`w-24 rounded px-1.5 py-0.5 text-xs bg-slate-950/90 border outline-none ${
-                day.modificadoPorSupervisor && day.salida !== day.salidaOriginal
-                  ? 'border-purple-500 text-purple-200 font-bold ring-1 ring-purple-500/30'
-                  : day.salida === '--:--'
-                  ? 'border-slate-800 text-rose-400'
-                  : 'border-slate-800 text-slate-100 font-semibold focus:border-amber-500'
-              }`}
-              title="Haz clic para ajustar o agregar manualmente la hora de Salida"
-            />
-            {day.salida !== '--:--' && (
-              <button
-                type="button"
-                onClick={() => onChangeTimes(day.entrada, '--:--')}
-                className="text-[10px] text-slate-600 hover:text-rose-400 no-print cursor-pointer"
-                title="Limpiar salida"
+            {isSalidaBloqueada ? (
+              <div
+                className={`w-24 rounded px-2 py-1 text-xs font-mono font-bold flex items-center justify-between border select-none ${
+                  day.modificadoPorSupervisor && day.salida !== day.salidaOriginal
+                    ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-200'
+                }`}
+                title="Checada de salida registrada y protegida contra edición"
               >
-                ×
-              </button>
+                <span>{day.salida}</span>
+                <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+              </div>
+            ) : (
+              <input
+                type="time"
+                value={day.salida === '--:--' ? '' : day.salida}
+                onChange={(e) => onChangeTimes(day.entrada, e.target.value || '--:--')}
+                className="w-24 rounded px-1.5 py-0.5 text-xs bg-slate-950/90 border border-amber-500/60 text-amber-200 font-mono outline-none focus:border-amber-400"
+                title="Falta checada de salida: ingresa la hora correspondiente"
+              />
             )}
           </div>
           {day.modificadoPorSupervisor && day.salida !== (day.salidaOriginal || '--:--') && (

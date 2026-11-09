@@ -191,6 +191,9 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
         supAddedPunchesCount: 0,
         supWithoutFormatCount: 0,
         blockingNoFormatItems: [] as Array<{ employee: Employee; day: ProcessedDay }>,
+        pendingOvertimeItems: [] as Array<{ employee: Employee; day: ProcessedDay }>,
+        pendingMissingPunchItems: [] as Array<{ employee: Employee; day: ProcessedDay }>,
+        hasPendingTasks: false,
         formatsUploadedCount: 0,
         confirmedFaltasCount: 0,
       };
@@ -203,20 +206,27 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     let supAddedPunchesCount = 0;
     let supWithoutFormatCount = 0;
     const blockingNoFormatItems: Array<{ employee: Employee; day: ProcessedDay }> = [];
+    const pendingOvertimeItems: Array<{ employee: Employee; day: ProcessedDay }> = [];
+    const pendingMissingPunchItems: Array<{ employee: Employee; day: ProcessedDay }> = [];
     let formatsUploadedCount = 0;
     let confirmedFaltasCount = 0;
 
     activeListWeeklyReports.forEach(r => {
       normalHours += r.totalNormal;
       r.dias.forEach(d => {
+        // Validación de tiempo extra: si generó tiempo extra pero aún no se autorizó ni rechazó (undefined)
         if (d.hExtra > 0) {
           detectedExtraHours += d.hExtra;
           if (d.horasExtrasAutorizadas === true) {
             extraHours += d.hExtra;
+          } else if (d.horasExtrasAutorizadas === undefined) {
+            pendingOvertimeItems.push({ employee: r.empleado, day: d });
           }
         }
+        // Validación de checadas incompletas / pendientes
         if (isDayMissingPunchesUnresolved(d)) {
           missingPunchDaysCount++;
+          pendingMissingPunchItems.push({ employee: r.empleado, day: d });
         }
         if (d.modificadoPorSupervisor) {
           if (d.tipoModificacionSupervisor === 'falta_confirmada') {
@@ -263,6 +273,12 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       supAddedPunchesCount,
       supWithoutFormatCount,
       blockingNoFormatItems,
+      pendingOvertimeItems,
+      pendingMissingPunchItems,
+      hasPendingTasks:
+        blockingNoFormatItems.length > 0 ||
+        pendingOvertimeItems.length > 0 ||
+        pendingMissingPunchItems.length > 0,
       formatsUploadedCount,
       confirmedFaltasCount,
     };
@@ -321,12 +337,27 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   };
 
   const handleConfirmLiberacion = () => {
-    if (stats.blockingNoFormatItems.length > 0) {
+    if (stats.pendingOvertimeItems.length > 0) {
       setUploadError(
-        `No puedes liberar la nómina porque hay ${stats.blockingNoFormatItems.length} día(s) donde el colaborador no tenía ni Entrada ni Salida y agregaste checada sin adjuntar el archivo de respaldo.`
+        `Tienes ${stats.pendingOvertimeItems.length} registro(s) de tiempo extra pendiente(s) de autorizar (SÍ o NO). Debes validarlos antes de liberar.`
       );
       return;
     }
+
+    if (stats.pendingMissingPunchItems.length > 0) {
+      setUploadError(
+        `Tienes ${stats.pendingMissingPunchItems.length} día(s) con checadas incompletas o alertas pendientes de resolver (agrega la checada o confirma falta / permiso).`
+      );
+      return;
+    }
+
+    if (stats.blockingNoFormatItems.length > 0) {
+      setUploadError(
+        `Tienes ${stats.blockingNoFormatItems.length} día(s) donde el colaborador no tenía ni Entrada ni Salida y agregaste checada sin adjuntar el archivo de respaldo.`
+      );
+      return;
+    }
+
     onLiberarNomina(
       targetSupervisor,
       currentWeekNumber,
@@ -657,58 +688,85 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                   </div>
                 </div>
 
-                {/* Aviso / Bloqueo si el supervisor agregó checadas a un día sin Entrada ni Salida y no ha subido el formato de respaldo */}
-                {stats.blockingNoFormatItems.length > 0 && (
+                {/* Aviso / Bloqueo si el supervisor tiene pendientes: Horas Extras sin autorizar, checadas faltantes o formatos requeridos */}
+                {stats.hasPendingTasks && (
                   <div className="mt-4 p-4 rounded-xl bg-rose-500/15 border border-rose-500/50 space-y-3 text-xs text-rose-200">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-start sm:items-center gap-2.5">
                         <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
                         <div>
-                          <strong className="text-rose-300 block">
-                            🚫 Bloqueo de Liberación: {stats.blockingNoFormatItems.length} día(s) sin Entrada ni Salida con checada agregada sin archivo de respaldo.
+                          <strong className="text-rose-300 block text-sm">
+                            🚫 Tienes tareas pendientes por resolver antes de poder liberar la nómina:
                           </strong>
-                          <span>
-                            Cuando a un colaborador solo le falta 1 checada no es forzoso subir formato, pero cuando no tiene <strong>ni Entrada ni Salida</strong> es obligatorio adjuntar el archivo que lo respalde para poder liberar la nómina.
+                          <span className="text-[11px] text-slate-300">
+                            Revisa y resuelve los siguientes puntos para que Recursos Humanos reciba la lista completa:
                           </span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setListFilterMode('modified')}
-                        className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shrink-0 cursor-pointer"
-                      >
-                        Filtrar Filas Modificadas
-                      </button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-rose-500/30">
-                      {stats.blockingNoFormatItems.map(({ employee, day }) => (
-                        <div
-                          key={`${employee.id}-${day.isoDate}`}
-                          className="p-2.5 rounded-lg bg-slate-950/80 border border-rose-500/40 flex items-center justify-between gap-2"
-                        >
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-2 border-t border-rose-500/30">
+                      {/* 1. Tiempos extras pendientes */}
+                      {stats.pendingOvertimeItems.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/40 text-[11px] flex flex-col justify-between">
                           <div>
-                            <span className="font-mono font-bold text-rose-300">#{employee.id}</span>{' '}
-                            <span className="font-semibold text-slate-200">{employee.nombre}</span>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              {day.dayName} {day.isoDate} • Agregada: {day.entrada} - {day.salida} (Orig: Sin Entrada ni Salida)
-                            </div>
+                            <span className="font-bold text-amber-300 flex items-center gap-1.5 mb-1">
+                              <Clock className="w-3.5 h-3.5 text-amber-400" />
+                              {stats.pendingOvertimeItems.length} Tiempo(s) Extra sin Autorizar
+                            </span>
+                            <p className="text-[10px] text-slate-400">
+                              Debes presionar <strong>SÍ</strong> o <strong>NO</strong> en cada jornada con horas extras detectadas.
+                            </p>
+                          </div>
+                          <span className="text-[9px] font-mono text-amber-400 mt-2 block">
+                            Pendiente autorización
+                          </span>
+                        </div>
+                      )}
+
+                      {/* 2. Checadas incompletas / faltantes */}
+                      {stats.pendingMissingPunchItems.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-500/40 text-[11px] flex flex-col justify-between">
+                          <div>
+                            <span className="font-bold text-rose-300 flex items-center gap-1.5 mb-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                              {stats.pendingMissingPunchItems.length} Checada(s) Incompletas
+                            </span>
+                            <p className="text-[10px] text-slate-400">
+                              Días laborales sin checadas completas. Agrega la hora faltante o confirma falta/permiso.
+                            </p>
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
-                              setFormatModalTarget({
-                                employee,
-                                day,
-                                mode: 'checada_sin_gafete',
-                              })
-                            }
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] shrink-0 cursor-pointer"
+                            onClick={() => setListFilterMode('missing_punches')}
+                            className="mt-2 text-[10px] font-bold px-2 py-1 rounded bg-rose-600/30 text-rose-200 border border-rose-500/40 hover:bg-rose-600/50 cursor-pointer self-start"
                           >
-                            📎 Subir Respaldo
+                            Filtrar Días con Checadas Faltantes
                           </button>
                         </div>
-                      ))}
+                      )}
+
+                      {/* 3. Formatos obligatorios por falta de 2 checadas */}
+                      {stats.blockingNoFormatItems.length > 0 && (
+                        <div className="p-3 rounded-xl bg-slate-950/80 border border-purple-500/40 text-[11px] flex flex-col justify-between">
+                          <div>
+                            <span className="font-bold text-purple-300 flex items-center gap-1.5 mb-1">
+                              <Paperclip className="w-3.5 h-3.5 text-purple-400" />
+                              {stats.blockingNoFormatItems.length} Respaldo(s) Obligatorios
+                            </span>
+                            <p className="text-[10px] text-slate-400">
+                              Días sin Entrada ni Salida con checada agregada que requieren formato firmado adjunto.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setListFilterMode('modified')}
+                            className="mt-2 text-[10px] font-bold px-2 py-1 rounded bg-purple-600/30 text-purple-200 border border-purple-500/40 hover:bg-purple-600/50 cursor-pointer self-start"
+                          >
+                            Filtrar Filas para Adjuntar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1228,24 +1286,53 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                     <span className="text-sm font-bold text-rose-200">{stats.confirmedFaltasCount}</span>
                   </div>
                 </div>
-                {stats.blockingNoFormatItems.length > 0 && (
-                  <div className="p-3 rounded-xl bg-rose-500/20 border border-rose-500/50 text-rose-200 space-y-2">
-                    <p className="text-[11px] font-bold flex items-start gap-1.5">
+                {/* Desglose detallado de pendientes que impiden la liberación */}
+                {stats.hasPendingTasks && (
+                  <div className="p-3.5 rounded-xl bg-rose-500/20 border border-rose-500/50 text-rose-200 space-y-3">
+                    <p className="text-[11px] font-bold flex items-start gap-1.5 text-rose-100">
                       <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                       <span>
-                        🚫 No puedes liberar la nómina todavía: Tienes {stats.blockingNoFormatItems.length} día(s) donde el colaborador no tenía ni Entrada ni Salida y agregaste checada sin adjuntar el archivo de respaldo:
+                        🚫 No puedes liberar la nómina todavía. Tienes las siguientes tareas pendientes:
                       </span>
                     </p>
-                    <div className="space-y-1.5">
-                      {stats.blockingNoFormatItems.map(({ employee, day }) => (
+
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {/* Tiempos extras sin autorizar */}
+                      {stats.pendingOvertimeItems.map(({ employee, day }) => (
                         <div
-                          key={`modal-${employee.id}-${day.isoDate}`}
-                          className="p-2 rounded bg-slate-950/90 border border-rose-500/30 flex items-center justify-between gap-2 text-[11px]"
+                          key={`modal-ot-${employee.id}-${day.isoDate}`}
+                          className="p-2 rounded bg-slate-950/90 border border-amber-500/40 flex items-center justify-between gap-2 text-[11px]"
                         >
-                          <span>
-                            <strong className="font-mono text-rose-300">#{employee.id}</strong> {employee.nombre} —{' '}
-                            <span className="font-mono">{day.dayName} {day.isoDate}</span>
-                          </span>
+                          <div>
+                            <span className="font-mono font-bold text-amber-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-200">{employee.nombre}</span>
+                            <div className="text-[10px] text-amber-400/90 font-mono">
+                              {day.dayName} {day.isoDate} • {day.hExtra.toFixed(2)}h extras pendientes de autorizar (SÍ / NO)
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsWorkingOnRelease(false)}
+                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-[#171821] font-extrabold text-[10px] cursor-pointer shrink-0"
+                          >
+                            Ir a Autorizar
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Checadas incompletas */}
+                      {stats.pendingMissingPunchItems.map(({ employee, day }) => (
+                        <div
+                          key={`modal-miss-${employee.id}-${day.isoDate}`}
+                          className="p-2 rounded bg-slate-950/90 border border-rose-500/40 flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <div>
+                            <span className="font-mono font-bold text-rose-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-200">{employee.nombre}</span>
+                            <div className="text-[10px] text-rose-400/90 font-mono">
+                              {day.dayName} {day.isoDate} • Ent: {day.entrada} | Sal: {day.salida} (Falta checada o permiso)
+                            </div>
+                          </div>
                           <button
                             type="button"
                             onClick={() => {
@@ -1258,7 +1345,37 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                             }}
                             className="px-2.5 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px] cursor-pointer shrink-0"
                           >
-                            📎 Adjuntar Respaldo Ahora
+                            Resolver Checada
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Checadas agregadas sin archivo de respaldo */}
+                      {stats.blockingNoFormatItems.map(({ employee, day }) => (
+                        <div
+                          key={`modal-fmt-${employee.id}-${day.isoDate}`}
+                          className="p-2 rounded bg-slate-950/90 border border-purple-500/40 flex items-center justify-between gap-2 text-[11px]"
+                        >
+                          <div>
+                            <span className="font-mono font-bold text-purple-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-200">{employee.nombre}</span>
+                            <div className="text-[10px] text-purple-400/90 font-mono">
+                              {day.dayName} {day.isoDate} • Agregada sin checadas originales (requiere adjunto firmado)
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsWorkingOnRelease(false);
+                              setFormatModalTarget({
+                                employee,
+                                day,
+                                mode: 'checada_sin_gafete',
+                              });
+                            }}
+                            className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] cursor-pointer shrink-0"
+                          >
+                            📎 Adjuntar Respaldo
                           </button>
                         </div>
                       ))}
@@ -1294,7 +1411,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                   )}
                 </div>
                 {uploadError && (
-                  <p className="text-rose-400 text-[10px] mt-1">{uploadError}</p>
+                  <p className="text-rose-400 text-[10px] mt-1 font-semibold">{uploadError}</p>
                 )}
               </div>
 
@@ -1328,17 +1445,17 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 <button
                   type="button"
                   onClick={handleConfirmLiberacion}
-                  disabled={stats.blockingNoFormatItems.length > 0}
+                  disabled={stats.hasPendingTasks}
                   className={`px-5 py-2.5 rounded-xl font-bold text-xs shadow-lg flex items-center gap-2 transition-all ${
-                    stats.blockingNoFormatItems.length > 0
+                    stats.hasPendingTasks
                       ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
                       : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 cursor-pointer'
                   }`}
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>
-                    {stats.blockingNoFormatItems.length > 0
-                      ? 'Adjunta los respaldos obligatorios para liberar'
+                    {stats.hasPendingTasks
+                      ? `Tienes ${stats.pendingOvertimeItems.length + stats.pendingMissingPunchItems.length + stats.blockingNoFormatItems.length} tarea(s) pendiente(s)`
                       : 'Confirmar y Liberar Nómina a RH'}
                   </span>
                 </button>

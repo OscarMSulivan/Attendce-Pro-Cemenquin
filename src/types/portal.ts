@@ -5,6 +5,13 @@
 
 export type UserRole = 'admin' | 'rh' | 'supervisor';
 
+export type PortalModule = 
+  | 'nomina'        // Dashboard y Tabla de Asistencia / Trabajo de Nómina
+  | 'semaforo'      // Semáforo de Nóminas y Dispersión
+  | 'incidencias'   // Bandeja de Incidencias
+  | 'contpaqi'      // Exportador CONTPAQi® Nóminas
+  | 'usuarios';     // Administración de Usuarios y Permisos
+
 export interface PortalUser {
   id: string;
   name: string;
@@ -13,6 +20,8 @@ export interface PortalUser {
   email: string;
   role: UserRole;
   employeeId?: string;    // Formato de 5 dígitos (ej: "00615")
+  // Módulos específicos a los que este usuario tiene permiso de entrar
+  allowedModules?: PortalModule[];
   // Lista principal de supervisor asignada en el catálogo de empleados
   supervisorName?: string;
   // Todas las listas de nómina que este usuario tiene asignadas para trabajar
@@ -21,6 +30,28 @@ export interface PortalUser {
   delegatedSupervisor?: string;
   active: boolean;
   notes?: string;
+}
+
+/**
+ * Obtiene los módulos permitidos para un usuario, garantizando defaults según su rol si no fueron configurados manualmente.
+ */
+export function getUserAllowedModules(user: PortalUser): PortalModule[] {
+  if (Array.isArray(user.allowedModules) && user.allowedModules.length > 0) {
+    return user.allowedModules;
+  }
+  if (user.role === 'admin') {
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'usuarios'];
+  }
+  if (user.role === 'rh') {
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi'];
+  }
+  return ['nomina', 'incidencias'];
+}
+
+export function userHasModuleAccess(user: PortalUser, module: PortalModule): boolean {
+  if (user.role === 'admin') return true;
+  const mods = getUserAllowedModules(user);
+  return mods.includes(module);
 }
 
 /**

@@ -88,6 +88,8 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
 
   const getActiveViewTitle = () => {
     switch (activeTab) {
+      case 'inicio':
+        return 'Panel de Inicio y Bienvenida';
       case 'semaforo':
         return 'Semáforo de Liberación de Nóminas';
       case 'incidencias':
@@ -95,7 +97,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
       case 'contpaqi':
         return 'Exportación CONTPAQi® Nóminas';
       case 'usuarios':
-        return 'Gestión de Usuarios y Listas';
+        return 'Gestión de Usuarios y Permisos';
       default:
         return currentUser.role === 'supervisor'
           ? 'Portal de Validación de Supervisor'

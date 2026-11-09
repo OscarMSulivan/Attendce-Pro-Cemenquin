@@ -21,14 +21,16 @@ import {
   Laptop,
   Download,
   Upload,
-  X
+  Calendar,
+  X,
 } from 'lucide-react';
-import { UserRole } from '../types/portal';
+import { UserRole, PortalUser, userHasModuleAccess } from '../types/portal';
 
 interface SidebarNavProps {
   activeTab: string;
   onTabChange: (tab: string) => void;
   userRole: UserRole;
+  currentUser?: PortalUser;
   pendingIncidentsCount: number;
   pendingReleasesCount: number;
   onOpenSchedules: () => void;
@@ -49,6 +51,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   activeTab,
   onTabChange,
   userRole,
+  currentUser,
   pendingIncidentsCount,
   pendingReleasesCount,
   onOpenSchedules,
@@ -74,15 +77,29 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     if (onCloseMobile) onCloseMobile();
   };
 
+  const checkAccess = (mod: 'nomina' | 'semaforo' | 'incidencias' | 'contpaqi' | 'usuarios') => {
+    if (!currentUser) return true;
+    return userHasModuleAccess(currentUser, mod);
+  };
+
   const primaryItems = [
     {
-      id: 'nomina',
-      label: isSupervisor ? 'Mi Portal Supervisor' : 'Dashboard Nómina',
+      id: 'inicio',
+      label: 'Inicio (Bienvenida)',
       icon: Home,
+      onClick: () => handleAction(() => onTabChange('inicio')),
+      isActive: activeTab === 'inicio',
+      badge: 0,
+      show: true,
+    },
+    {
+      id: 'nomina',
+      label: isSupervisor ? 'Mi Lista de Nómina' : 'Dashboard Nómina',
+      icon: Calendar,
       onClick: () => handleAction(() => onTabChange('nomina')),
       isActive: activeTab === 'nomina',
       badge: 0,
-      show: true,
+      show: checkAccess('nomina'),
     },
     {
       id: 'semaforo',
@@ -91,7 +108,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(() => onTabChange('semaforo')),
       isActive: activeTab === 'semaforo',
       badge: pendingReleasesCount,
-      show: !isSupervisor,
+      show: checkAccess('semaforo'),
     },
     {
       id: 'incidencias',
@@ -100,7 +117,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(() => onTabChange('incidencias')),
       isActive: activeTab === 'incidencias',
       badge: pendingIncidentsCount,
-      show: true,
+      show: checkAccess('incidencias'),
     },
     {
       id: 'contpaqi',
@@ -109,16 +126,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(() => onTabChange('contpaqi')),
       isActive: activeTab === 'contpaqi',
       badge: 0,
-      show: !isSupervisor,
+      show: checkAccess('contpaqi'),
     },
     {
       id: 'usuarios',
-      label: 'Usuarios y Listas',
+      label: 'Usuarios y Permisos',
       icon: Users,
       onClick: () => handleAction(() => onTabChange('usuarios')),
       isActive: activeTab === 'usuarios',
       badge: 0,
-      show: userRole === 'admin',
+      show: checkAccess('usuarios'),
     },
   ].filter(item => item.show);
 

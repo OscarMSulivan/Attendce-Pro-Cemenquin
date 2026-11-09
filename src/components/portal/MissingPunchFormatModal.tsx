@@ -16,7 +16,8 @@ import {
   X,
   CreditCard,
   Briefcase,
-  FileSignature
+  FileSignature,
+  Lock
 } from 'lucide-react';
 import { Employee, ProcessedDay } from '../../types/attendance';
 import { IncidentType, doesIncidentRequireMandatoryFile } from '../../types/portal';
@@ -421,25 +422,43 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
                   <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
                     Hora de Entrada (Orig: {day.entradaOriginal || '--:--'})
                   </label>
-                  <input
-                    type="time"
-                    value={entrada}
-                    onChange={(e) => setEntrada(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-purple-500/40 text-slate-100 font-mono text-xs outline-none focus:border-purple-400"
-                    required
-                  />
+                  {hadOriginalEnt ? (
+                    <div className="w-full rounded-lg px-3 py-2 bg-slate-900 border border-slate-800 text-slate-200 font-mono text-xs flex items-center justify-between">
+                      <span>{entrada}</span>
+                      <span className="text-[9px] text-slate-500 font-sans font-bold flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Registrada
+                      </span>
+                    </div>
+                  ) : (
+                    <input
+                      type="time"
+                      value={entrada}
+                      onChange={(e) => setEntrada(e.target.value)}
+                      className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-purple-500/40 text-slate-100 font-mono text-xs outline-none focus:border-purple-400"
+                      required
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
                     Hora de Salida (Orig: {day.salidaOriginal || '--:--'})
                   </label>
-                  <input
-                    type="time"
-                    value={salida}
-                    onChange={(e) => setSalida(e.target.value)}
-                    className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-purple-500/40 text-slate-100 font-mono text-xs outline-none focus:border-purple-400"
-                    required
-                  />
+                  {hadOriginalSal ? (
+                    <div className="w-full rounded-lg px-3 py-2 bg-slate-900 border border-slate-800 text-slate-200 font-mono text-xs flex items-center justify-between">
+                      <span>{salida}</span>
+                      <span className="text-[9px] text-slate-500 font-sans font-bold flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Registrada
+                      </span>
+                    </div>
+                  ) : (
+                    <input
+                      type="time"
+                      value={salida}
+                      onChange={(e) => setSalida(e.target.value)}
+                      className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-purple-500/40 text-slate-100 font-mono text-xs outline-none focus:border-purple-400"
+                      required
+                    />
+                  )}
                 </div>
               </div>
             </div>

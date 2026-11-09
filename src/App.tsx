@@ -55,6 +55,7 @@ import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseMod
 import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
 import { DayResolutionPayload } from './components/portal/MissingPunchFormatModal';
+import { WelcomeDashboard } from './components/portal/WelcomeDashboard';
 import { PortalService } from './services/portalService';
 import {
   PortalUser,
@@ -65,8 +66,10 @@ import {
   PayrollModificationLog,
   IncidentType,
   getUserAllowedLists,
+  userHasModuleAccess,
 } from './types/portal';
 import { ListChecks, Send, Mail, CheckCircle2 } from 'lucide-react';
+import { ToastContainer, ToastItem, ToastType } from './components/Toast';
 
 
 export default function App() {
@@ -98,6 +101,19 @@ export default function App() {
   // Mensaje de estado
   const [statusMessage, setStatusMessage] = useState<string>('Esperando archivos de nómina...');
   const [statusType, setStatusType] = useState<'info' | 'success' | 'warning' | 'error'>('info');
+
+  // Sistema de notificaciones Toast flotantes para feedback de acciones masivas y cambios críticos
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const showToast = useCallback((message: string, type: ToastType = 'success', title?: string, duration = 4500) => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const newToast: ToastItem = { id, type, message, title, duration };
+    setToasts(prev => [newToast, ...prev.slice(0, 3)]);
+  }, []);
+
+  const handleDismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   // Reporte calculado
   const [reportes, setReportes] = useState<EmployeeReport[]>([]);
@@ -1190,6 +1206,7 @@ export default function App() {
 
       setStatusMessage(`✓ Archivo descargado: ${nombreArchivo}`);
       setStatusType('success');
+      showToast(`Archivo "${nombreArchivo}" generado y descargado exitosamente.`, 'success', 'Excel Generado');
     } catch (err: any) {
       console.error(err);
       setStatusMessage(`✗ Error al exportar Excel: ${err.message}`);
@@ -1304,6 +1321,7 @@ Saludos.`
 
     setStatusMessage(`✓ Horario "${code}" guardado y sincronizado con la lista`);
     setStatusType('success');
+    showToast(`Horario "${code}" guardado y sincronizado con el reporte.`, 'success', 'Turno Guardado');
   };
 
   // Eliminar Horario
@@ -1322,6 +1340,7 @@ Saludos.`
 
     setStatusMessage(`Horario "${code}" eliminado`);
     setStatusType('info');
+    showToast(`Horario "${code}" eliminado del catálogo.`, 'info', 'Turno Eliminado');
   };
 
   // Asignar Horario Individual
@@ -1339,6 +1358,7 @@ Saludos.`
     }
     setStatusMessage(`✓ Horario ${scheduleCode || 'ADMO'} asignado a colaborador #${empId}`);
     setStatusType('success');
+    showToast(`Horario ${scheduleCode || 'ADMO'} asignado a colaborador #${empId}`, 'success', 'Horario Asignado');
   };
 
   // Asignar Horario Masivo
@@ -1366,6 +1386,7 @@ Saludos.`
 
     setStatusMessage(`✓ Horario asignado a ${empIds.length} colaboradores`);
     setStatusType('success');
+    showToast(`Horario asignado a ${empIds.length} colaboradores en lote.`, 'success', 'Asignación Masiva');
   };
 
   // Exportar respaldo JSON
@@ -1375,6 +1396,7 @@ Saludos.`
     saveAs(blob, `AttendancePRO_Respaldo_${dateStr}.json`);
     setStatusMessage('✓ Respaldo exportado correctamente');
     setStatusType('success');
+    showToast('Archivo de respaldo descargado correctamente.', 'success', 'Respaldo Generado');
   };
 
   // Importar respaldo JSON
@@ -1394,6 +1416,7 @@ Saludos.`
 
       setStatusMessage('✓ Respaldo importado y restaurado correctamente');
       setStatusType('success');
+      showToast('Respaldo importado y base de datos restaurada con éxito.', 'success', 'Respaldo Restaurado');
     } catch (err: any) {
       alert(`Error al importar: ${err.message}`);
     }
@@ -1415,6 +1438,7 @@ Saludos.`
 
     setStatusMessage('✓ Configuración actualizada');
     setStatusType('success');
+    showToast('Configuración general y parámetros del sistema guardados con éxito.', 'success', 'Configuración Guardada');
   };
 
   // Descargar versión portable .HTML bajo demanda sin inflar el bundle inicial
@@ -1456,16 +1480,35 @@ Saludos.`
     let sumN = 0;
     let sumE = 0;
     let sumAlerts = 0;
+    let pendingOT = 0;
+    let pendingMissing = 0;
     supervisorTeamReports.forEach(r => {
       sumN += r.totalNormal;
-      sumE += r.totalExtra;
-      sumAlerts += r.dias.filter(d => d.advertencia || d.huerfana).length;
+      r.dias.forEach(d => {
+        if (d.hExtra > 0) {
+          if (d.horasExtrasAutorizadas === true) {
+            sumE += d.hExtra;
+          } else if (d.horasExtrasAutorizadas === undefined) {
+            pendingOT++;
+          }
+        }
+        const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
+        const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+        if (d.horarioProgramado && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor && d.incidencia !== 'Vacaciones') {
+          pendingMissing++;
+        }
+        if (d.advertencia || d.huerfana) {
+          sumAlerts++;
+        }
+      });
     });
     return {
       empleadosCount: supervisorTeamReports.length,
       horasNormales: sumN,
       horasExtras: sumE,
-      alertasCount: sumAlerts
+      alertasCount: sumAlerts,
+      pendingOvertimeCount: pendingOT,
+      pendingMissingPunchCount: pendingMissing,
     };
   }, [supervisorTeamReports]);
 
@@ -1488,7 +1531,7 @@ Saludos.`
 
   const handleLoginSuccess = (user: PortalUser) => {
     handleSwitchUser(user.id);
-    setPortalTab('nomina');
+    setPortalTab('inicio');
   };
 
   const handleLogout = () => {
@@ -1514,6 +1557,7 @@ Saludos.`
     });
     setStatusMessage(`✓ Usuario "${user.name}" guardado correctamente`);
     setStatusType('success');
+    showToast(`El usuario "${user.name}" y sus accesos fueron guardados en el sistema.`, 'success', 'Usuario Guardado');
   };
 
   const handleDeletePortalUser = (userId: string) => {
@@ -1524,6 +1568,7 @@ Saludos.`
     });
     setStatusMessage('Usuario eliminado del sistema');
     setStatusType('info');
+    showToast('El usuario fue removido del sistema.', 'info', 'Usuario Eliminado');
   };
 
   // Incidencias (Aprobar, Rechazar, Crear)
@@ -1546,6 +1591,7 @@ Saludos.`
     });
     setStatusMessage('✓ Incidencia aprobada e integrada a los cálculos de nómina');
     setStatusType('success');
+    showToast('La incidencia fue aprobada e integrada a los cálculos de nómina.', 'success', 'Incidencia Aprobada');
   };
 
   const handleRejectIncident = (incidentId: string, notes?: string) => {
@@ -1567,6 +1613,7 @@ Saludos.`
     });
     setStatusMessage('Incidencia marcada como rechazada');
     setStatusType('info');
+    showToast('La solicitud de incidencia fue rechazada.', 'info', 'Incidencia Rechazada');
   };
 
   const handleSubmitNewIncident = (newIncident: IncidentRequest) => {
@@ -1578,6 +1625,7 @@ Saludos.`
     setIsNewIncidentModalOpen(false);
     setStatusMessage('✓ Solicitud de incidencia enviada exitosamente a RH');
     setStatusType('success');
+    showToast('Solicitud de incidencia enviada exitosamente a Recursos Humanos.', 'success', 'Incidencia Registrada');
   };
 
   // Liberar nómina formalmente a RH (Supervisor)
@@ -1606,6 +1654,7 @@ Saludos.`
     setIsReleaseModalOpen(false);
     setStatusMessage(`✓ Nómina de ${currentSupervisorForRelease} liberada formalmente a RH`);
     setStatusType('success');
+    showToast(`La nómina de ${currentSupervisorForRelease} (Semana ${currentWeekNumber}) fue liberada a RH.`, 'success', 'Nómina Liberada');
   };
 
   // Verificar si la semana actual ya fue dispersada (total o parcialmente) por Nóminas/RH
@@ -1660,6 +1709,7 @@ Saludos.`
       const fileName = await exportPayrollExcelBySupervisor(supReports, currentWeekNumber, supName);
       setStatusMessage(`✓ Archivo descargado: ${fileName}`);
       setStatusType('success');
+      showToast(`Archivo "${fileName}" descargado para ${supName}.`, 'success', 'Excel Generado');
     } catch (e: any) {
       setStatusMessage(`Error al exportar: ${e.message}`);
       setStatusType('error');
@@ -1705,6 +1755,13 @@ Saludos.`
       );
     }
     setStatusType('success');
+    showToast(
+      targets.length === 1
+        ? `Nómina dispersada para ${targets[0]} (Semana ${semanaNum}). Notificaciones enviadas.`
+        : `Dispersión completada: ${targets.length} listas enviadas a los supervisores (Semana ${semanaNum}).`,
+      'success',
+      'Nómina Dispersada'
+    );
   };
 
   // Descargar el archivo Excel devuelto por el supervisor con sus modificaciones
@@ -1925,6 +1982,7 @@ Saludos.`
       {/* Barra Lateral de Navegación Inspirada en el Dashboard */}
       <SidebarNav
         userRole={currentUser.role}
+        currentUser={currentUser}
         activeTab={portalTab}
         onTabChange={setPortalTab}
         pendingIncidentsCount={pendingIncidentsCount}
@@ -1967,6 +2025,32 @@ Saludos.`
 
         {/* Contenido principal según la pestaña activa del portal y el rol */}
         <main className="flex-1 max-w-[1600px] mx-auto w-full px-3 sm:px-5 lg:px-6 py-5 sm:py-6">
+        {/* VISTA 0: PANEL DE INICIO Y BIENVENIDA */}
+        {portalTab === 'inicio' && (
+          <WelcomeDashboard
+            currentUser={currentUser}
+            selectedWeek={selectedWeek}
+            currentWeekNumber={currentWeekNumber}
+            reportesCount={reportes.length}
+            hasEmployees={Object.keys(empleadosDB).length > 0}
+            hasEvents={Object.keys(eventosDB).length > 0}
+            onNavigateTab={setPortalTab}
+            pendingIncidentsCount={pendingIncidentsCount}
+            pendingReleasesCount={pendingReleasesCount}
+            isPayrollReleased={isPayrollReleased}
+            supervisorPendingOvertimeCount={supervisorTeamStats.pendingOvertimeCount}
+            supervisorPendingMissingPunchCount={supervisorTeamStats.pendingMissingPunchCount}
+            supervisorTotalPendingTasks={
+              (supervisorTeamStats.pendingOvertimeCount || 0) +
+              (supervisorTeamStats.pendingMissingPunchCount || 0) +
+              (supervisorTeamStats.alertasCount || 0)
+            }
+            assignedSupervisorList={allowedSupervisors[0] || currentUser.supervisorName}
+            onOpenSchedules={() => setIsSchedulesOpen(true)}
+            onOpenAssign={() => setIsAssignOpen(true)}
+          />
+        )}
+
         {/* VISTA DEDICADA PARA SUPERVISORES */}
         {currentUser.role === 'supervisor' && portalTab === 'nomina' && (
           <SupervisorWorkspaceView
@@ -2120,7 +2204,7 @@ Saludos.`
           />
         )}
 
-        {portalTab === 'contpaqi' && currentUser.role !== 'supervisor' && (
+        {portalTab === 'contpaqi' && userHasModuleAccess(currentUser, 'contpaqi') && (
           <ContpaqiExportView
             reports={reportes}
             releases={releases}
@@ -2130,7 +2214,7 @@ Saludos.`
           />
         )}
 
-        {portalTab === 'incidencias' && (
+        {portalTab === 'incidencias' && userHasModuleAccess(currentUser, 'incidencias') && (
           <IncidentsManagementView
             currentUser={currentUser}
             incidents={incidents}
@@ -2140,7 +2224,7 @@ Saludos.`
           />
         )}
 
-        {portalTab === 'usuarios' && currentUser.role === 'admin' && (
+        {portalTab === 'usuarios' && userHasModuleAccess(currentUser, 'usuarios') && (
           <AdminUsersView
             users={portalUsers}
             supervisorsInCatalog={supervisorsList}
@@ -2244,6 +2328,8 @@ Saludos.`
           horasNormales={supervisorTeamStats.horasNormales}
           horasExtras={supervisorTeamStats.horasExtras}
           alertasCount={supervisorTeamStats.alertasCount}
+          pendingOvertimeCount={supervisorTeamStats.pendingOvertimeCount}
+          pendingMissingPunchCount={supervisorTeamStats.pendingMissingPunchCount}
           onClose={() => setIsReleaseModalOpen(false)}
           onConfirmRelease={handleConfirmRelease}
         />
@@ -2381,6 +2467,9 @@ Saludos.`
           </div>
         </div>
       )}
+
+      {/* Notificaciones flotantes Toast para acciones masivas y feedback visual */}
+      <ToastContainer toasts={toasts} onDismiss={handleDismissToast} />
     </div>
   );
 }

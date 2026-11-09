@@ -26,7 +26,7 @@ import {
   Cpu,
   Globe
 } from 'lucide-react';
-import { PortalUser, UserRole, getUserAllowedLists } from '../../types/portal';
+import { PortalUser, UserRole, PortalModule, getUserAllowedLists, getUserAllowedModules } from '../../types/portal';
 import { normalizeEmployeeId, normalizeSupervisorName } from '../../utils/calendarUtils';
 import saveAs from 'file-saver';
 
@@ -57,6 +57,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const [email, setEmail] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [role, setRole] = useState<UserRole>('supervisor');
+  const [allowedModules, setAllowedModules] = useState<PortalModule[]>(['nomina', 'incidencias']);
   const [assignedLists, setAssignedLists] = useState<string[]>([]);
   const [customListName, setCustomListName] = useState('');
   const [delegatedSupervisor, setDelegatedSupervisor] = useState('');
@@ -88,6 +89,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setEmail('');
     setEmployeeId('');
     setRole('supervisor');
+    setAllowedModules(['nomina', 'incidencias']);
     setAssignedLists(allAvailableLists[0] ? [allAvailableLists[0]] : []);
     setCustomListName('');
     setDelegatedSupervisor('');
@@ -106,6 +108,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setEmail(user.email);
     setEmployeeId(user.employeeId || '');
     setRole(user.role);
+    setAllowedModules(getUserAllowedModules(user));
     const currentLists = user.assignedLists && user.assignedLists.length > 0
       ? user.assignedLists
       : user.supervisorName
@@ -117,6 +120,14 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setActiveStatus(user.active !== false);
     setNotes(user.notes || '');
     setIsModalOpen(true);
+  };
+
+  const handleToggleModule = (mod: PortalModule) => {
+    setAllowedModules(prev =>
+      prev.includes(mod)
+        ? prev.filter(m => m !== mod)
+        : [...prev, mod]
+    );
   };
 
   const handleToggleAssignedList = (listName: string) => {
@@ -153,6 +164,11 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       return;
     }
 
+    if (allowedModules.length === 0) {
+      setFormError('Selecciona al menos un módulo del sistema al que este usuario tendrá acceso.');
+      return;
+    }
+
     const userToSave: PortalUser = {
       id: editingId || `user_${Date.now()}`,
       name: name.trim(),
@@ -161,6 +177,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       email: email.trim().toLowerCase() || `${cleanUsername}@empresa.com`,
       role,
       employeeId: normalizedEmpId,
+      allowedModules,
       supervisorName: role === 'supervisor' ? assignedLists[0] : undefined,
       assignedLists: role === 'supervisor' ? assignedLists : [],
       delegatedSupervisor: delegatedSupervisor ? delegatedSupervisor : undefined,
@@ -456,6 +473,23 @@ pm2 save && pm2 startup`}
                   </div>
                 </div>
 
+                {/* Módulos de Acceso Permitidos */}
+                <div className="mt-2.5 p-2.5 rounded-xl bg-[#171821] border border-[#2C2D3C] text-[11px]">
+                  <span className="text-[#8C8D9B] block text-[9px] uppercase font-bold tracking-wider mb-1.5">
+                    Módulos con Acceso Permitido:
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {getUserAllowedModules(u).map((mod) => (
+                      <span
+                        key={mod}
+                        className="px-2 py-0.5 rounded-md bg-[#20AEF3]/10 text-[#20AEF3] border border-[#20AEF3]/25 font-bold text-[9px] uppercase"
+                      >
+                        {mod === 'nomina' ? 'Nómina' : mod === 'semaforo' ? 'Semáforo' : mod === 'incidencias' ? 'Incidencias' : mod === 'contpaqi' ? 'CONTPAQi' : 'Usuarios'}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Listas asignadas */}
                 {u.role === 'supervisor' && (
                   <div className="mt-2.5 p-3 rounded-xl bg-[#171821] border border-[#2C2D3C] text-[11px]">
@@ -672,7 +706,107 @@ pm2 save && pm2 startup`}
                 </select>
               </div>
 
-              {/* ASIGNACIÓN DE QUÉ LISTA(S) TRABAJARÁ EL SUPERVISOR */}
+              {/* ASIGNACIÓN DE PERMISOS Y ACCESO A MÓDULOS */}
+              <div className="p-4 rounded-xl bg-[#171821] border border-[#20AEF3]/40 space-y-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-[#20AEF3] flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Permisos y Acceso a Módulos del Sistema *</span>
+                  </label>
+                  <p className="text-[11px] text-[#8C8D9B] mt-0.5">
+                    Selecciona exactamente a qué módulos puede entrar este colaborador (ej. Nómina, Semáforo, Incidencias o CONTPAQi).
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    allowedModules.includes('nomina')
+                      ? 'bg-[#20AEF3]/15 border-[#20AEF3]/50 text-[#20AEF3]'
+                      : 'bg-[#21222D] border-[#2C2D3C] text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={allowedModules.includes('nomina')}
+                      onChange={() => handleToggleModule('nomina')}
+                      className="mt-0.5 rounded accent-[#20AEF3]"
+                    />
+                    <div>
+                      <strong className="block text-xs font-bold text-white">Nómina y Asistencia</strong>
+                      <span className="text-[10px] text-[#8C8D9B] block">Trabajo de checadas, horarios y asistencias de listas</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    allowedModules.includes('semaforo')
+                      ? 'bg-[#A9DFD8]/15 border-[#A9DFD8]/50 text-[#A9DFD8]'
+                      : 'bg-[#21222D] border-[#2C2D3C] text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={allowedModules.includes('semaforo')}
+                      onChange={() => handleToggleModule('semaforo')}
+                      className="mt-0.5 rounded accent-[#A9DFD8]"
+                    />
+                    <div>
+                      <strong className="block text-xs font-bold text-white">Semáforo de Nóminas</strong>
+                      <span className="text-[10px] text-[#8C8D9B] block">Monitoreo de liberación y dispersión semanal</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    allowedModules.includes('incidencias')
+                      ? 'bg-[#FEB95A]/15 border-[#FEB95A]/50 text-[#FEB95A]'
+                      : 'bg-[#21222D] border-[#2C2D3C] text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={allowedModules.includes('incidencias')}
+                      onChange={() => handleToggleModule('incidencias')}
+                      className="mt-0.5 rounded accent-[#FEB95A]"
+                    />
+                    <div>
+                      <strong className="block text-xs font-bold text-white">Bandeja de Incidencias</strong>
+                      <span className="text-[10px] text-[#8C8D9B] block">Solicitudes, permisos y validación de formatos</span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
+                    allowedModules.includes('contpaqi')
+                      ? 'bg-[#F2C8ED]/15 border-[#F2C8ED]/50 text-[#F2C8ED]'
+                      : 'bg-[#21222D] border-[#2C2D3C] text-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={allowedModules.includes('contpaqi')}
+                      onChange={() => handleToggleModule('contpaqi')}
+                      className="mt-0.5 rounded accent-[#F2C8ED]"
+                    />
+                    <div>
+                      <strong className="block text-xs font-bold text-white">CONTPAQi® Nóminas</strong>
+                      <span className="text-[10px] text-[#8C8D9B] block">Exportador y layout con claves de incidencias</span>
+                    </div>
+                  </label>
+
+                  {role === 'admin' && (
+                    <label className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all sm:col-span-2 ${
+                      allowedModules.includes('usuarios')
+                        ? 'bg-purple-500/15 border-purple-500/50 text-purple-300'
+                        : 'bg-[#21222D] border-[#2C2D3C] text-slate-300'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={allowedModules.includes('usuarios')}
+                        onChange={() => handleToggleModule('usuarios')}
+                        className="mt-0.5 rounded accent-purple-500"
+                      />
+                      <div>
+                        <strong className="block text-xs font-bold text-white">Administración de Usuarios</strong>
+                        <span className="text-[10px] text-[#8C8D9B] block">Crear credenciales, asignar listas y otorgar accesos</span>
+                      </div>
+                    </label>
+                  )}
+                </div>
+              </div>
               {role === 'supervisor' && (
                 <div className="p-4 rounded-xl bg-[#171821] border border-[#FEB95A]/40 space-y-3">
                   <div>
