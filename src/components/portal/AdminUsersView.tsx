@@ -796,6 +796,23 @@ echo "pm2 save && pm2 startup"
             </div>
           </div>
 
+          {/* Guía rápida para Contraseña de Aplicación de Google / Gmail */}
+          {(smtpForm.smtpHost?.toLowerCase().includes('gmail') || smtpForm.smtpUser?.toLowerCase().includes('@gmail')) && (
+            <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-[11px] text-amber-900 dark:text-amber-200">
+              <div>
+                <strong className="font-bold">⚠️ Importante para cuentas @gmail.com / Google Workspace:</strong> Google no permite usar tu contraseña normal en servidores SMTP (Error 534-5.7.9). Debes generar una <strong>Contraseña de Aplicación de 16 letras</strong> en tu cuenta de Google y pegarla en el campo de contraseña.
+              </div>
+              <a
+                href="https://myaccount.google.com/apppasswords"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-[11px] shrink-0 text-center transition-colors"
+              >
+                Generar Clave en Google ↗
+              </a>
+            </div>
+          )}
+
           {/* Fila inferior: Nombre remitente, SSL/TLS, Probar y Guardar */}
           <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-100 dark:border-[#2C2D3C]/60">
             <div className="flex flex-wrap items-center gap-4">

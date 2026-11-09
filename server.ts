@@ -126,24 +126,35 @@ async function startServer() {
       const nodemailer = await import('nodemailer');
       const { smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure } = req.body || {};
 
-      if (!smtpUser || !smtpPass) {
-        return res.status(400).json({
+      const cleanUser = String(smtpUser || '').trim();
+      const rawPass = String(smtpPass || '').trim();
+
+      if (!cleanUser || !rawPass) {
+        return res.status(200).json({
           ok: false,
           error: 'Faltan credenciales: se requiere Correo de Nóminas y Contraseña / Clave de aplicación.',
         });
       }
 
-      const host = smtpHost || (smtpUser.includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com');
+      const host = String(
+        smtpHost || (cleanUser.toLowerCase().includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com')
+      ).trim();
       const port = Number(smtpPort) || 587;
       const secure = Boolean(smtpSecure) || port === 465;
+
+      // Si es Gmail / Google Workspace y el usuario pegó la Contraseña de Aplicación con espacios (ej. "abcd efgh ijkl mnop"), eliminar espacios
+      const isGoogleHost = host.toLowerCase().includes('gmail') || cleanUser.toLowerCase().includes('@gmail');
+      const cleanPass = isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass)
+        ? rawPass.replace(/\s+/g, '')
+        : rawPass;
 
       const transporter = nodemailer.createTransport({
         host,
         port,
         secure,
         auth: {
-          user: smtpUser,
-          pass: smtpPass,
+          user: cleanUser,
+          pass: cleanPass,
         },
         connectionTimeout: 8000,
       });
@@ -152,10 +163,10 @@ async function startServer() {
 
       // Enviar correo de prueba al mismo remitente
       const info = await transporter.sendMail({
-        from: `"AttendancePRO Nóminas" <${smtpUser}>`,
-        to: smtpUser,
+        from: `"AttendancePRO Nóminas" <${cleanUser}>`,
+        to: cleanUser,
         subject: '✓ [AttendancePRO] Prueba de Conexión Exitosa',
-        text: `Hola,\n\nEste es un mensaje de prueba para verificar que el servidor de correo está correctamente conectado y listo para enviar alertas automáticas de nómina.\n\nServidor: ${host}:${port}\nUsuario: ${smtpUser}\nFecha: ${new Date().toLocaleString()}`,
+        text: `Hola,\n\nEste es un mensaje de prueba para verificar que el servidor de correo está correctamente conectado y listo para enviar alertas automáticas de nómina.\n\nServidor: ${host}:${port}\nUsuario: ${cleanUser}\nFecha: ${new Date().toLocaleString()}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
             <div style="background: #0f172a; padding: 12px 18px; border-radius: 8px; color: #a9dfd8; font-weight: bold; font-size: 14px; margin-bottom: 16px;">
@@ -167,23 +178,39 @@ async function startServer() {
             </p>
             <div style="background: #f8fafc; border-left: 4px solid #a9dfd8; padding: 10px 14px; margin: 16px 0; font-size: 12px; color: #334155;">
               <strong>Servidor:</strong> ${host}:${port}<br/>
-              <strong>Cuenta conectada:</strong> ${smtpUser}<br/>
+              <strong>Cuenta conectada:</strong> ${cleanUser}<br/>
               <strong>Fecha:</strong> ${new Date().toLocaleString()}
             </div>
           </div>
         `,
       });
 
-      return res.json({
+      return res.status(200).json({
         ok: true,
-        message: `Conexión verificada con éxito. Se envió un correo de prueba a ${smtpUser}.`,
+        message: `Conexión verificada con éxito. Se envió un correo de prueba a ${cleanUser}.`,
         messageId: info.messageId,
       });
     } catch (err: any) {
-      console.warn('Error probando SMTP:', err);
-      return res.status(500).json({
+      const rawMsg = String(err?.message || '');
+      let friendlyError = 'No se pudo autenticar con el servidor SMTP. Verifica el correo y la contraseña.';
+      let requiresAppPassword = false;
+
+      if (rawMsg.includes('534-5.7.9') || rawMsg.toLowerCase().includes('application-specific password required')) {
+        requiresAppPassword = true;
+        friendlyError =
+          'Google exige una "Contraseña de Aplicación" de 16 letras (no tu contraseña normal de Gmail). Activa la Verificación en 2 pasos en tu cuenta de Google y genera una Contraseña de Aplicación en myaccount.google.com/apppasswords.';
+      } else if (rawMsg.includes('535') || rawMsg.toLowerCase().includes('username and password not accepted')) {
+        requiresAppPassword = true;
+        friendlyError =
+          'Usuario o contraseña rechazados por el servidor (Código 535). Si usas Gmail u Office 365, asegúrate de colocar una Contraseña de Aplicación de 16 caracteres en lugar de tu contraseña habitual.';
+      } else if (rawMsg) {
+        friendlyError = `No se pudo conectar al servidor SMTP: ${rawMsg}`;
+      }
+
+      return res.status(200).json({
         ok: false,
-        error: err.message || 'Error al conectar con el servidor SMTP',
+        requiresAppPassword,
+        error: friendlyError,
       });
     }
   });
@@ -209,19 +236,28 @@ async function startServer() {
       if (emailConfig && emailConfig.smtpUser && emailConfig.smtpPass && Array.isArray(dispatches)) {
         try {
           const nodemailer = await import('nodemailer');
-          const host =
+          const cleanUser = String(emailConfig.smtpUser || '').trim();
+          const rawPass = String(emailConfig.smtpPass || '').trim();
+          const host = String(
             emailConfig.smtpHost ||
-            (emailConfig.smtpUser.includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com');
+              (cleanUser.toLowerCase().includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com')
+          ).trim();
           const port = Number(emailConfig.smtpPort) || 587;
           const secure = Boolean(emailConfig.smtpSecure) || port === 465;
+
+          const isGoogleHost = host.toLowerCase().includes('gmail') || cleanUser.toLowerCase().includes('@gmail');
+          const cleanPass =
+            isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass)
+              ? rawPass.replace(/\s+/g, '')
+              : rawPass;
 
           const transporter = nodemailer.createTransport({
             host,
             port,
             secure,
             auth: {
-              user: emailConfig.smtpUser,
-              pass: emailConfig.smtpPass,
+              user: cleanUser,
+              pass: cleanPass,
             },
             connectionTimeout: 10000,
           });
@@ -242,7 +278,7 @@ async function startServer() {
                 : 'A la brevedad posible';
 
               await transporter.sendMail({
-                from: `"${emailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${emailConfig.smtpUser}>`,
+                from: `"${emailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
                 to: d.recipientEmail,
                 subject: d.subject || `[AttendancePRO] Nómina Semana ${semanaNumero} Lista para Validación — ${d.supervisorName}`,
                 text:
@@ -288,12 +324,11 @@ async function startServer() {
               smtpSuccessCount++;
               deliveryResults.push({ email: d.recipientEmail, ok: true });
             } catch (singleErr: any) {
-              console.warn(`Error enviando correo a ${d.recipientEmail}:`, singleErr.message);
               deliveryResults.push({ email: d.recipientEmail, ok: false, info: singleErr.message });
             }
           }
-        } catch (smtpInitErr: any) {
-          console.warn('Error inicializando transporter SMTP:', smtpInitErr.message);
+        } catch (_smtpInitErr: any) {
+          // Transporter initialization error captured in delivery results
         }
       }
 
