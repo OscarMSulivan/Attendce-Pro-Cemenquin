@@ -6,14 +6,27 @@
 export type UserRole = 'admin' | 'rh' | 'supervisor';
 
 export type PortalModule = 
-  | 'nomina'        // Dashboard y Tabla de Asistencia / Trabajo de Nómina
-  | 'semaforo'      // Semáforo de Nóminas y Dispersión
-  | 'incidencias'   // Bandeja de Incidencias
-  | 'contpaqi'      // Exportador CONTPAQi® Nóminas
-  | 'tiempo_extra'  // Configuración de Reglas de Tiempo Extra
-  | 'tiempo_limite' // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
-  | 'smtp_correo'   // Configuración de Credenciales SMTP para Correo Automático
-  | 'usuarios';     // Administración de Usuarios, Roles y Permisos
+  | 'nomina'            // Dashboard y Tabla de Asistencia / Trabajo de Nómina
+  | 'semaforo'          // Semáforo de Nóminas y Dispersión
+  | 'incidencias'       // Bandeja de Incidencias
+  | 'contpaqi'          // Exportador CONTPAQi® Nóminas
+  | 'tiempo_extra'      // Configuración de Reglas de Tiempo Extra
+  | 'tiempo_limite'     // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
+  | 'plantillas_correo' // Configuración de Mensajes de Correo y Alerta por Vencimiento
+  | 'smtp_correo'       // Configuración de Credenciales SMTP para Correo Automático
+  | 'usuarios';         // Administración de Usuarios, Roles y Permisos
+
+export const ALL_PORTAL_MODULES: PortalModule[] = [
+  'nomina',
+  'semaforo',
+  'incidencias',
+  'contpaqi',
+  'tiempo_extra',
+  'tiempo_limite',
+  'plantillas_correo',
+  'smtp_correo',
+  'usuarios',
+];
 
 export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: string; description: string }> = {
   nomina: {
@@ -46,6 +59,11 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
     title: 'Límite de Tiempo para Trabajar Lista',
     description: 'Definir el plazo (por horas) para que supervisores liberen su nómina',
   },
+  plantillas_correo: {
+    short: 'Mensajes y Alertas',
+    title: 'Mensajes de Correo y Alerta por Vencer',
+    description: 'Personalizar el mensaje al dispersar nómina y la alerta automática antes de vencer el plazo',
+  },
   smtp_correo: {
     short: 'Correo SMTP',
     title: 'Credenciales de Correo SMTP',
@@ -54,7 +72,7 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
   usuarios: {
     short: 'Usuarios y Accesos',
     title: 'Administración de Usuarios y Roles',
-    description: 'Crear credenciales, asignar listas y otorgar accesos a módulos',
+    description: 'Crear credenciales, asignar rol de Administrador General, listas y módulos',
   },
 };
 
@@ -79,20 +97,18 @@ export interface PortalUser {
 }
 
 /**
- * Obtiene los módulos permitidos para un usuario, garantizando defaults según su rol si no fueron configurados manualmente.
+ * Obtiene los módulos permitidos para un usuario, garantizando que cualquier usuario con rol 'admin'
+ * tenga exactamente todos los accesos del usuario Administrador General.
  */
 export function getUserAllowedModules(user: PortalUser): PortalModule[] {
-  if (user.id === 'user_admin') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo', 'usuarios'];
+  if (user.id === 'user_admin' || user.role === 'admin') {
+    return [...ALL_PORTAL_MODULES];
   }
   if (Array.isArray(user.allowedModules) && user.allowedModules.length > 0) {
     return user.allowedModules;
   }
-  if (user.role === 'admin') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo', 'usuarios'];
-  }
   if (user.role === 'rh') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'plantillas_correo', 'smtp_correo'];
   }
   return ['nomina', 'incidencias'];
 }
@@ -104,14 +120,14 @@ export function userHasModuleAccess(user: PortalUser, module: PortalModule): boo
 }
 
 /**
- * Determina si el usuario tiene acceso a al menos una sección del panel Administrativo
- * (Gestión de Usuarios, Tiempo Extra, Configuración de Tiempo Límite de Liberación o Servidor SMTP).
+ * Determina si el usuario tiene acceso a al menos una sección del panel Administrativo / Configuración
  */
 export function userHasAnyAdminPanelAccess(user: PortalUser): boolean {
   return (
     userHasModuleAccess(user, 'usuarios') ||
     userHasModuleAccess(user, 'tiempo_extra') ||
     userHasModuleAccess(user, 'tiempo_limite') ||
+    userHasModuleAccess(user, 'plantillas_correo') ||
     userHasModuleAccess(user, 'smtp_correo')
   );
 }
@@ -262,6 +278,34 @@ export interface EmailServerConfig {
   smtpPass?: string;
   smtpSecure?: boolean;
   smtpFromName?: string;
+  // Plantillas personalizables para correo de dispersión inicial
+  asuntoDispersion?: string;
+  mensajeDispersion?: string;
+  // Configuración de alerta automática cuando está por vencer el tiempo límite
+  activarAlertaPorVencer?: boolean;
+  horasAntesVencimiento?: number; // ej. 2 (enviar alerta cuando falten 2 horas o menos)
+  asuntoPorVencer?: string;
+  mensajePorVencer?: string;
+}
+
+export const DEFAULT_EMAIL_TEMPLATES = {
+  asuntoDispersion: '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+  mensajeDispersion:
+    'Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una nómina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).',
+  activarAlertaPorVencer: true,
+  horasAntesVencimiento: 2,
+  asuntoPorVencer: '⚠️ [URGENTE] Tu tiempo para liberar la Nómina Semana {semana} está por finalizar — {supervisor}',
+  mensajePorVencer:
+    'Hola {nombre},\n\nTe recordamos que tienes la Nómina de la Semana {semana} ({periodo}) pendiente de liberar y el tiempo asignado está a punto de finalizar (restan aprox. {tiempo_restante}).\n\nFecha y hora límite: {fecha_limite}.\nPor favor ingresa de inmediato al portal para concluir la revisión y liberar tu lista.',
+};
+
+export function formatEmailTemplate(template: string, vars: Record<string, string>): string {
+  let output = template || '';
+  Object.entries(vars).forEach(([key, val]) => {
+    const regex = new RegExp(`\\{${key}\\}`, 'gi');
+    output = output.replace(regex, val ?? '');
+  });
+  return output;
 }
 
 export interface PayrollDispersal {
@@ -275,6 +319,7 @@ export interface PayrollDispersal {
   emailDispatches?: DispersalEmailDispatch[];
   horasLimite?: number;             // ej: 24 (horas para liberar)
   limiteLiberacion?: string;        // ISO string de fecha y hora límite
+  recordatoriosVencimientoEnviados?: string[]; // Supervisores a quienes ya se envió la alerta automática por vencer
   cancelada?: boolean;              // Indica si la dispersión fue cancelada globalmente
   fechaCancelacion?: string;        // ISO string
   canceladoPor?: string;            // Nombre de quien canceló

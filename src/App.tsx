@@ -334,6 +334,47 @@ export default function App() {
     emailConfig,
   ]);
 
+  // Revisión periódica (cada 45s) de alertas automáticas cuando el plazo de liberación está por vencer
+  useEffect(() => {
+    if (!isServerHydrated) return;
+    const hasActiveDispersalWithDeadline = dispersals.some(
+      d => !d.cancelada && Boolean(d.limiteLiberacion)
+    );
+    if (!hasActiveDispersalWithDeadline) return;
+
+    const checkExpiring = () => {
+      if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
+      fetch('/api/notifications/check-expiring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data && data.ok && data.remindersSent > 0) {
+            if (Array.isArray(data.dispersals)) {
+              setDispersals(data.dispersals);
+              PortalService.saveDispersals(data.dispersals);
+            }
+            if (Array.isArray(data.notifications)) {
+              setNotifications(data.notifications);
+              PortalService.saveNotifications(data.notifications);
+            }
+            showToast(
+              `Se envió alerta automática por vencimiento próximo a ${data.remindersSent} supervisor(es) con nómina pendiente.`,
+              'warning',
+              'Alerta Automática por Vencimiento'
+            );
+          }
+        })
+        .catch(() => {});
+    };
+
+    checkExpiring();
+    const interval = setInterval(checkExpiring, 45000);
+    return () => clearInterval(interval);
+  }, [isServerHydrated, dispersals, showToast]);
+
   // Usuario actual en sesión
   const currentUser = useMemo<PortalUser>(() => {
     return portalUsers.find(u => u.id === activeUserId) || portalUsers[0];

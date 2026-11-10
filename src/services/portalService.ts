@@ -466,20 +466,32 @@ export class PortalService {
   }
 
   static loadEmailConfig(): EmailServerConfig {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.EMAIL_CONFIG);
-      if (raw) return JSON.parse(raw);
-    } catch {
-      // ignore
-    }
-    return {
+    const defaults: EmailServerConfig = {
       smtpHost: 'smtp.gmail.com',
       smtpPort: 587,
       smtpUser: 'nominas@empresa.com',
       smtpPass: '',
       smtpSecure: false,
       smtpFromName: 'AttendancePRO Nóminas',
+      asuntoDispersion: '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+      mensajeDispersion:
+        'Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una nómina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).',
+      activarAlertaPorVencer: true,
+      horasAntesVencimiento: 2,
+      asuntoPorVencer: '⚠️ [URGENTE] Tu tiempo para liberar la Nómina Semana {semana} está por finalizar — {supervisor}',
+      mensajePorVencer:
+        'Hola {nombre},\n\nTe recordamos que tienes la Nómina de la Semana {semana} ({periodo}) pendiente de liberar y el tiempo asignado está a punto de finalizar (restan aprox. {tiempo_restante}).\n\nFecha y hora límite: {fecha_limite}.\nPor favor ingresa de inmediato al portal para concluir la revisión y liberar tu lista.',
     };
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.EMAIL_CONFIG);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { ...defaults, ...parsed };
+      }
+    } catch {
+      // ignore
+    }
+    return defaults;
   }
 
   static saveEmailConfig(cfg: EmailServerConfig): void {
@@ -489,7 +501,8 @@ export class PortalService {
 
   /**
    * Registra la dispersión de una o varias listas de nómina (soporta Dispersión Lista por Lista o Dispersar Todas),
-   * y genera automáticamente notificaciones tanto en el Sistema como al Correo Electrónico Empresarial del supervisor.
+   * y genera automáticamente notificaciones tanto en el Sistema como al Correo Electrónico Empresarial del supervisor
+   * usando la plantilla personalizada configurada por el administrador.
    */
   static recordDispersal(
     semanaNumero: number,
@@ -510,6 +523,7 @@ export class PortalService {
     const dispersals = this.loadDispersals();
     const existingIndex = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
     const existingDispersal = existingIndex >= 0 ? dispersals[existingIndex] : null;
+    const emailCfg = this.loadEmailConfig();
 
     const normalizedTargets = targetSupervisors.map(s => normalizeSupervisorName(s).toUpperCase());
 
@@ -521,11 +535,55 @@ export class PortalService {
       ])
     );
 
+    const effectiveHorasLimite =
+      horasLimite !== undefined ? horasLimite : existingDispersal?.horasLimite;
+
+    const effectiveLimiteLiberacion =
+      limiteLiberacion ||
+      (effectiveHorasLimite && effectiveHorasLimite > 0
+        ? new Date(Date.now() + effectiveHorasLimite * 3600000).toISOString()
+        : existingDispersal?.limiteLiberacion);
+
+    const limiteFormatted = effectiveLimiteLiberacion
+      ? new Date(effectiveLimiteLiberacion).toLocaleString('es-MX', {
+          weekday: 'short',
+          day: '2-digit',
+          month: 'short',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : effectiveHorasLimite
+      ? `${effectiveHorasLimite} horas`
+      : 'A la brevedad';
+
+    const periodoClean = semanaPeriodo.replace('|', ' al ');
     const nowISO = new Date().toISOString();
+
+    const renderTemplate = (tpl: string, vars: Record<string, string>) => {
+      let out = tpl || '';
+      Object.entries(vars).forEach(([k, v]) => {
+        out = out.replace(new RegExp(`\\{${k}\\}`, 'gi'), v ?? '');
+      });
+      return out;
+    };
+
     const customMsg =
       mensaje && mensaje.trim()
         ? mensaje.trim()
-        : `Tu lista de asistencia de la Semana ${semanaNumero} (${semanaPeriodo.replace('|', ' al ')}) ha sido dispersada por ${dispersadoPor}. Ingresa al portal para revisarla y liberarla.`;
+        : renderTemplate(
+            emailCfg.mensajeDispersion ||
+              'Tu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}. Ingresa al portal para revisarla y liberarla antes del {fecha_limite}.',
+            {
+              supervisor: normalizedTargets.length === 1 ? normalizedTargets[0] : 'SUPERVISORES',
+              nombre: normalizedTargets.length === 1 ? normalizedTargets[0] : 'Supervisor',
+              semana: String(semanaNumero),
+              periodo: periodoClean,
+              dispersado_por: dispersadoPor,
+              fecha_limite: limiteFormatted,
+              horas_limite: String(effectiveHorasLimite || 24),
+              tiempo_restante: `${effectiveHorasLimite || 24} hrs`,
+            }
+          );
 
     const newNotifications: PortalNotification[] = [];
     const emailDispatches: DispersalEmailDispatch[] = [];
@@ -543,6 +601,30 @@ export class PortalService {
         `${supListName.toLowerCase().replace(/\s+/g, '.')}@empresa.com`;
       const recipientName = matchedUser?.name || supListName;
 
+      const templateVars = {
+        supervisor: supListName,
+        nombre: recipientName,
+        semana: String(semanaNumero),
+        periodo: periodoClean,
+        dispersado_por: dispersadoPor,
+        fecha_limite: limiteFormatted,
+        horas_limite: String(effectiveHorasLimite || 24),
+        tiempo_restante: `${effectiveHorasLimite || 24} hrs`,
+      };
+
+      const personalizedMsg =
+        mensaje && mensaje.trim()
+          ? renderTemplate(mensaje.trim(), templateVars)
+          : renderTemplate(
+              emailCfg.mensajeDispersion || customMsg,
+              templateVars
+            );
+
+      const personalizedSubject = renderTemplate(
+        emailCfg.asuntoDispersion || '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+        templateVars
+      );
+
       const notif: PortalNotification = {
         id: `notif_${semanaNumero}_${supListName.replace(/\s+/g, '_')}_${Date.now()}`,
         targetSupervisor: supListName,
@@ -551,7 +633,7 @@ export class PortalService {
         semanaNumero,
         semanaPeriodo,
         titulo: `Nómina Semana ${semanaNumero} Dispersada — Lista ${supListName}`,
-        mensaje: customMsg,
+        mensaje: personalizedMsg,
         enviadoPor: dispersadoPor,
         fechaEnvio: nowISO,
         leida: false,
@@ -566,7 +648,7 @@ export class PortalService {
           recipientEmail,
           sentAt: nowISO,
           channel: 'sistema_y_correo',
-          subject: `[AttendancePRO] Nómina Semana ${semanaNumero} Lista para Validación — ${supListName}`,
+          subject: personalizedSubject,
         });
       }
     });
@@ -577,15 +659,6 @@ export class PortalService {
         prev => !normalizedTargets.includes(prev.supervisorName.toUpperCase())
       ),
     ];
-
-    const effectiveHorasLimite =
-      horasLimite !== undefined ? horasLimite : existingDispersal?.horasLimite;
-
-    const effectiveLimiteLiberacion =
-      limiteLiberacion ||
-      (effectiveHorasLimite && effectiveHorasLimite > 0
-        ? new Date(Date.now() + effectiveHorasLimite * 3600000).toISOString()
-        : existingDispersal?.limiteLiberacion);
 
     const newDispersal: PayrollDispersal = {
       id: existingDispersal?.id || `disp_semana_${semanaNumero}_${Date.now()}`,
@@ -598,6 +671,9 @@ export class PortalService {
       emailDispatches: combinedEmailDispatches,
       horasLimite: effectiveHorasLimite,
       limiteLiberacion: effectiveLimiteLiberacion,
+      recordatoriosVencimientoEnviados: (existingDispersal?.recordatoriosVencimientoEnviados || []).filter(
+        s => !normalizedTargets.includes(s.toUpperCase())
+      ),
       cancelada: false,
       supervisoresCancelados: (existingDispersal?.supervisoresCancelados || []).filter(
         s => !normalizedTargets.includes(s.toUpperCase())
@@ -627,7 +703,6 @@ export class PortalService {
 
     // Disparar envío automático en servidor Express con credenciales SMTP
     if (sendCorporateEmail && typeof window !== 'undefined' && window.location.protocol !== 'file:') {
-      const emailCfg = this.loadEmailConfig();
       fetch('/api/notifications/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
