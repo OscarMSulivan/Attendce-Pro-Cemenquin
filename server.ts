@@ -7,11 +7,21 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'portal_db.json');
+
+interface ServerEmailConfig {
+  smtpHost?: string;
+  smtpPort?: number;
+  smtpUser?: string;
+  smtpPass?: string;
+  smtpSecure?: boolean;
+  smtpFromName?: string;
+}
 
 interface ServerPortalDatabase {
   users?: unknown[];
@@ -29,6 +39,7 @@ interface ServerPortalDatabase {
   horarios?: Record<string, unknown>;
   asignaciones?: Record<string, string>;
   config?: Record<string, unknown>;
+  emailConfig?: ServerEmailConfig;
   updatedAt?: string;
 }
 
@@ -55,13 +66,61 @@ function readDatabase(): ServerPortalDatabase {
 function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalDatabase {
   ensureDataDir();
   const current = readDatabase();
+  const mergedConfig =
+    partial.config && typeof partial.config === 'object'
+      ? { ...(current.config || {}), ...partial.config }
+      : current.config;
+
   const updated: ServerPortalDatabase = {
     ...current,
     ...partial,
+    ...(mergedConfig ? { config: mergedConfig } : {}),
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), 'utf-8');
   return updated;
+}
+
+function resolveEmailConfig(override?: Partial<ServerEmailConfig>): ServerEmailConfig {
+  const db = readDatabase();
+  const fromConfig = (db.config?.emailServer as ServerEmailConfig | undefined) || {};
+  const fromRoot = db.emailConfig || {};
+  return {
+    ...fromConfig,
+    ...fromRoot,
+    ...(override || {}),
+  };
+}
+
+function createSmtpTransporter(emailConfig: ServerEmailConfig, timeoutMs = 8000) {
+  const cleanUser = String(emailConfig.smtpUser || '').trim();
+  const rawPass = String(emailConfig.smtpPass || '').trim();
+  const host = String(
+    emailConfig.smtpHost ||
+      (cleanUser.toLowerCase().includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com')
+  ).trim();
+  const port = Number(emailConfig.smtpPort) || 587;
+  const secure = Boolean(emailConfig.smtpSecure) || port === 465;
+
+  // Si es Gmail / Google Workspace y el usuario pegó la Contraseña de Aplicación con espacios (ej. "abcd efgh ijkl mnop"), eliminar espacios
+  const isGoogleHost = host.toLowerCase().includes('gmail') || cleanUser.toLowerCase().includes('@gmail');
+  const cleanPass =
+    isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass)
+      ? rawPass.replace(/\s+/g, '')
+      : rawPass;
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: {
+      user: cleanUser,
+      pass: cleanPass,
+    },
+    connectionTimeout: timeoutMs,
+  });
+
+  return { transporter, cleanUser, cleanPass, host, port, secure };
 }
 
 async function startServer() {
@@ -98,6 +157,10 @@ async function startServer() {
   app.post('/api/portal/sync', (req, res) => {
     try {
       const body = req.body || {};
+      const emailServerFromConfig =
+        body.config && typeof body.config === 'object' && body.config.emailServer
+          ? (body.config.emailServer as ServerEmailConfig)
+          : undefined;
       const updated = writeDatabase({
         ...(Array.isArray(body.users) ? { users: body.users } : {}),
         ...(Array.isArray(body.incidents) ? { incidents: body.incidents } : {}),
@@ -113,6 +176,11 @@ async function startServer() {
         ...(body.horarios && typeof body.horarios === 'object' ? { horarios: body.horarios } : {}),
         ...(body.asignaciones && typeof body.asignaciones === 'object' ? { asignaciones: body.asignaciones } : {}),
         ...(body.config && typeof body.config === 'object' ? { config: body.config } : {}),
+        ...(body.emailConfig && typeof body.emailConfig === 'object'
+          ? { emailConfig: body.emailConfig }
+          : emailServerFromConfig
+          ? { emailConfig: emailServerFromConfig }
+          : {}),
       });
       res.json({ ok: true, updatedAt: updated.updatedAt });
     } catch (err: any) {
@@ -123,47 +191,27 @@ async function startServer() {
   // Endpoint para probar conexión y credenciales SMTP
   app.post('/api/notifications/test-smtp', async (req, res) => {
     try {
-      const nodemailer = await import('nodemailer');
-      const { smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure } = req.body || {};
+      const activeEmailConfig = resolveEmailConfig(req.body || {});
+      const { transporter, cleanUser, cleanPass, host, port } = createSmtpTransporter(activeEmailConfig, 8000);
 
-      const cleanUser = String(smtpUser || '').trim();
-      const rawPass = String(smtpPass || '').trim();
-
-      if (!cleanUser || !rawPass) {
+      if (!cleanUser || !cleanPass) {
         return res.status(200).json({
           ok: false,
           error: 'Faltan credenciales: se requiere Correo de Nóminas y Contraseña / Clave de aplicación.',
         });
       }
 
-      const host = String(
-        smtpHost || (cleanUser.toLowerCase().includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com')
-      ).trim();
-      const port = Number(smtpPort) || 587;
-      const secure = Boolean(smtpSecure) || port === 465;
-
-      // Si es Gmail / Google Workspace y el usuario pegó la Contraseña de Aplicación con espacios (ej. "abcd efgh ijkl mnop"), eliminar espacios
-      const isGoogleHost = host.toLowerCase().includes('gmail') || cleanUser.toLowerCase().includes('@gmail');
-      const cleanPass = isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass)
-        ? rawPass.replace(/\s+/g, '')
-        : rawPass;
-
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: {
-          user: cleanUser,
-          pass: cleanPass,
-        },
-        connectionTimeout: 8000,
+      // Persistir la configuración probada en el estado del proyecto
+      writeDatabase({
+        emailConfig: activeEmailConfig,
+        config: { emailServer: activeEmailConfig },
       });
 
       await transporter.verify();
 
       // Enviar correo de prueba al mismo remitente
       const info = await transporter.sendMail({
-        from: `"AttendancePRO Nóminas" <${cleanUser}>`,
+        from: `"${activeEmailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
         to: cleanUser,
         subject: '✓ [AttendancePRO] Prueba de Conexión Exitosa',
         text: `Hola,\n\nEste es un mensaje de prueba para verificar que el servidor de correo está correctamente conectado y listo para enviar alertas automáticas de nómina.\n\nServidor: ${host}:${port}\nUsuario: ${cleanUser}\nFecha: ${new Date().toLocaleString()}`,
@@ -195,7 +243,10 @@ async function startServer() {
       let friendlyError = 'No se pudo autenticar con el servidor SMTP. Verifica el correo y la contraseña.';
       let requiresAppPassword = false;
 
-      if (rawMsg.includes('534-5.7.9') || rawMsg.toLowerCase().includes('application-specific password required')) {
+      if (rawMsg.includes("Cannot find package 'nodemailer'") || err?.code === 'ERR_MODULE_NOT_FOUND') {
+        friendlyError =
+          "El paquete 'nodemailer' aún no está instalado en este servidor VPS. Para activarlo, ejecuta en la terminal de tu servidor: npm install y luego reinicia con pm2 restart all.";
+      } else if (rawMsg.includes('534-5.7.9') || rawMsg.toLowerCase().includes('application-specific password required')) {
         requiresAppPassword = true;
         friendlyError =
           'Google exige una "Contraseña de Aplicación" de 16 letras (no tu contraseña normal de Gmail). Activa la Verificación en 2 pasos en tu cuenta de Google y genera una Contraseña de Aplicación en myaccount.google.com/apppasswords.';
@@ -232,35 +283,11 @@ async function startServer() {
       let smtpSuccessCount = 0;
       const deliveryResults: Array<{ email: string; ok: boolean; info?: string }> = [];
 
-      // Si hay credenciales de correo configuradas, realizar envío REAL vía SMTP
-      if (emailConfig && emailConfig.smtpUser && emailConfig.smtpPass && Array.isArray(dispatches)) {
+      // Inicializar transporte usando el estado emailConfig del proyecto (combinado con lo enviado en la petición)
+      const resolvedEmailConfig = resolveEmailConfig(emailConfig);
+      if (resolvedEmailConfig.smtpUser && resolvedEmailConfig.smtpPass && Array.isArray(dispatches)) {
         try {
-          const nodemailer = await import('nodemailer');
-          const cleanUser = String(emailConfig.smtpUser || '').trim();
-          const rawPass = String(emailConfig.smtpPass || '').trim();
-          const host = String(
-            emailConfig.smtpHost ||
-              (cleanUser.toLowerCase().includes('@gmail') ? 'smtp.gmail.com' : 'smtp.office365.com')
-          ).trim();
-          const port = Number(emailConfig.smtpPort) || 587;
-          const secure = Boolean(emailConfig.smtpSecure) || port === 465;
-
-          const isGoogleHost = host.toLowerCase().includes('gmail') || cleanUser.toLowerCase().includes('@gmail');
-          const cleanPass =
-            isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass)
-              ? rawPass.replace(/\s+/g, '')
-              : rawPass;
-
-          const transporter = nodemailer.createTransport({
-            host,
-            port,
-            secure,
-            auth: {
-              user: cleanUser,
-              pass: cleanPass,
-            },
-            connectionTimeout: 10000,
-          });
+          const { transporter, cleanUser } = createSmtpTransporter(resolvedEmailConfig, 10000);
 
           for (const d of dispatches) {
             try {
@@ -278,7 +305,7 @@ async function startServer() {
                 : 'A la brevedad posible';
 
               await transporter.sendMail({
-                from: `"${emailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
+                from: `"${resolvedEmailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
                 to: d.recipientEmail,
                 subject: d.subject || `[AttendancePRO] Nómina Semana ${semanaNumero} Lista para Validación — ${d.supervisorName}`,
                 text:

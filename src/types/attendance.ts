@@ -108,6 +108,36 @@ export interface PayrollSummary {
 
 export type ReadingMode = 'checadas_reales' | 'jerarquia_eventos';
 
+export type OvertimeRoundingMode = 'exacto' | '15_min' | '30_min' | '60_min';
+export type OvertimeCalculationMode = 'desde_minuto_uno' | 'despues_del_umbral';
+
+export interface OvertimeRulesConfig {
+  /** Minutos mínimos de excedente para que se considere Tiempo Extra (ej. 30 min = a partir de media hora) */
+  minutosMinimosParaExtra: number;
+  /** Si es true, si el empleado llega antes de su hora de entrada (ej. 10 min antes), NO se cuenta como tiempo extra */
+  ignorarEntradaAnticipada: boolean;
+  /** Opcional: permitir contar tiempo antes de la entrada únicamente si supera un umbral grande (ej. 60 min antes) */
+  permitirExtraAntesEntradaConUmbral: boolean;
+  /** Minutos mínimos antes de la entrada para que cuente cuando permitirExtraAntesEntradaConUmbral es true */
+  minutosMinimosAntesEntrada: number;
+  /** 'desde_minuto_uno' cuenta todo el extra al superar el mínimo; 'despues_del_umbral' resta los minutos del umbral */
+  modoCalculoExtra: OvertimeCalculationMode;
+  /** Modo de redondeo del tiempo extra: exacto o por bloques cumplidos de 15, 30 o 60 min */
+  redondeoExtra: OvertimeRoundingMode;
+  /** Límite máximo de horas extras por día (0 = sin límite) */
+  topeMaximoExtraDiarioHrs: number;
+}
+
+export const DEFAULT_OVERTIME_RULES: OvertimeRulesConfig = {
+  minutosMinimosParaExtra: 30,
+  ignorarEntradaAnticipada: true,
+  permitirExtraAntesEntradaConUmbral: false,
+  minutosMinimosAntesEntrada: 60,
+  modoCalculoExtra: 'desde_minuto_uno',
+  redondeoExtra: 'exacto',
+  topeMaximoExtraDiarioHrs: 0,
+};
+
 export interface AppConfig {
   emailDestino: string;
   toleranciaAntes: number; // minutos (default: 29)
@@ -117,6 +147,7 @@ export interface AppConfig {
   modoLectura: ReadingMode; // 'checadas_reales' (recomendado) | 'jerarquia_eventos'
   minutosRebote: number; // minutos mínimos para no duplicar la misma checada (default: 15)
   horasLimiteLiberacion: number; // horas permitidas para que supervisores liberen nómina tras dispersión (default: 24)
+  overtimeRules: OvertimeRulesConfig; // configuración de reglas de tiempo extra
   theme: 'dark' | 'light';
 }
 

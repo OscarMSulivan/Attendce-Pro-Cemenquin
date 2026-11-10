@@ -14,12 +14,15 @@ import { ScheduleModal } from './components/ScheduleModal';
 import { AssignScheduleModal } from './components/AssignScheduleModal';
 import { RawPunchAuditModal } from './components/RawPunchAuditModal';
 import { ConfigModal } from './components/ConfigModal';
+import { OvertimeConfigModal } from './components/OvertimeConfigModal';
 
 import { 
   AppConfig, 
+  DEFAULT_OVERTIME_RULES,
   Employee, 
   EmployeeReport, 
   EventsDB, 
+  OvertimeRulesConfig,
   PayrollSummary, 
   ReadingMode, 
   ScheduleConfig 
@@ -126,6 +129,7 @@ export default function App() {
   const [isAssignOpen, setIsAssignOpen] = useState<boolean>(false);
   const [isRawPunchesOpen, setIsRawPunchesOpen] = useState<boolean>(false);
   const [isConfigOpen, setIsConfigOpen] = useState<boolean>(false);
+  const [isOvertimeConfigOpen, setIsOvertimeConfigOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
   // Estado del Portal Multirrol (Admin, RH, Supervisores)
@@ -250,6 +254,7 @@ export default function App() {
                   jornadaBase: hydratedConfig.jornadaBase,
                   modoLectura: hydratedConfig.modoLectura,
                   minutosRebote: hydratedConfig.minutosRebote,
+                  overtimeRules: hydratedConfig.overtimeRules || DEFAULT_OVERTIME_RULES,
                 }
               );
 
@@ -311,6 +316,7 @@ export default function App() {
         horarios,
         asignaciones,
         config,
+        emailConfig,
       });
     }, 350);
     return () => clearTimeout(timer);
@@ -325,6 +331,7 @@ export default function App() {
     horarios,
     asignaciones,
     config,
+    emailConfig,
   ]);
 
   // Usuario actual en sesión
@@ -500,7 +507,8 @@ export default function App() {
           {
             jornadaBase: updatedConfig.jornadaBase,
             modoLectura: newMode,
-            minutosRebote: updatedConfig.minutosRebote
+            minutosRebote: updatedConfig.minutosRebote,
+            overtimeRules: updatedConfig.overtimeRules
           }
         );
         setReportes(calculados);
@@ -666,7 +674,8 @@ export default function App() {
           {
             jornadaBase: config.jornadaBase,
             modoLectura: config.modoLectura,
-            minutosRebote: config.minutosRebote
+            minutosRebote: config.minutosRebote,
+            overtimeRules: config.overtimeRules
           }
         );
 
@@ -781,7 +790,8 @@ export default function App() {
             isRST,
             vca,
             isoDate,
-            Boolean(rep.empleado.horario)
+            Boolean(rep.empleado.horario),
+            config.overtimeRules
           );
 
           const origEnt = d.entradaOriginal ?? d.entrada;
@@ -1029,7 +1039,8 @@ export default function App() {
                   isRST,
                   vcaLabel,
                   payload.isoDate,
-                  Boolean(rep.empleado.horario)
+                  Boolean(rep.empleado.horario),
+                  config.overtimeRules
                 )
               : {
                   hNormal: payload.tipoIncidencia === 'Permiso sin goce' ? 0 : config.jornadaBase,
@@ -1074,7 +1085,8 @@ export default function App() {
             isRST,
             undefined,
             payload.isoDate,
-            Boolean(rep.empleado.horario)
+            Boolean(rep.empleado.horario),
+            config.overtimeRules
           );
 
           sumN += metricas.hNormal;
@@ -1295,7 +1307,8 @@ Saludos.`
           {
             jornadaBase: config.jornadaBase,
             modoLectura: config.modoLectura,
-            minutosRebote: config.minutosRebote
+            minutosRebote: config.minutosRebote,
+            overtimeRules: config.overtimeRules
           }
         );
 
@@ -1323,7 +1336,7 @@ Saludos.`
         setResumen(recomputeSummaryFromReports(mergedReportes));
       }
     },
-    [config.jornadaBase, config.minutosRebote, config.modoLectura, recomputeSummaryFromReports, reportes, selectedWeek, vacacionesDB]
+    [config.jornadaBase, config.minutosRebote, config.modoLectura, config.overtimeRules, recomputeSummaryFromReports, reportes, selectedWeek, vacacionesDB]
   );
 
   // Guardar Horario
@@ -1456,6 +1469,86 @@ Saludos.`
     setStatusMessage('✓ Configuración actualizada');
     setStatusType('success');
     showToast('Configuración general y parámetros del sistema guardados con éxito.', 'success', 'Configuración Guardada');
+  };
+
+  // Guardar configuración de Reglas de Tiempo Extra y recalcular inmediatamente todos los reportes activos
+  const handleSaveOvertimeRules = (newRules: OvertimeRulesConfig) => {
+    const updatedConfig: AppConfig = {
+      ...config,
+      overtimeRules: newRules,
+    };
+    setConfig(updatedConfig);
+    StorageService.saveConfig(updatedConfig);
+
+    if (reportes.length > 0) {
+      const recalculatedReportes = reportes.map(rep => {
+        let sumN = 0;
+        let sumE = 0;
+        const updatedDias = rep.dias.map(d => {
+          if (d.tipoModificacionSupervisor === 'falta_confirmada' || d.incidencia === 'Falta Confirmada') {
+            return d;
+          }
+          const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
+          const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+          if (!tieneEnt || !tieneSal) {
+            sumN += d.hNormal;
+            return d;
+          }
+
+          const vca = vacacionesDB[rep.empleado.id]?.[d.isoDate];
+          const isRST = Boolean(eventosDB[rep.empleado.id]?.[d.isoDate]?.isRST);
+          const metricas = calcularMetricasDia(
+            d.entrada,
+            d.salida,
+            d.horarioProgramado,
+            updatedConfig.jornadaBase,
+            isRST,
+            vca,
+            d.isoDate,
+            Boolean(rep.empleado.horario),
+            newRules
+          );
+
+          const effectiveAutorizada = metricas.hExtra > 0 ? d.horasExtrasAutorizadas : undefined;
+          sumN += metricas.hNormal;
+          if (effectiveAutorizada === true) {
+            sumE += metricas.hExtra;
+          }
+
+          return {
+            ...d,
+            hNormal: metricas.hNormal,
+            hExtra: metricas.hExtra,
+            horasExtrasAutorizadas: effectiveAutorizada,
+            advertencia: d.modificadoPorSupervisor ? d.advertencia : metricas.advertencia,
+          };
+        });
+
+        return {
+          ...rep,
+          dias: updatedDias,
+          totalNormal: sumN,
+          totalExtra: sumE,
+        };
+      });
+
+      setReportes(recalculatedReportes);
+      setResumen(recomputeSummaryFromReports(recalculatedReportes));
+    }
+
+    setStatusMessage(
+      `✓ Reglas de Tiempo Extra actualizadas: A partir de ${newRules.minutosMinimosParaExtra} min (${
+        newRules.ignorarEntradaAnticipada ? 'Sin contar llegadas anticipadas' : 'Incluyendo llegadas anticipadas'
+      }).`
+    );
+    setStatusType('success');
+    showToast(
+      `Tiempo extra configurado a partir de ${newRules.minutosMinimosParaExtra} min (${
+        newRules.ignorarEntradaAnticipada ? 'descartando llegadas antes de la entrada' : 'con entrada exacta'
+      }). Nómina recalculada.`,
+      'success',
+      'Reglas de Tiempo Extra Aplicadas'
+    );
   };
 
   // Descargar versión portable .HTML bajo demanda sin inflar el bundle inicial
@@ -2114,6 +2207,7 @@ Saludos.`
         onOpenSchedules={() => setIsSchedulesOpen(true)}
         onOpenAssign={() => setIsAssignOpen(true)}
         onOpenRawPunches={() => setIsRawPunchesOpen(true)}
+        onOpenOvertimeConfig={() => setIsOvertimeConfigOpen(true)}
         onOpenSettings={() => setIsConfigOpen(true)}
         onDownloadPortable={handleDownloadPortable}
         onExportBackup={handleExportBackup}
@@ -2287,6 +2381,8 @@ Saludos.`
               onReleasePayroll={() => setIsReleaseModalOpen(true)}
               isPayrollReleased={isPayrollReleased}
               releaseTooltip="Módulo exclusivo de revisión global de nóminas"
+              overtimeRules={config.overtimeRules}
+              onOpenOvertimeConfig={() => setIsOvertimeConfigOpen(true)}
             />
 
             {/* Tabla de Asistencia y Empleados */}
@@ -2372,12 +2468,22 @@ Saludos.`
             currentUser={currentUser}
             emailConfig={emailConfig}
             onSaveEmailConfig={handleSaveEmailConfig}
+            overtimeRules={config.overtimeRules}
+            jornadaBase={config.jornadaBase}
+            onSaveOvertimeRules={handleSaveOvertimeRules}
           />
         )}
         </main>
       </div>
 
       {/* Modales Existentes */}
+      <OvertimeConfigModal
+        isOpen={isOvertimeConfigOpen}
+        onClose={() => setIsOvertimeConfigOpen(false)}
+        rules={config.overtimeRules}
+        jornadaBase={config.jornadaBase}
+        onSaveRules={handleSaveOvertimeRules}
+      />
       <ScheduleModal
         isOpen={isSchedulesOpen}
         onClose={() => setIsSchedulesOpen(false)}

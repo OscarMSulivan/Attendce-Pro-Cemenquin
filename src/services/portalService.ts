@@ -185,6 +185,10 @@ export class PortalService {
       if (data.notifications && Array.isArray(data.notifications)) {
         localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       }
+      const serverEmailCfg = data.emailConfig || data.config?.emailServer;
+      if (serverEmailCfg && typeof serverEmailCfg === 'object') {
+        localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(serverEmailCfg));
+      }
       return data;
     } catch {
       return null;
@@ -480,7 +484,7 @@ export class PortalService {
 
   static saveEmailConfig(cfg: EmailServerConfig): void {
     localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(cfg));
-    this.pushToServer({ config: { emailServer: cfg } });
+    this.pushToServer({ emailConfig: cfg, config: { emailServer: cfg } });
   }
 
   /**

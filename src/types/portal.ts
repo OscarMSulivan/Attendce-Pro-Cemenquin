@@ -10,6 +10,7 @@ export type PortalModule =
   | 'semaforo'      // Semáforo de Nóminas y Dispersión
   | 'incidencias'   // Bandeja de Incidencias
   | 'contpaqi'      // Exportador CONTPAQi® Nóminas
+  | 'tiempo_extra'  // Configuración de Reglas de Tiempo Extra
   | 'tiempo_limite' // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
   | 'smtp_correo'   // Configuración de Credenciales SMTP para Correo Automático
   | 'usuarios';     // Administración de Usuarios, Roles y Permisos
@@ -34,6 +35,11 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
     short: 'CONTPAQi',
     title: 'CONTPAQi® Nóminas',
     description: 'Exportador y layout con claves de incidencias',
+  },
+  tiempo_extra: {
+    short: 'Tiempo Extra',
+    title: 'Configuración de Tiempo Extra',
+    description: 'Definir desde cuántos minutos cuenta el tiempo extra y descartar llegadas anticipadas',
   },
   tiempo_limite: {
     short: 'Tiempo Límite',
@@ -77,16 +83,16 @@ export interface PortalUser {
  */
 export function getUserAllowedModules(user: PortalUser): PortalModule[] {
   if (user.id === 'user_admin') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo', 'usuarios'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo', 'usuarios'];
   }
   if (Array.isArray(user.allowedModules) && user.allowedModules.length > 0) {
     return user.allowedModules;
   }
   if (user.role === 'admin') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo', 'usuarios'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo', 'usuarios'];
   }
   if (user.role === 'rh') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo'];
+    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo'];
   }
   return ['nomina', 'incidencias'];
 }
@@ -99,11 +105,12 @@ export function userHasModuleAccess(user: PortalUser, module: PortalModule): boo
 
 /**
  * Determina si el usuario tiene acceso a al menos una sección del panel Administrativo
- * (Gestión de Usuarios, Configuración de Tiempo Límite de Liberación o Configuración de Servidor SMTP).
+ * (Gestión de Usuarios, Tiempo Extra, Configuración de Tiempo Límite de Liberación o Servidor SMTP).
  */
 export function userHasAnyAdminPanelAccess(user: PortalUser): boolean {
   return (
     userHasModuleAccess(user, 'usuarios') ||
+    userHasModuleAccess(user, 'tiempo_extra') ||
     userHasModuleAccess(user, 'tiempo_limite') ||
     userHasModuleAccess(user, 'smtp_correo')
   );

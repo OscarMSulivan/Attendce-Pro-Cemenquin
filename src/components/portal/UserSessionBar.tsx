@@ -175,7 +175,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
   };
 
   return (
-    <header className="bg-[#171821]/95 backdrop-blur-md border-b border-white/[0.06] text-slate-200 no-print sticky top-0 z-30 transition-colors">
+    <header className="bg-white/95 dark:bg-[#171821]/95 backdrop-blur-md border-b border-slate-200 dark:border-white/[0.06] text-slate-800 dark:text-slate-200 no-print sticky top-0 z-30 transition-colors">
       <div className="px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
         {/* Izquierda: Botón Menú Móvil + Título de Vista Activa + Estado del Sistema */}
         <div className="flex items-center gap-3 min-w-0">
@@ -183,7 +183,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
             <button
               type="button"
               onClick={onOpenMobileSidebar}
-              className="lg:hidden p-2 rounded-xl bg-[#21222D] hover:bg-[#2B2B36] border border-white/[0.07] text-[#A9DFD8] transition-colors cursor-pointer shrink-0"
+              className="lg:hidden p-2 rounded-xl bg-slate-100 dark:bg-[#21222D] hover:bg-slate-200 dark:hover:bg-[#2B2B36] border border-slate-200 dark:border-white/[0.07] text-teal-700 dark:text-[#A9DFD8] transition-colors cursor-pointer shrink-0"
               title="Abrir menú lateral"
             >
               <MenuIcon className="w-5 h-5" />
@@ -192,11 +192,11 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
 
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h1 className="text-sm sm:text-base font-bold tracking-tight text-white truncate">
+              <h1 className="text-sm sm:text-base font-bold tracking-tight text-slate-900 dark:text-white truncate">
                 {getActiveViewTitle()}
               </h1>
               {currentUser.delegatedSupervisor && (
-                <span className="hidden xl:inline-flex text-[10px] font-semibold text-amber-300 items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 shrink-0">
+                <span className="hidden xl:inline-flex text-[10px] font-semibold text-amber-800 dark:text-amber-300 items-center gap-1 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-500/20 shrink-0">
                   <RefreshCw className="w-2.5 h-2.5 animate-spin" style={{ animationDuration: '6s' }} />
                   <span>Supliendo a {currentUser.delegatedSupervisor}</span>
                 </span>
@@ -219,8 +219,8 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
               onClick={() => setIsNotifOpen((prev) => !prev)}
               className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer outline-none ${
                 unreadNotifCount > 0
-                  ? 'bg-teal-50 dark:bg-[#A9DFD8]/15 border-teal-300 dark:border-[#A9DFD8]/40 text-teal-700 dark:text-[#A9DFD8] hover:bg-teal-100 dark:hover:bg-[#A9DFD8]/25'
-                  : 'bg-slate-100 dark:bg-[#21222D] border-slate-200 dark:border-white/[0.07] text-slate-600 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-teal-50 dark:bg-[#A9DFD8]/15 border-teal-300 dark:border-[#A9DFD8]/40 text-teal-800 dark:text-[#A9DFD8] hover:bg-teal-100 dark:hover:bg-[#A9DFD8]/25'
+                  : 'bg-slate-100 dark:bg-[#21222D] border-slate-200 dark:border-white/[0.07] text-slate-700 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Notificaciones de dispersión y Bitácora (Logs) de modificaciones de listas"
             >
@@ -233,7 +233,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
               )}
               {userModificationLogs.length > 0 && (
                 <span
-                  className="hidden sm:inline-block px-1.5 py-0.2 rounded-full bg-purple-50 dark:bg-[#F2C8ED]/15 text-purple-700 dark:text-[#F2C8ED] border border-purple-200 dark:border-[#F2C8ED]/35 text-[10px] font-mono font-bold"
+                  className="hidden sm:inline-block px-1.5 py-0.2 rounded-full bg-purple-100 dark:bg-[#F2C8ED]/15 text-purple-800 dark:text-[#F2C8ED] border border-purple-300 dark:border-[#F2C8ED]/35 text-[10px] font-mono font-bold"
                   title={`${userModificationLogs.length} modificación(es) registrada(s) en la lista`}
                 >
                   {userModificationLogs.length}
@@ -246,15 +246,15 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                 className="absolute right-0 z-50 mt-2 w-[90vw] max-w-[420px] rounded-2xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.1] shadow-2xl p-3 text-slate-800 dark:text-slate-200 backdrop-blur-md outline-none animate-scale-in"
               >
                 {/* Pestañas superiores: Avisos vs Logs de Modificaciones */}
-                <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-white/[0.06]">
-                  <div className="flex items-center gap-1 bg-[#171821] p-1 rounded-xl border border-white/[0.06] flex-1">
+                <div className="flex items-center justify-between gap-2 pb-2.5 mb-2.5 border-b border-slate-200 dark:border-white/[0.06]">
+                  <div className="flex items-center gap-1 bg-slate-100 dark:bg-[#171821] p-1 rounded-xl border border-slate-200 dark:border-white/[0.06] flex-1">
                     <button
                       type="button"
                       onClick={() => setNotifTab('avisos')}
                       className={`flex-1 py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         notifTab === 'avisos'
-                          ? 'bg-[#A9DFD8] text-[#171821] shadow'
-                          : 'text-[#87888C] hover:text-white'
+                          ? 'bg-teal-600 dark:bg-[#A9DFD8] text-white dark:text-[#171821] shadow'
+                          : 'text-slate-600 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       <Bell className="w-3.5 h-3.5" />
@@ -265,8 +265,8 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                       onClick={() => setNotifTab('logs')}
                       className={`flex-1 py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         notifTab === 'logs'
-                          ? 'bg-[#A9DFD8] text-[#171821] shadow'
-                          : 'text-[#87888C] hover:text-white'
+                          ? 'bg-teal-600 dark:bg-[#A9DFD8] text-white dark:text-[#171821] shadow'
+                          : 'text-slate-600 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       <History className="w-3.5 h-3.5" />
@@ -278,7 +278,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                     <button
                       type="button"
                       onClick={onMarkAllNotificationsRead}
-                      className="text-[10px] font-bold text-[#A9DFD8] hover:underline flex items-center gap-1 cursor-pointer shrink-0"
+                      className="text-[10px] font-bold text-teal-700 dark:text-[#A9DFD8] hover:underline flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <CheckCheck className="w-3 h-3" /> Leídas
                     </button>
@@ -287,7 +287,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
 
                 {notifTab === 'avisos' ? (
                   userNotifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-[#87888C]">
+                    <div className="p-6 text-center text-xs text-slate-500 dark:text-[#87888C]">
                       No tienes notificaciones de dispersión pendientes.
                     </div>
                   ) : (
@@ -302,23 +302,23 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                           }}
                           className={`p-3 rounded-xl border text-xs transition-all cursor-pointer ${
                             !n.leida
-                              ? 'bg-[#171821] border-[#A9DFD8]/40 text-slate-100'
-                              : 'bg-[#171821]/60 border-white/[0.05] text-[#87888C]'
+                              ? 'bg-teal-50/70 dark:bg-[#171821] border-teal-300 dark:border-[#A9DFD8]/40 text-slate-900 dark:text-slate-100 shadow-sm'
+                              : 'bg-slate-50 dark:bg-[#171821]/60 border-slate-200 dark:border-white/[0.05] text-slate-600 dark:text-[#87888C]'
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span className="font-bold text-[11px] text-[#A9DFD8] line-clamp-1">
+                            <span className="font-bold text-[11px] text-teal-800 dark:text-[#A9DFD8] line-clamp-1">
                               {n.titulo}
                             </span>
                             {!n.leida && (
-                              <span className="w-2 h-2 rounded-full bg-[#A9DFD8] shrink-0" />
+                              <span className="w-2 h-2 rounded-full bg-teal-600 dark:bg-[#A9DFD8] shrink-0" />
                             )}
                           </div>
-                          <p className="text-[11px] text-slate-300 leading-relaxed">
+                          <p className="text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
                             {n.mensaje}
                           </p>
-                          <div className="mt-2 pt-1.5 border-t border-white/[0.06] flex items-center justify-between text-[10px] font-mono text-[#87888C]">
-                            <span className="flex items-center gap-1 text-[#A9DFD8]">
+                          <div className="mt-2 pt-1.5 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-[#87888C]">
+                            <span className="flex items-center gap-1 text-teal-700 dark:text-[#A9DFD8]">
                               <Mail className="w-3 h-3" />
                               <span className="truncate max-w-[160px]">{n.recipientEmail || currentUser.email}</span>
                             </span>
@@ -329,7 +329,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                     </div>
                   )
                 ) : userModificationLogs.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-[#87888C]">
+                  <div className="p-6 text-center text-xs text-slate-500 dark:text-[#87888C]">
                     Aún no se han registrado modificaciones sobre las listas de asistencia de esta semana.
                   </div>
                 ) : (
@@ -337,12 +337,12 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                     {userModificationLogs.map((log) => {
                       const badgeColor =
                         log.actionType === 'falta_confirmada' || log.actionType === 'tiempo_extra_rechazado'
-                          ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                          ? 'bg-rose-100 dark:bg-rose-500/15 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-500/30'
                           : log.actionType === 'tiempo_extra_autorizado'
-                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
                           : log.actionType === 'formato_permiso'
-                          ? 'bg-blue-500/15 text-blue-300 border-blue-500/30'
-                          : 'bg-purple-500/15 text-purple-300 border-purple-500/30';
+                          ? 'bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-500/30'
+                          : 'bg-purple-100 dark:bg-purple-500/15 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-500/30';
 
                       return (
                         <div
@@ -351,14 +351,14 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                             onTabChange('nomina');
                             setIsNotifOpen(false);
                           }}
-                          className="p-2.5 rounded-xl bg-[#171821] border border-white/[0.06] hover:border-[#A9DFD8]/40 text-xs transition-all cursor-pointer space-y-1"
+                          className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.06] hover:border-teal-400 dark:hover:border-[#A9DFD8]/40 text-xs transition-all cursor-pointer space-y-1"
                         >
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30">
                                 #{log.employeeId}
                               </span>
-                              <span className="font-bold text-slate-100 text-[11px] truncate max-w-[160px]">
+                              <span className="font-bold text-slate-900 dark:text-slate-100 text-[11px] truncate max-w-[160px]">
                                 {log.employeeName}
                               </span>
                             </div>
@@ -379,22 +379,22 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                             </span>
                           </div>
 
-                          <p className="text-[11px] text-slate-200 font-medium leading-snug">
+                          <p className="text-[11px] text-slate-800 dark:text-slate-200 font-medium leading-snug">
                             {log.summary}
                           </p>
 
                           {log.details && (
-                            <p className="text-[10px] text-[#87888C] italic leading-snug">
+                            <p className="text-[10px] text-slate-500 dark:text-[#87888C] italic leading-snug">
                               {log.details}
                             </p>
                           )}
 
-                          <div className="pt-1 border-t border-white/[0.06] flex items-center justify-between text-[9px] font-mono text-[#87888C]">
+                          <div className="pt-1 border-t border-slate-200 dark:border-white/[0.06] flex items-center justify-between text-[9px] font-mono text-slate-500 dark:text-[#87888C]">
                             <span>
                               {log.dayName} {log.isoDate} • Lista: <strong>{log.supervisorName}</strong>
                             </span>
                             {log.hasAttachment && (
-                              <span className="text-[#A9DFD8] flex items-center gap-0.5 font-bold">
+                              <span className="text-teal-700 dark:text-[#A9DFD8] flex items-center gap-0.5 font-bold">
                                 <Paperclip className="w-2.5 h-2.5" /> {log.attachmentName || 'Adjunto'}
                               </span>
                             )}

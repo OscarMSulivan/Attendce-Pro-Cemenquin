@@ -48,6 +48,8 @@ import { PortalService } from '../../services/portalService';
 import saveAs from 'file-saver';
 import { HeadlessSelect, SelectOption } from '../ui/HeadlessSelect';
 import { DispersalCountdownTimer } from './DispersalCountdownTimer';
+import { OvertimeRulesConfig } from '../../types/attendance';
+import { OvertimeConfigContent } from '../OvertimeConfigModal';
 
 interface AdminUsersViewProps {
   users: PortalUser[];
@@ -61,6 +63,9 @@ interface AdminUsersViewProps {
   activeDispersal?: PayrollDispersal;
   emailConfig?: EmailServerConfig;
   onSaveEmailConfig?: (cfg: EmailServerConfig) => void;
+  overtimeRules?: OvertimeRulesConfig;
+  jornadaBase?: number;
+  onSaveOvertimeRules?: (rules: OvertimeRulesConfig) => void;
 }
 
 export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
@@ -75,6 +80,9 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   activeDispersal,
   emailConfig,
   onSaveEmailConfig,
+  overtimeRules,
+  jornadaBase = 8.0,
+  onSaveOvertimeRules,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showHostingerGuide, setShowHostingerGuide] = useState(false);
@@ -84,6 +92,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
 
   // Permisos granulares del usuario en sesión sobre cada sub-módulo administrativo
   const canManageUsers = !currentUser || userHasModuleAccess(currentUser, 'usuarios');
+  const canConfigureOvertime = !currentUser || userHasModuleAccess(currentUser, 'tiempo_extra');
   const canConfigureTimeLimit = !currentUser || userHasModuleAccess(currentUser, 'tiempo_limite');
   const canConfigureSmtp = !currentUser || userHasModuleAccess(currentUser, 'smtp_correo');
 
@@ -249,10 +258,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
 
   const getDefaultModulesForRole = (r: UserRole): PortalModule[] => {
     if (r === 'admin') {
-      return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo', 'usuarios'];
+      return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo', 'usuarios'];
     }
     if (r === 'rh') {
-      return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_limite', 'smtp_correo'];
+      return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'smtp_correo'];
     }
     return ['nomina', 'incidencias'];
   };
@@ -439,6 +448,12 @@ echo "pm2 save && pm2 startup"
       accentClass: 'accent-pink-500 dark:accent-[#F2C8ED]',
     },
     {
+      id: 'tiempo_extra',
+      badgeColor: 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30',
+      activeClass: 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-400 dark:border-emerald-500/50 text-emerald-900 dark:text-emerald-300',
+      accentClass: 'accent-emerald-500',
+    },
+    {
       id: 'tiempo_limite',
       badgeColor: 'bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-500/30',
       activeClass: 'bg-orange-50 dark:bg-orange-500/15 border-orange-400 dark:border-orange-500/50 text-orange-900 dark:text-orange-300',
@@ -504,6 +519,31 @@ echo "pm2 save && pm2 startup"
           </div>
         )}
       </div>
+
+      {/* SECCIÓN 0: MÓDULO DE CONFIGURACIÓN DE REGLAS DE TIEMPO EXTRA */}
+      {canConfigureOvertime && overtimeRules && onSaveOvertimeRules && (
+        <div className="rounded-2xl p-5 bg-white dark:bg-[#21222D] border border-slate-200 dark:border-[#2C2D3C] shadow-md dark:shadow-xl space-y-4">
+          <div className="flex items-start gap-3 border-b border-slate-200 dark:border-[#2C2D3C] pb-4">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-700 dark:text-emerald-300 shrink-0">
+              <Clock className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                Módulo de Configuración de Tiempo Extra (Nómina)
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-[#8C8D9B] mt-0.5">
+                Configura a partir de cuántos minutos se considera Tiempo Extra y evita que las llegadas anticipadas (ej. 10 min antes) sumen tiempo extra.
+              </p>
+            </div>
+          </div>
+          <OvertimeConfigContent
+            rules={overtimeRules}
+            jornadaBase={jornadaBase}
+            onSaveRules={onSaveOvertimeRules}
+            isStandaloneModule={true}
+          />
+        </div>
+      )}
 
       {/* SECCIÓN 1: CONFIGURACIÓN DE LÍMITE DE TIEMPO PARA LIBERAR NÓMINA (POR HORAS) */}
       {canConfigureTimeLimit && (

@@ -15,10 +15,11 @@ import {
   Cpu,
   Send,
   CheckCircle2,
-  ListChecks
+  ListChecks,
+  Clock
 } from 'lucide-react';
 import { PayrollWeekOption } from '../utils/calendarUtils';
-import { ReadingMode } from '../types/attendance';
+import { OvertimeRulesConfig, ReadingMode } from '../types/attendance';
 import { HeadlessSelect, SelectOption } from './ui/HeadlessSelect';
 
 interface ControlsBarProps {
@@ -54,6 +55,8 @@ interface ControlsBarProps {
   isPayrollReleased?: boolean;
   releaseTooltip?: string;
   isDelegated?: boolean;
+  overtimeRules?: OvertimeRulesConfig;
+  onOpenOvertimeConfig?: () => void;
 }
 
 export const ControlsBar: React.FC<ControlsBarProps> = ({
@@ -88,6 +91,8 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   onReleasePayroll,
   isPayrollReleased,
   releaseTooltip,
+  overtimeRules,
+  onOpenOvertimeConfig,
 }) => {
   const weekOptions: SelectOption[] = useMemo(() => {
     return payrollWeeks.map((w) => ({
@@ -217,7 +222,25 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             {isGenerating ? 'Generando...' : 'Generar Reporte'}
           </button>
 
-          {/* Paso 2A: Dispersar directamente la Lista Generada / Seleccionada en este momento (Sin abrir pop-up) */}
+          {/* Botón para abrir Configuración de Tiempo Extra directamente desde Nómina */}
+          {onOpenOvertimeConfig && (
+            <button
+              type="button"
+              onClick={onOpenOvertimeConfig}
+              title="Configurar a partir de cuántos minutos cuenta el Tiempo Extra y bloquear llegadas anticipadas (ej. 10 min antes)"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 dark:bg-[#FEB95A]/15 hover:bg-amber-100 dark:hover:bg-[#FEB95A]/25 text-amber-800 dark:text-[#FEB95A] border border-amber-300 dark:border-[#FEB95A]/40 transition-all cursor-pointer whitespace-nowrap"
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>
+                Config. Tiempo Extra{' '}
+                {overtimeRules
+                  ? `(≥${overtimeRules.minutosMinimosParaExtra}m${
+                      overtimeRules.ignorarEntradaAnticipada ? ' · Sin llegada ant.' : ''
+                    })`
+                  : ''}
+              </span>
+            </button>
+          )}
           {!isSupervisor && onDisperseActiveList && (
             <button
               type="button"

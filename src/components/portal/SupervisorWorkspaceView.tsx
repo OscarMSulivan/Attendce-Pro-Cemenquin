@@ -416,26 +416,26 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     <div className="space-y-6 animate-fade-up">
       {/* Banner Animado de Notificación de Dispersión (Sistema + Correo Electrónico Empresarial) */}
       {activeListNotification && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-950/90 via-blue-950/80 to-slate-900 border border-indigo-500/40 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-scale-in">
+        <div className="p-4 rounded-2xl bg-indigo-50/90 dark:bg-[#21222D] border-2 border-indigo-200 dark:border-indigo-500/40 shadow-md dark:shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-scale-in">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-300 shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-300 dark:border-indigo-500/30 flex items-center justify-center text-indigo-700 dark:text-indigo-300 shrink-0">
               <Bell className="w-5 h-5 animate-bounce" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border border-indigo-300 dark:border-indigo-500/30">
                   Nueva Notificación en Sistema
                 </span>
                 {activeListNotification.emailEnviado && (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1">
                     <Mail className="w-3 h-3" /> Copia enviada a {activeListNotification.recipientEmail || currentUser.email}
                   </span>
                 )}
               </div>
-              <h3 className="text-xs font-bold text-white mt-1">
+              <h3 className="text-xs font-extrabold text-slate-900 dark:text-white mt-1">
                 {activeListNotification.titulo}
               </h3>
-              <p className="text-xs text-slate-300 mt-0.5">
+              <p className="text-xs text-slate-700 dark:text-slate-300 mt-0.5 font-medium">
                 {activeListNotification.mensaje}
               </p>
             </div>
@@ -444,7 +444,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
             <button
               type="button"
               onClick={() => onMarkNotificationRead(activeListNotification.id)}
-              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 cursor-pointer transition-all self-end sm:self-center"
+              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0 cursor-pointer transition-all self-end sm:self-center shadow-sm"
             >
               Entendido ✓
             </button>
@@ -453,29 +453,29 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       )}
 
       {/* Banner de Bienvenida y Estatus de Dispersión */}
-      <div className="rounded-2xl p-6 bg-gradient-to-r from-slate-900 via-slate-900 to-blue-950/40 border border-slate-800 shadow-xl relative overflow-hidden">
+      <div className="rounded-2xl p-6 bg-white dark:bg-[#21222D] border border-slate-200 dark:border-slate-800 shadow-md dark:shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+              <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
                 Portal de Supervisión
               </span>
               {currentUser.employeeId && (
-                <span className="font-mono px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <span className="font-mono px-2.5 py-0.5 rounded-lg text-[11px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30">
                   ID: #{currentUser.employeeId}
                 </span>
               )}
               {isCancelledForSupervisor ? (
-                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-rose-500/15 text-rose-300 border border-rose-500/30 flex items-center gap-1">
-                  <Ban className="w-3 h-3 text-rose-400" /> Semana {currentWeekNumber} Dispersión Cancelada
+                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-rose-100 dark:bg-rose-500/15 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-500/30 flex items-center gap-1">
+                  <Ban className="w-3 h-3 text-rose-600 dark:text-rose-400" /> Semana {currentWeekNumber} Dispersión Cancelada
                 </span>
               ) : isDispersedToSupervisor ? (
-                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                  <Send className="w-3 h-3 text-emerald-400" /> Semana {currentWeekNumber} Dispersada por Nóminas / RH
+                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1">
+                  <Send className="w-3 h-3 text-emerald-600 dark:text-emerald-400" /> Semana {currentWeekNumber} Dispersada por Nóminas / RH
                 </span>
               ) : (
-                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400" /> En espera de dispersión por Nóminas / RH
+                <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 border border-slate-300 dark:border-slate-700 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-slate-600 dark:text-slate-400" /> En espera de dispersión por Nóminas / RH
                 </span>
               )}
               {currentDispersal && (
@@ -486,16 +486,16 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 />
               )}
             </div>
-            <h1 className="text-xl font-extrabold text-slate-100 mt-2">
+            <h1 className="text-xl font-extrabold text-slate-900 dark:text-slate-100 mt-2">
               Hola, {currentUser.name}
             </h1>
-            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-600 dark:text-slate-400">
               <span>
-                Lista activa: <strong className="text-amber-300">{targetSupervisor}</strong> · {activeListEmployees.length} colaboradores en esta lista.
+                Lista activa: <strong className="text-amber-700 dark:text-amber-300">{targetSupervisor}</strong> · {activeListEmployees.length} colaboradores en esta lista.
               </span>
               {userAssignedLists.length > 1 && (
                 <div className="flex items-center gap-1.5 ml-1">
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Cambiar lista asignada:</span>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Cambiar lista asignada:</span>
                   {userAssignedLists.map((lName) => (
                     <button
                       key={lName}
@@ -504,7 +504,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                       className={`px-2.5 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
                         targetSupervisor === lName
                           ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-amber-500/40'
+                          : 'bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-800 hover:border-amber-500/40'
                       }`}
                     >
                       {lName}
@@ -518,51 +518,51 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
           {/* Estado de la Nómina Activa */}
           <div className="flex items-center gap-3">
             {isCancelledForSupervisor ? (
-              <div className="px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400">
+              <div className="px-4 py-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-300 dark:border-rose-500/30 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-rose-100 dark:bg-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
                   <Ban className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-rose-400 block">
+                  <span className="text-[10px] uppercase font-bold text-rose-700 dark:text-rose-400 block">
                     Nómina Semana {currentWeekNumber}
                   </span>
-                  <span className="text-xs font-bold text-rose-300">Dispersión Cancelada</span>
+                  <span className="text-xs font-bold text-rose-900 dark:text-rose-300">Dispersión Cancelada</span>
                 </div>
               </div>
             ) : !isDispersedToSupervisor ? (
-              <div className="px-4 py-3 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
+              <div className="px-4 py-3 rounded-xl bg-slate-100 dark:bg-slate-950/90 border border-slate-300 dark:border-slate-800 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-400">
                   <Clock className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400 block">
                     Nómina Semana {currentWeekNumber}
                   </span>
-                  <span className="text-xs font-bold text-slate-300">Aún no dispersada por RH</span>
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-300">Aún no dispersada por RH</span>
                 </div>
               </div>
             ) : isLiberada ? (
-              <div className="px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <div className="px-4 py-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                  <span className="text-[10px] uppercase font-bold text-emerald-700 dark:text-emerald-400 block">
                     Nómina Semana {currentWeekNumber}
                   </span>
-                  <span className="text-xs font-bold text-slate-100">Liberada a RH ✓</span>
+                  <span className="text-xs font-bold text-emerald-950 dark:text-slate-100">Liberada a RH ✓</span>
                 </div>
               </div>
             ) : (
-              <div className="px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 animate-pulse">
+              <div className="px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400 animate-pulse">
                   <Clock className="w-5 h-5" />
                 </div>
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-amber-400 block">
+                  <span className="text-[10px] uppercase font-bold text-amber-700 dark:text-amber-400 block">
                     Nómina Semana {currentWeekNumber}
                   </span>
-                  <span className="text-xs font-bold text-amber-200">Pendiente de Liberar</span>
+                  <span className="text-xs font-bold text-amber-900 dark:text-amber-200">Pendiente de Liberar</span>
                 </div>
                 <button
                   type="button"
@@ -579,8 +579,8 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
         {/* Notificación de Suplencia si aplica */}
         {currentUser.delegatedSupervisor && (
-          <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center gap-2 text-xs text-amber-300">
-            <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
+            <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
             <span>
               Tienes asignado el rol suplente para autorizar y liberar las nóminas de <strong>{currentUser.delegatedSupervisor}</strong> por periodo vacacional.
             </span>
@@ -796,35 +796,35 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
                 {/* Aviso / Bloqueo si el supervisor tiene pendientes: Horas Extras sin autorizar, checadas faltantes o formatos requeridos */}
                 {stats.hasPendingTasks && (
-                  <div className="mt-4 p-4 rounded-xl bg-rose-500/15 border border-rose-500/50 space-y-3 text-xs text-rose-200">
+                  <div className="mt-4 p-4 rounded-xl bg-rose-50 dark:bg-rose-500/15 border border-rose-300 dark:border-rose-500/50 space-y-3 text-xs text-rose-900 dark:text-rose-200 shadow-sm">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-start sm:items-center gap-2.5">
-                        <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
+                        <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
                         <div>
-                          <strong className="text-rose-300 block text-sm">
+                          <strong className="text-rose-800 dark:text-rose-300 block text-sm">
                             🚫 Tienes tareas pendientes por resolver antes de poder liberar la nómina:
                           </strong>
-                          <span className="text-[11px] text-slate-300">
+                          <span className="text-[11px] text-slate-700 dark:text-slate-300">
                             Revisa y resuelve los siguientes puntos para que Recursos Humanos reciba la lista completa:
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-2 border-t border-rose-500/30">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 pt-2 border-t border-rose-200 dark:border-rose-500/30">
                       {/* 1. Tiempos extras pendientes */}
                       {stats.pendingOvertimeItems.length > 0 && (
-                        <div className="p-3 rounded-xl bg-slate-950/80 border border-amber-500/40 text-[11px] flex flex-col justify-between">
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-950/80 border border-amber-300 dark:border-amber-500/40 text-[11px] flex flex-col justify-between shadow-sm">
                           <div>
-                            <span className="font-bold text-amber-300 flex items-center gap-1.5 mb-1">
-                              <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <span className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 mb-1">
+                              <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                               {stats.pendingOvertimeItems.length} Tiempo(s) Extra sin Autorizar
                             </span>
-                            <p className="text-[10px] text-slate-400">
+                            <p className="text-[10px] text-slate-600 dark:text-slate-400">
                               Debes presionar <strong>SÍ</strong> o <strong>NO</strong> en cada jornada con horas extras detectadas.
                             </p>
                           </div>
-                          <span className="text-[9px] font-mono text-amber-400 mt-2 block">
+                          <span className="text-[9px] font-mono text-amber-700 dark:text-amber-400 mt-2 block font-semibold">
                             Pendiente autorización
                           </span>
                         </div>
@@ -832,20 +832,20 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
                       {/* 2. Checadas incompletas / faltantes */}
                       {stats.pendingMissingPunchItems.length > 0 && (
-                        <div className="p-3 rounded-xl bg-slate-950/80 border border-rose-500/40 text-[11px] flex flex-col justify-between">
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-950/80 border border-rose-300 dark:border-rose-500/40 text-[11px] flex flex-col justify-between shadow-sm">
                           <div>
-                            <span className="font-bold text-rose-300 flex items-center gap-1.5 mb-1">
-                              <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="font-bold text-rose-800 dark:text-rose-300 flex items-center gap-1.5 mb-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
                               {stats.pendingMissingPunchItems.length} Checada(s) Incompletas
                             </span>
-                            <p className="text-[10px] text-slate-400">
+                            <p className="text-[10px] text-slate-600 dark:text-slate-400">
                               Días laborales sin checadas completas. Agrega la hora faltante o confirma falta/permiso.
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => setListFilterMode('missing_punches')}
-                            className="mt-2 text-[10px] font-bold px-2 py-1 rounded bg-rose-600/30 text-rose-200 border border-rose-500/40 hover:bg-rose-600/50 cursor-pointer self-start"
+                            className="mt-2 text-[10px] font-bold px-2.5 py-1 rounded-lg bg-rose-600 text-white hover:bg-rose-500 cursor-pointer self-start shadow-sm"
                           >
                             Filtrar Días con Checadas Faltantes
                           </button>
@@ -854,20 +854,20 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
                       {/* 3. Formatos obligatorios por falta de 2 checadas */}
                       {stats.blockingNoFormatItems.length > 0 && (
-                        <div className="p-3 rounded-xl bg-slate-950/80 border border-purple-500/40 text-[11px] flex flex-col justify-between">
+                        <div className="p-3 rounded-xl bg-white dark:bg-slate-950/80 border border-purple-300 dark:border-purple-500/40 text-[11px] flex flex-col justify-between shadow-sm">
                           <div>
-                            <span className="font-bold text-purple-300 flex items-center gap-1.5 mb-1">
-                              <Paperclip className="w-3.5 h-3.5 text-purple-400" />
+                            <span className="font-bold text-purple-800 dark:text-purple-300 flex items-center gap-1.5 mb-1">
+                              <Paperclip className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                               {stats.blockingNoFormatItems.length} Respaldo(s) Obligatorios
                             </span>
-                            <p className="text-[10px] text-slate-400">
+                            <p className="text-[10px] text-slate-600 dark:text-slate-400">
                               Días sin Entrada ni Salida con checada agregada que requieren formato firmado adjunto.
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={() => setListFilterMode('modified')}
-                            className="mt-2 text-[10px] font-bold px-2 py-1 rounded bg-purple-600/30 text-purple-200 border border-purple-500/40 hover:bg-purple-600/50 cursor-pointer self-start"
+                            className="mt-2 text-[10px] font-bold px-2.5 py-1 rounded-lg bg-purple-600 text-white hover:bg-purple-500 cursor-pointer self-start shadow-sm"
                           >
                             Filtrar Filas para Adjuntar
                           </button>
@@ -1394,9 +1394,9 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                 </div>
                 {/* Desglose detallado de pendientes que impiden la liberación */}
                 {stats.hasPendingTasks && (
-                  <div className="p-3.5 rounded-xl bg-rose-500/20 border border-rose-500/50 text-rose-200 space-y-3">
-                    <p className="text-[11px] font-bold flex items-start gap-1.5 text-rose-100">
-                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-500/20 border border-rose-300 dark:border-rose-500/50 text-rose-900 dark:text-rose-200 space-y-3">
+                    <p className="text-[11px] font-bold flex items-start gap-1.5 text-rose-800 dark:text-rose-100">
+                      <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
                       <span>
                         🚫 No puedes liberar la nómina todavía. Tienes las siguientes tareas pendientes:
                       </span>
@@ -1407,19 +1407,19 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                       {stats.pendingOvertimeItems.map(({ employee, day }) => (
                         <div
                           key={`modal-ot-${employee.id}-${day.isoDate}`}
-                          className="p-2 rounded bg-slate-950/90 border border-amber-500/40 flex items-center justify-between gap-2 text-[11px]"
+                          className="p-2 rounded bg-white dark:bg-slate-950/90 border border-amber-300 dark:border-amber-500/40 flex items-center justify-between gap-2 text-[11px]"
                         >
                           <div>
-                            <span className="font-mono font-bold text-amber-300">#{employee.id}</span>{' '}
-                            <span className="text-slate-200">{employee.nombre}</span>
-                            <div className="text-[10px] text-amber-400/90 font-mono">
+                            <span className="font-mono font-bold text-amber-800 dark:text-amber-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-900 dark:text-slate-200 font-semibold">{employee.nombre}</span>
+                            <div className="text-[10px] text-amber-700 dark:text-amber-400/90 font-mono">
                               {day.dayName} {day.isoDate} • {day.hExtra.toFixed(2)}h extras pendientes de autorizar (SÍ / NO)
                             </div>
                           </div>
                           <button
                             type="button"
                             onClick={() => setIsWorkingOnRelease(false)}
-                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-[#171821] font-extrabold text-[10px] cursor-pointer shrink-0"
+                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-extrabold text-[10px] cursor-pointer shrink-0"
                           >
                             Ir a Autorizar
                           </button>
@@ -1430,12 +1430,12 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                       {stats.pendingMissingPunchItems.map(({ employee, day }) => (
                         <div
                           key={`modal-miss-${employee.id}-${day.isoDate}`}
-                          className="p-2 rounded bg-slate-950/90 border border-rose-500/40 flex items-center justify-between gap-2 text-[11px]"
+                          className="p-2 rounded bg-white dark:bg-slate-950/90 border border-rose-300 dark:border-rose-500/40 flex items-center justify-between gap-2 text-[11px]"
                         >
                           <div>
-                            <span className="font-mono font-bold text-rose-300">#{employee.id}</span>{' '}
-                            <span className="text-slate-200">{employee.nombre}</span>
-                            <div className="text-[10px] text-rose-400/90 font-mono">
+                            <span className="font-mono font-bold text-rose-800 dark:text-rose-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-900 dark:text-slate-200 font-semibold">{employee.nombre}</span>
+                            <div className="text-[10px] text-rose-700 dark:text-rose-400/90 font-mono">
                               {day.dayName} {day.isoDate} • Ent: {day.entrada} | Sal: {day.salida} (Falta checada o permiso)
                             </div>
                           </div>
@@ -1460,12 +1460,12 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                       {stats.blockingNoFormatItems.map(({ employee, day }) => (
                         <div
                           key={`modal-fmt-${employee.id}-${day.isoDate}`}
-                          className="p-2 rounded bg-slate-950/90 border border-purple-500/40 flex items-center justify-between gap-2 text-[11px]"
+                          className="p-2 rounded bg-white dark:bg-slate-950/90 border border-purple-300 dark:border-purple-500/40 flex items-center justify-between gap-2 text-[11px]"
                         >
                           <div>
-                            <span className="font-mono font-bold text-purple-300">#{employee.id}</span>{' '}
-                            <span className="text-slate-200">{employee.nombre}</span>
-                            <div className="text-[10px] text-purple-400/90 font-mono">
+                            <span className="font-mono font-bold text-purple-800 dark:text-purple-300">#{employee.id}</span>{' '}
+                            <span className="text-slate-900 dark:text-slate-200 font-semibold">{employee.nombre}</span>
+                            <div className="text-[10px] text-purple-700 dark:text-purple-400/90 font-mono">
                               {day.dayName} {day.isoDate} • Agregada sin checadas originales (requiere adjunto firmado)
                             </div>
                           </div>

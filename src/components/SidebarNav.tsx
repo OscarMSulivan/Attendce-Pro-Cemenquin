@@ -36,6 +36,7 @@ interface SidebarNavProps {
   onOpenSchedules: () => void;
   onOpenAssign: () => void;
   onOpenRawPunches: () => void;
+  onOpenOvertimeConfig?: () => void;
   onOpenSettings: () => void;
   onDownloadPortable: () => void;
   onExportBackup: () => void;
@@ -57,6 +58,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   onOpenSchedules,
   onOpenAssign,
   onOpenRawPunches,
+  onOpenOvertimeConfig,
   onOpenSettings,
   onDownloadPortable,
   onExportBackup,
@@ -168,6 +170,14 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(onOpenRawPunches),
       disabled: !hasEvents,
       show: !isSupervisor,
+    },
+    {
+      id: 'tiempo_extra',
+      label: 'Config. Tiempo Extra',
+      icon: Clock,
+      onClick: () => handleAction(() => (onOpenOvertimeConfig ? onOpenOvertimeConfig() : onOpenSettings())),
+      disabled: false,
+      show: checkAccess('tiempo_extra'),
     },
     {
       id: 'ajustes',

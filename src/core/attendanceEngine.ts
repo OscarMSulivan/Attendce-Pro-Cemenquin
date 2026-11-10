@@ -6,9 +6,11 @@
 import {
   DayEventStore,
   DaySchedule,
+  DEFAULT_OVERTIME_RULES,
   Employee,
   EmployeeReport,
   EventsDB,
+  OvertimeRulesConfig,
   PayrollSummary,
   ProcessedDay,
   RawPunchItem,
@@ -328,6 +330,44 @@ export function consolidarEventosConHorarios(
 }
 
 /**
+ * Aplica las reglas de redondeo y tope diario sobre los minutos de tiempo extra computables.
+ */
+function aplicarRedondeoYTopeExtra(
+  minutosExtraRaw: number,
+  rules: OvertimeRulesConfig
+): number {
+  if (minutosExtraRaw <= 0 || minutosExtraRaw < (rules.minutosMinimosParaExtra ?? 30)) {
+    return 0;
+  }
+
+  let minutosComputables =
+    rules.modoCalculoExtra === 'despues_del_umbral'
+      ? Math.max(0, minutosExtraRaw - (rules.minutosMinimosParaExtra ?? 30))
+      : minutosExtraRaw;
+
+  switch (rules.redondeoExtra) {
+    case '15_min':
+      minutosComputables = Math.floor(minutosComputables / 15) * 15;
+      break;
+    case '30_min':
+      minutosComputables = Math.floor(minutosComputables / 30) * 30;
+      break;
+    case '60_min':
+      minutosComputables = Math.floor(minutosComputables / 60) * 60;
+      break;
+    case 'exacto':
+    default:
+      break;
+  }
+
+  let horasExtra = Number((minutosComputables / 60).toFixed(2));
+  if (rules.topeMaximoExtraDiarioHrs && rules.topeMaximoExtraDiarioHrs > 0) {
+    horasExtra = Math.min(horasExtra, rules.topeMaximoExtraDiarioHrs);
+  }
+  return Math.max(0, horasExtra);
+}
+
+/**
  * Calcula las horas normales, horas extras, incidencia y advertencias de un día
  * a partir de una hora de entrada y salida dadas.
  * Se utiliza tanto en el cálculo automático como cuando el usuario edita manualmente una hora en la tabla.
@@ -340,7 +380,8 @@ export function calcularMetricasDia(
   isRST = false,
   vca?: string,
   isoDate?: string,
-  tieneHorarioEmpleado?: boolean
+  tieneHorarioEmpleado?: boolean,
+  overtimeRules?: OvertimeRulesConfig
 ): {
   hNormal: number;
   hExtra: number;
@@ -349,6 +390,10 @@ export function calcularMetricasDia(
   huerfana: boolean;
   rowClass: ProcessedDay['rowClass'];
 } {
+  const rules: OvertimeRulesConfig = {
+    ...DEFAULT_OVERTIME_RULES,
+    ...(overtimeRules || {}),
+  };
   const normHorario = normalizarHorarioDia(horarioProgramado);
   let hNormal = 0;
   let hExtra = 0;
@@ -363,8 +408,33 @@ export function calcularMetricasDia(
   if (tieneEnt && tieneSal) {
     const m1 = timeToMinutes(ent);
     const m2 = timeToMinutes(sal);
-    let d = m2 - m1;
+    let m1Efectiva = m1;
+
+    // Si tiene horario programado y llegó antes de su hora de entrada (ej. 10 min antes),
+    // aplicar la regla para NO contar llegada anticipada como tiempo extra.
+    if (normHorario && rules.ignorarEntradaAnticipada) {
+      const mEntProgramada = timeToMinutes(normHorario.entrada);
+      let minAntesDeEntrada = mEntProgramada - m1;
+      if (minAntesDeEntrada < -720) minAntesDeEntrada += 1440;
+      if (minAntesDeEntrada > 720) minAntesDeEntrada -= 1440;
+
+      if (minAntesDeEntrada > 0) {
+        const superaUmbralAnticipado =
+          rules.permitirExtraAntesEntradaConUmbral &&
+          minAntesDeEntrada >= (rules.minutosMinimosAntesEntrada || 60);
+
+        if (!superaUmbralAnticipado) {
+          m1Efectiva = mEntProgramada;
+        }
+      }
+    }
+
+    let d = m2 - m1Efectiva;
     if (d < 0) d += 1440; // Cruce de medianoche
+    // Si el colaborador entró temprano pero también salió antes de la hora de entrada programada, evitar desborde de 24h
+    if (m1Efectiva !== m1 && d > 12 * 60 && !normHorario?.cruzaMedianoche) {
+      d = 0;
+    }
 
     let totalDelDia = d / 60;
     const tiempoComida = normHorario ? (normHorario.comida / 60) : 1.0;
@@ -376,32 +446,40 @@ export function calcularMetricasDia(
     const esDiaDescanso = normHorario === null;
 
     if (esDiaDescanso) {
+      const rawExtraMin = Math.max(0, Math.round(totalDelDia * 60));
+      hExtra = aplicarRedondeoYTopeExtra(rawExtraMin, rules);
+      hNormal = 0;
       inc = 'Descanso';
       cls = 'row-success';
-      msg = `⭐ El empleado laboró en su día de descanso (+${totalDelDia.toFixed(2)} hrs)`;
-      hExtra = totalDelDia;
-      hNormal = 0;
+      msg =
+        hExtra > 0
+          ? `⭐ El empleado laboró en su día de descanso (+${hExtra.toFixed(2)} hrs)`
+          : `⭐ Checada en día de descanso (${Math.round(totalDelDia * 60)} min, menor al mínimo de ${rules.minutosMinimosParaExtra} min para extra)`;
     } else {
       const jornadaEsperada = calcularJornadaEsperadaHrs(normHorario, tiempoComida, jornadaBase);
       hNormal = Math.max(0, Math.min(totalDelDia, jornadaEsperada));
-      hExtra = Math.max(0, totalDelDia - jornadaEsperada);
+      const rawExtraMin = Math.max(0, Math.round((totalDelDia - jornadaEsperada) * 60));
+      hExtra = aplicarRedondeoYTopeExtra(rawExtraMin, rules);
       inc = 'Asistencia';
       cls = 'row-success';
 
-      if (isRST && normHorario) {
-        const mSalEsperada = timeToMinutes(normHorario.salida);
-        const mSalReal = timeToMinutes(sal);
-        let diffMin = mSalReal - mSalEsperada;
-        if (diffMin < -720) diffMin += 1440;
-
-        if (diffMin > 40) {
-          const hExceso = Math.floor(diffMin / 60);
-          const mExceso = diffMin % 60;
-          const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
-          msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida})`;
+      if (hExtra > 0) {
+        if (isRST && normHorario) {
+          const mSalEsperada = timeToMinutes(normHorario.salida);
+          const mSalReal = timeToMinutes(sal);
+          let diffMin = mSalReal - mSalEsperada;
+          if (diffMin < -720) diffMin += 1440;
+          if (diffMin > 0) {
+            const hExceso = Math.floor(diffMin / 60);
+            const mExceso = diffMin % 60;
+            const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
+            msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida}) · Computable: ${hExtra.toFixed(2)} hrs`;
+          } else {
+            msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
+          }
+        } else {
+          msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
         }
-      } else if (hExtra >= 0.5) {
-        msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
       }
     }
   } else if (tieneEnt !== tieneSal) {
@@ -466,6 +544,7 @@ export interface EngineRunOptions {
   jornadaBase?: number; // default: 8.0
   modoLectura?: ReadingMode;
   minutosRebote?: number;
+  overtimeRules?: OvertimeRulesConfig;
 }
 
 /**
@@ -703,7 +782,8 @@ export function generarReporteAsistencia(
         Boolean(ev?.isRST),
         vca,
         isoF,
-        Boolean(emp.horario)
+        Boolean(emp.horario),
+        options.overtimeRules
       );
 
       if (vca) {

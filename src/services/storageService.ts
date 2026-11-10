@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AppConfig, Employee, ScheduleConfig } from '../types/attendance';
+import { AppConfig, DEFAULT_OVERTIME_RULES, Employee, ScheduleConfig } from '../types/attendance';
 import { normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarUtils';
 
 export const HORARIOS_POR_DEFECTO: Record<string, ScheduleConfig> = {
@@ -61,6 +61,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   modoLectura: 'checadas_reales',
   minutosRebote: 15,
   horasLimiteLiberacion: 24,
+  overtimeRules: { ...DEFAULT_OVERTIME_RULES },
   theme: 'dark'
 };
 
@@ -152,7 +153,16 @@ export class StorageService {
   static loadConfig(): AppConfig {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.CONFIG);
-      return data ? { ...DEFAULT_CONFIG, ...JSON.parse(data) } : DEFAULT_CONFIG;
+      if (!data) return DEFAULT_CONFIG;
+      const parsed = JSON.parse(data);
+      return {
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        overtimeRules: {
+          ...DEFAULT_OVERTIME_RULES,
+          ...(parsed?.overtimeRules || {}),
+        },
+      };
     } catch (e) {
       return DEFAULT_CONFIG;
     }
