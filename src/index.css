@@ -63,11 +63,11 @@
   body.light-mode .bg-\[\#21222D\]\/95,
   body.light-mode .bg-\[\#21222D\]\/98,
   body.light-mode .bg-slate-900,
-  body.light-mode .bg-slate-900\/98,
-  body.light-mode .bg-slate-900\/95,
-  body.light-mode .bg-slate-900\/90,
-  body.light-mode .bg-slate-900\/80,
-  body.light-mode .bg-slate-900\/60,
+  body.light-mode :not(.fixed).bg-slate-900\/98,
+  body.light-mode :not(.fixed).bg-slate-900\/95,
+  body.light-mode :not(.fixed).bg-slate-900\/90,
+  body.light-mode :not(.fixed).bg-slate-900\/80,
+  body.light-mode :not(.fixed).bg-slate-900\/60,
   body.light-mode .from-\[\#21222D\],
   body.light-mode .from-slate-900,
   body.light-mode .from-indigo-950\/90,
@@ -387,11 +387,11 @@
 }
 
 .animate-fade-up {
-  animation: fadeSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-scale-in {
-  animation: scaleFadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: scaleFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-progress-fill {
