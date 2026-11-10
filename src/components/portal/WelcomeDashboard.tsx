@@ -147,11 +147,11 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
 
           {/* Estado de Acción Rápida */}
           <div className="shrink-0 flex flex-col gap-2">
-            {isSupervisor ? (
+            {isSupervisor && !userHasModuleAccess(currentUser, 'nomina') ? (
               supervisorTotalPendingTasks > 0 ? (
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('nomina')}
+                  onClick={() => onNavigateTab('trabajar_listas')}
                   className="px-5 py-3 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-rose-500/20 flex items-center gap-2 cursor-pointer transition-all"
                 >
                   <AlertTriangle className="w-4 h-4 animate-bounce" />
@@ -166,11 +166,11 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('nomina')}
+                  onClick={() => onNavigateTab('trabajar_listas')}
                   className="px-5 py-3 rounded-2xl bg-teal-600 dark:bg-[#A9DFD8] hover:bg-teal-500 dark:hover:bg-[#95d0c8] text-white dark:text-[#171821] font-black text-xs uppercase tracking-wider shadow-lg flex items-center gap-2 cursor-pointer transition-all"
                 >
                   <FileCheck className="w-4 h-4" />
-                  <span>Listo para Liberar Nómina</span>
+                  <span>Trabajar / Liberar Mi Lista</span>
                   <ArrowRight className="w-4 h-4 ml-1" />
                 </button>
               )
@@ -182,8 +182,18 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
                     onClick={() => onNavigateTab('nomina')}
                     className="px-4 py-2.5 rounded-xl bg-[#20AEF3] hover:bg-[#1a9ad9] text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
                   >
-                    <Calendar className="w-4 h-4" />
-                    <span>Trabajar Periodo Nómina</span>
+                    <Send className="w-4 h-4" />
+                    <span>Dispersión de Nómina</span>
+                  </button>
+                )}
+                {userHasModuleAccess(currentUser, 'trabajar_listas') && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('trabajar_listas')}
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                  >
+                    <FileCheck className="w-4 h-4" />
+                    <span>Trabajar Listas</span>
                   </button>
                 )}
                 {userHasModuleAccess(currentUser, 'semaforo') && (
@@ -216,7 +226,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {/* Tarjeta 1: Tareas del supervisor o Estado de la semana */}
-          {isSupervisor ? (
+          {isSupervisor && !userHasModuleAccess(currentUser, 'nomina') ? (
             <div className={`p-4 rounded-xl border flex flex-col justify-between ${
               supervisorPendingOvertimeCount > 0
                 ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-300 dark:border-amber-500/40'
@@ -240,7 +250,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
               {supervisorPendingOvertimeCount > 0 && (
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('nomina')}
+                  onClick={() => onNavigateTab('trabajar_listas')}
                   className="mt-3 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] self-start cursor-pointer"
                 >
                   Autorizar Tiempos Extras
@@ -255,7 +265,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
             }`}>
               <div>
                 <span className="text-[10px] uppercase font-bold text-amber-800 dark:text-[#FEB95A] block mb-1 flex items-center gap-1.5">
-                  <Upload className="w-3.5 h-3.5" /> Carga de Archivos de Nómina
+                  <Upload className="w-3.5 h-3.5" /> Carga y Dispersión de Nómina
                 </span>
                 <h4 className="text-xs font-bold text-slate-900 dark:text-white">
                   {!hasEmployees || !hasEvents
@@ -267,7 +277,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
                     ? 'Sube el archivo Excel de empleados para sincronizar nombres y turnos.'
                     : !hasEvents
                     ? 'Sube el archivo de checadas biométricas de la semana.'
-                    : 'La base de datos de asistencia está activa y lista para trabajar.'}
+                    : 'La base de datos de asistencia está activa y lista para dispersar.'}
                 </p>
               </div>
               {(!hasEmployees || !hasEvents) && (
@@ -276,14 +286,14 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
                   onClick={() => onNavigateTab('nomina')}
                   className="mt-3 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] self-start cursor-pointer"
                 >
-                  Ir al Cargador de Archivos
+                  Ir a Dispersión de Nómina
                 </button>
               )}
             </div>
           )}
 
           {/* Tarjeta 2: Checadas incompletas o Semáforo */}
-          {isSupervisor ? (
+          {isSupervisor && !userHasModuleAccess(currentUser, 'semaforo') ? (
             <div className={`p-4 rounded-xl border flex flex-col justify-between ${
               supervisorPendingMissingPunchCount > 0 || supervisorBlockingNoFormatCount > 0
                 ? 'bg-rose-50 dark:bg-rose-500/10 border-rose-300 dark:border-rose-500/40'
@@ -307,7 +317,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
               {(supervisorPendingMissingPunchCount > 0 || supervisorBlockingNoFormatCount > 0) && (
                 <button
                   type="button"
-                  onClick={() => onNavigateTab('nomina')}
+                  onClick={() => onNavigateTab('trabajar_listas')}
                   className="mt-3 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[10px] self-start cursor-pointer"
                 >
                   Resolver Checadas Faltantes
@@ -384,7 +394,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
         </h3>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Módulo 1: Nómina */}
+          {/* Módulo 1A: Dispersión y Cálculo de Nómina */}
           {userHasModuleAccess(currentUser, 'nomina') && (
             <div
               onClick={() => onNavigateTab('nomina')}
@@ -392,19 +402,41 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
             >
               <div>
                 <div className="w-10 h-10 rounded-xl bg-sky-50 dark:bg-[#20AEF3]/15 border border-sky-200 dark:border-[#20AEF3]/30 flex items-center justify-center text-sky-600 dark:text-[#20AEF3] mb-3 group-hover:scale-110 transition-transform">
-                  <Home className="w-5 h-5" />
+                  <Send className="w-5 h-5" />
                 </div>
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-sky-600 dark:group-hover:text-[#20AEF3] transition-colors">
-                  {isSupervisor ? 'Trabajar Mi Lista de Nómina' : 'Dashboard y Asistencia'}
+                  Módulo de Dispersión de Nómina
                 </h4>
                 <p className="text-[11px] text-slate-600 dark:text-[#8C8D9B] mt-1">
-                  {isSupervisor
-                    ? `Gestiona checadas y valida el turno de ${assignedSupervisorList || 'tu personal'}.`
-                    : 'Revisa asistencia por listas, asigna turnos y audita checadas crudas.'}
+                  Carga archivos biométricos, genera el cálculo semanal global y dispersa las listas de nómina a los supervisores.
                 </p>
               </div>
               <div className="flex items-center text-xs font-bold text-sky-600 dark:text-[#20AEF3] mt-4">
-                <span>{isSupervisor ? 'Trabajar Nómina' : 'Abrir Dashboard'}</span>
+                <span>Abrir Dispersión de Nómina</span>
+                <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          )}
+
+          {/* Módulo 1B: Trabajar Listas Asignadas */}
+          {userHasModuleAccess(currentUser, 'trabajar_listas') && (
+            <div
+              onClick={() => onNavigateTab('trabajar_listas')}
+              className="p-5 rounded-2xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-[#2C2D3C] hover:border-indigo-400 dark:hover:border-indigo-500/60 transition-all cursor-pointer group shadow-md dark:shadow-lg flex flex-col justify-between"
+            >
+              <div>
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-500/15 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 mb-3 group-hover:scale-110 transition-transform">
+                  <FileCheck className="w-5 h-5" />
+                </div>
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors">
+                  Módulo para Trabajar Listas
+                </h4>
+                <p className="text-[11px] text-slate-600 dark:text-[#8C8D9B] mt-1">
+                  Revisa checadas, justifica faltas, autoriza tiempos extras y libera la lista asignada ({assignedSupervisorList || 'Tus listas asignadas'}).
+                </p>
+              </div>
+              <div className="flex items-center text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-4">
+                <span>Trabajar Lista(s)</span>
                 <ArrowRight className="w-4 h-4 ml-1 group-hover:translate-x-1 transition-transform" />
               </div>
             </div>

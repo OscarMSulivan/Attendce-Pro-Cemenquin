@@ -22,6 +22,8 @@ import {
   Download,
   Upload,
   Calendar,
+  Send,
+  ListChecks,
   X,
 } from 'lucide-react';
 import { UserRole, PortalUser, PortalModule, userHasModuleAccess, userHasAnyAdminPanelAccess } from '../types/portal';
@@ -101,12 +103,21 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     },
     {
       id: 'nomina',
-      label: isSupervisor ? 'Mi Lista de Nómina' : 'Dashboard Nómina',
-      icon: Calendar,
+      label: 'Dispersión de Nómina',
+      icon: Send,
       onClick: () => handleAction(() => onTabChange('nomina')),
       isActive: activeTab === 'nomina',
       badge: 0,
       show: checkAccess('nomina'),
+    },
+    {
+      id: 'trabajar_listas',
+      label: 'Trabajar Listas',
+      icon: ListChecks,
+      onClick: () => handleAction(() => onTabChange('trabajar_listas')),
+      isActive: activeTab === 'trabajar_listas',
+      badge: 0,
+      show: checkAccess('trabajar_listas'),
     },
     {
       id: 'semaforo',
@@ -153,7 +164,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       icon: Clock,
       onClick: () => handleAction(onOpenSchedules),
       disabled: false,
-      show: !isSupervisor,
+      show: checkAccess('nomina'),
     },
     {
       id: 'asignar',
@@ -161,7 +172,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       icon: UserCheck,
       onClick: () => handleAction(onOpenAssign),
       disabled: !hasEmployees,
-      show: !isSupervisor,
+      show: checkAccess('nomina'),
     },
     {
       id: 'crudas',
@@ -169,7 +180,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       icon: History,
       onClick: () => handleAction(onOpenRawPunches),
       disabled: !hasEvents,
-      show: !isSupervisor,
+      show: checkAccess('nomina'),
     },
     {
       id: 'tiempo_extra',

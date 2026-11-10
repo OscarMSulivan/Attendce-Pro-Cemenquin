@@ -72,6 +72,7 @@ interface SupervisorWorkspaceViewProps {
   onQuickConfirmFalta: (employeeId: string, isoDate: string) => void;
   onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
   horasLimiteLiberacion?: number;
+  availableSupervisorLists?: string[];
 }
 
 export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = ({
@@ -96,6 +97,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   onQuickConfirmFalta,
   onToggleOvertimeApproval,
   horasLimiteLiberacion = 24,
+  availableSupervisorLists = [],
 }) => {
   const [activeModule, setActiveModule] = useState<'nominas' | 'equipo' | 'solicitudes'>('nominas');
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
@@ -110,11 +112,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     mode: ResolutionMode;
   } | null>(null);
 
-  // Todas las listas de nómina asignadas a este usuario supervisor
+  // Todas las listas de nómina asignadas a este usuario (o listas del catálogo si es Admin/RH sin lista específica restringida)
   const userAssignedLists = useMemo(() => {
     const lists = getUserAllowedLists(currentUser);
-    return lists.length > 0 ? lists : [currentUser.supervisorName || currentUser.name.toUpperCase()];
-  }, [currentUser]);
+    if (lists.length > 0) return lists;
+    if (availableSupervisorLists.length > 0) return availableSupervisorLists;
+    return [currentUser.supervisorName || currentUser.name.toUpperCase()];
+  }, [currentUser, availableSupervisorLists]);
 
   const [selectedListForWork, setSelectedListForWork] = useState<string>(
     () => userAssignedLists[0] || ''

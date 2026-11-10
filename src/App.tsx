@@ -409,24 +409,60 @@ export default function App() {
     return list;
   }, [empleadosDB]);
 
-  // Supervisores / Listas permitidas según el usuario activo (soporta múltiples listas asignadas y suplencias)
-  const allowedSupervisors = useMemo(() => {
-    if (currentUser.role === 'admin' || currentUser.role === 'rh') {
+  // Supervisores / Listas permitidas para el Módulo "Trabajar Listas" según las listas asignadas al usuario
+  const workListSupervisors = useMemo(() => {
+    const explicitLists = getUserAllowedLists(currentUser);
+    if (explicitLists.length > 0) {
+      return explicitLists;
+    }
+    if (currentUser.role === 'admin' || userHasModuleAccess(currentUser, 'nomina')) {
       return supervisorsList;
     }
-    return getUserAllowedLists(currentUser);
+    return [];
   }, [currentUser, supervisorsList]);
 
-  // Si el usuario en sesión es supervisor, restringir automáticamente su filtro a su equipo o suplencia
+  // Supervisores disponibles en el filtro global de Dispersión de Nómina
+  const allowedSupervisors = useMemo(() => {
+    if (
+      currentUser.role === 'admin' ||
+      currentUser.role === 'rh' ||
+      userHasModuleAccess(currentUser, 'nomina')
+    ) {
+      return supervisorsList;
+    }
+    return workListSupervisors;
+  }, [currentUser, supervisorsList, workListSupervisors]);
+
+  // Sincronizar pestaña activa si el usuario cambia y no tiene permiso para la pestaña actual
   useEffect(() => {
-    if (currentUser.role === 'supervisor') {
-      if (!selectedSupervisor || !allowedSupervisors.includes(selectedSupervisor)) {
-        if (allowedSupervisors.length > 0) {
-          setSelectedSupervisor(allowedSupervisors[0]);
+    if (portalTab === 'nomina' && !userHasModuleAccess(currentUser, 'nomina')) {
+      if (userHasModuleAccess(currentUser, 'trabajar_listas')) {
+        setPortalTab('trabajar_listas');
+      } else {
+        setPortalTab('inicio');
+      }
+    } else if (
+      portalTab === 'trabajar_listas' &&
+      !userHasModuleAccess(currentUser, 'trabajar_listas')
+    ) {
+      if (userHasModuleAccess(currentUser, 'nomina')) {
+        setPortalTab('nomina');
+      } else {
+        setPortalTab('inicio');
+      }
+    }
+  }, [currentUser, portalTab]);
+
+  // Si el usuario en sesión no tiene acceso a Dispersión global, restringir su filtro a sus listas asignadas
+  useEffect(() => {
+    if (!userHasModuleAccess(currentUser, 'nomina')) {
+      if (!selectedSupervisor || !workListSupervisors.includes(selectedSupervisor)) {
+        if (workListSupervisors.length > 0) {
+          setSelectedSupervisor(workListSupervisors[0]);
         }
       }
     }
-  }, [currentUser, allowedSupervisors, selectedSupervisor]);
+  }, [currentUser, workListSupervisors, selectedSupervisor]);
 
   // Cantidad de asignados por horario
   const assignedCountBySchedule = useMemo(() => {
@@ -1669,12 +1705,21 @@ Saludos.`
     PortalService.setSessionAuthenticated(true, userId);
     setIsAuthenticated(true);
     const targetUser = portalUsers.find(u => u.id === userId);
-    if (targetUser?.role === 'supervisor') {
+    if (targetUser) {
       const lists = getUserAllowedLists(targetUser);
       if (lists.length > 0) {
         setSelectedSupervisor(lists[0]);
       }
-      setPortalTab('nomina');
+      if (
+        userHasModuleAccess(targetUser, 'trabajar_listas') &&
+        !userHasModuleAccess(targetUser, 'nomina')
+      ) {
+        setPortalTab('trabajar_listas');
+      } else if (userHasModuleAccess(targetUser, 'nomina')) {
+        setPortalTab('nomina');
+      } else {
+        setPortalTab('inicio');
+      }
     }
     setStatusMessage(`Sesión activa: ${targetUser?.name || userId}`);
     setStatusType('info');
@@ -2312,45 +2357,47 @@ Saludos.`
           />
         )}
 
-        {/* VISTA DEDICADA PARA SUPERVISORES */}
-        {currentUser.role === 'supervisor' && portalTab === 'nomina' && (
-          <SupervisorWorkspaceView
-            currentUser={currentUser}
-            dispersals={dispersals}
-            releases={releases}
-            notifications={notifications}
-            onMarkNotificationRead={handleMarkNotificationRead}
-            assignedEmployees={Object.values(empleadosDB).filter(e => {
-              const jefe = e.jefe?.trim().toUpperCase();
-              return Boolean(jefe && allowedSupervisors.includes(jefe));
-            })}
-            weeklyReports={
-              isCurrentWeekDispersed
-                ? reportes.filter(r => {
-                    const jefe = r.empleado.jefe?.trim().toUpperCase();
-                    return Boolean(jefe && allowedSupervisors.includes(jefe));
-                  })
-                : []
-            }
-            incidents={incidents}
-            horarios={horarios}
-            currentWeekNumber={currentWeekNumber}
-            currentWeekPeriod={selectedWeek}
-            horasLimiteLiberacion={config.horasLimiteLiberacion}
-            onDownloadProcessedExcel={handleDownloadSupervisorExcel}
-            onLiberarNomina={handleSupervisorLiberarNomina}
-            onOpenNewIncidentModal={handleOpenIncidentModalForEmp}
-            onUpdateDayIncidence={handleUpdateDayIncidence}
-            onUpdateDayTimes={handleUpdateDayTimes}
-            onUpdateDayNote={handleUpdateDayNote}
-            onResolveMissingPunchDay={handleResolveMissingPunchDay}
-            onQuickConfirmFalta={handleQuickConfirmFalta}
-            onToggleOvertimeApproval={handleToggleOvertimeApproval}
-          />
-        )}
+        {/* MÓDULO PARA TRABAJAR LISTAS (Cualquier usuario con el acceso 'trabajar_listas' habilitado) */}
+        {portalTab === 'trabajar_listas' &&
+          userHasModuleAccess(currentUser, 'trabajar_listas') && (
+            <SupervisorWorkspaceView
+              currentUser={currentUser}
+              availableSupervisorLists={workListSupervisors}
+              dispersals={dispersals}
+              releases={releases}
+              notifications={notifications}
+              onMarkNotificationRead={handleMarkNotificationRead}
+              assignedEmployees={Object.values(empleadosDB).filter(e => {
+                const jefe = e.jefe?.trim().toUpperCase();
+                return Boolean(jefe && workListSupervisors.includes(jefe));
+              })}
+              weeklyReports={
+                isCurrentWeekDispersed || userHasModuleAccess(currentUser, 'nomina')
+                  ? reportes.filter(r => {
+                      const jefe = r.empleado.jefe?.trim().toUpperCase();
+                      return Boolean(jefe && workListSupervisors.includes(jefe));
+                    })
+                  : []
+              }
+              incidents={incidents}
+              horarios={horarios}
+              currentWeekNumber={currentWeekNumber}
+              currentWeekPeriod={selectedWeek}
+              horasLimiteLiberacion={config.horasLimiteLiberacion}
+              onDownloadProcessedExcel={handleDownloadSupervisorExcel}
+              onLiberarNomina={handleSupervisorLiberarNomina}
+              onOpenNewIncidentModal={handleOpenIncidentModalForEmp}
+              onUpdateDayIncidence={handleUpdateDayIncidence}
+              onUpdateDayTimes={handleUpdateDayTimes}
+              onUpdateDayNote={handleUpdateDayNote}
+              onResolveMissingPunchDay={handleResolveMissingPunchDay}
+              onQuickConfirmFalta={handleQuickConfirmFalta}
+              onToggleOvertimeApproval={handleToggleOvertimeApproval}
+            />
+          )}
 
-        {/* VISTAS PARA RECURSOS HUMANOS / NÓMINAS Y ADMINISTRADOR */}
-        {currentUser.role !== 'supervisor' && portalTab === 'nomina' && (
+        {/* MÓDULO DE DISPERSIÓN Y CÁLCULO DE NÓMINA (Cualquier usuario con el acceso 'nomina' habilitado) */}
+        {portalTab === 'nomina' && userHasModuleAccess(currentUser, 'nomina') && (
           <>
             {/* Panel de Estadísticas superiores (Today's Sales + Level) */}
             {activeSummary && (

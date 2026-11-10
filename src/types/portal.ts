@@ -6,8 +6,9 @@
 export type UserRole = 'admin' | 'rh' | 'supervisor';
 
 export type PortalModule = 
-  | 'nomina'            // Dashboard y Tabla de Asistencia / Trabajo de Nómina
-  | 'semaforo'          // Semáforo de Nóminas y Dispersión
+  | 'nomina'            // Módulo de Dispersión y Cálculo Global de Nómina
+  | 'trabajar_listas'   // Módulo para Trabajar y Liberar Listas de Nómina Asignadas
+  | 'semaforo'          // Semáforo de Nóminas y Monitoreo
   | 'incidencias'       // Bandeja de Incidencias
   | 'contpaqi'          // Exportador CONTPAQi® Nóminas
   | 'tiempo_extra'      // Configuración de Reglas de Tiempo Extra
@@ -18,6 +19,7 @@ export type PortalModule =
 
 export const ALL_PORTAL_MODULES: PortalModule[] = [
   'nomina',
+  'trabajar_listas',
   'semaforo',
   'incidencias',
   'contpaqi',
@@ -30,9 +32,14 @@ export const ALL_PORTAL_MODULES: PortalModule[] = [
 
 export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: string; description: string }> = {
   nomina: {
-    short: 'Nómina',
-    title: 'Nómina y Asistencia',
-    description: 'Trabajo de checadas, horarios y asistencias de listas',
+    short: 'Dispersión de Nómina',
+    title: 'Módulo de Dispersión de Nómina',
+    description: 'Cargar checadas, generar reporte global y dispersar las listas de nómina',
+  },
+  trabajar_listas: {
+    short: 'Trabajar Listas',
+    title: 'Módulo para Trabajar Listas',
+    description: 'Revisar asistencia, justificar faltas, autorizar extras y liberar las listas asignadas',
   },
   semaforo: {
     short: 'Semáforo',
@@ -98,19 +105,39 @@ export interface PortalUser {
 
 /**
  * Obtiene los módulos permitidos para un usuario, garantizando que cualquier usuario con rol 'admin'
- * tenga exactamente todos los accesos del usuario Administrador General.
+ * tenga exactamente todos los accesos del usuario Administrador General, y separando claramente
+ * el módulo de Dispersión de Nómina ('nomina') del módulo para Trabajar Listas ('trabajar_listas').
  */
 export function getUserAllowedModules(user: PortalUser): PortalModule[] {
   if (user.id === 'user_admin' || user.role === 'admin') {
     return [...ALL_PORTAL_MODULES];
   }
   if (Array.isArray(user.allowedModules) && user.allowedModules.length > 0) {
+    // Migración transparente para supervisores guardados antes de separar 'nomina' y 'trabajar_listas'
+    if (
+      user.role === 'supervisor' &&
+      !user.allowedModules.includes('trabajar_listas') &&
+      user.allowedModules.length === 2 &&
+      user.allowedModules.includes('nomina') &&
+      user.allowedModules.includes('incidencias')
+    ) {
+      return ['trabajar_listas', 'incidencias'];
+    }
     return user.allowedModules;
   }
   if (user.role === 'rh') {
-    return ['nomina', 'semaforo', 'incidencias', 'contpaqi', 'tiempo_extra', 'tiempo_limite', 'plantillas_correo', 'smtp_correo'];
+    return [
+      'nomina',
+      'semaforo',
+      'incidencias',
+      'contpaqi',
+      'tiempo_extra',
+      'tiempo_limite',
+      'plantillas_correo',
+      'smtp_correo',
+    ];
   }
-  return ['nomina', 'incidencias'];
+  return ['trabajar_listas', 'incidencias'];
 }
 
 export function userHasModuleAccess(user: PortalUser, module: PortalModule): boolean {

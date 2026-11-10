@@ -24,6 +24,7 @@ import {
   Users,
   UserPlus,
   Shield,
+  ShieldCheck,
   Mail,
   Briefcase,
   UserCheck,
@@ -33,7 +34,6 @@ import {
   XCircle,
   ArrowRightLeft,
   AlertCircle,
-  Hash,
   Search,
   Server,
   HardDrive,
@@ -54,11 +54,9 @@ import {
   HelpCircle,
   BellRing,
   FileText,
-  ChevronDown,
-  ChevronUp,
   Sliders,
-  Sparkles,
   Crown,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AdminUsersViewProps {
@@ -86,6 +84,16 @@ type ConfigSectionId =
   | 'smtp_correo'
   | 'vps_hostinger';
 
+type UserFilterTab =
+  | 'all'
+  | 'admin'
+  | 'rh'
+  | 'supervisor'
+  | 'with_dispersion'
+  | 'with_work_lists';
+
+type ModalSectionTab = 'cuenta' | 'nomina_listas' | 'modulos';
+
 export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   users,
   supervisorsInCatalog,
@@ -110,51 +118,23 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     userHasModuleAccess(currentUser, 'smtp_correo');
   const canManageSmtp = userHasModuleAccess(currentUser, 'smtp_correo');
 
-  // Control de tarjetas desplegables (Acordeón / Sub-menús)
-  const [openSections, setOpenSections] = useState<Record<ConfigSectionId, boolean>>(() => ({
-    usuarios: canManageUsers,
-    tiempo_extra: !canManageUsers && canManageOvertime,
-    tiempo_limite: !canManageUsers && !canManageOvertime && canManageDeadline,
-    plantillas_correo:
-      !canManageUsers && !canManageOvertime && !canManageDeadline && canManageEmailTemplates,
-    smtp_correo:
-      !canManageUsers &&
-      !canManageOvertime &&
-      !canManageDeadline &&
-      !canManageEmailTemplates &&
-      canManageSmtp,
-    vps_hostinger: false,
-  }));
-
-  const toggleSection = (id: ConfigSectionId) => {
-    setOpenSections(prev => ({ ...prev, [id]: !prev[id] }));
+  const getInitialSection = (): ConfigSectionId => {
+    if (canManageUsers) return 'usuarios';
+    if (canManageOvertime) return 'tiempo_extra';
+    if (canManageDeadline) return 'tiempo_limite';
+    if (canManageEmailTemplates) return 'plantillas_correo';
+    if (canManageSmtp) return 'smtp_correo';
+    return 'usuarios';
   };
 
-  const focusSingleSection = (id: ConfigSectionId) => {
-    setOpenSections({
-      usuarios: id === 'usuarios',
-      tiempo_extra: id === 'tiempo_extra',
-      tiempo_limite: id === 'tiempo_limite',
-      plantillas_correo: id === 'plantillas_correo',
-      smtp_correo: id === 'smtp_correo',
-      vps_hostinger: id === 'vps_hostinger',
-    });
-  };
-
-  const setAllSectionsOpen = (open: boolean) => {
-    setOpenSections({
-      usuarios: open && canManageUsers,
-      tiempo_extra: open && canManageOvertime,
-      tiempo_limite: open && canManageDeadline,
-      plantillas_correo: open && canManageEmailTemplates,
-      smtp_correo: open && canManageSmtp,
-      vps_hostinger: open && canManageUsers,
-    });
-  };
+  const [activeSection, setActiveSection] = useState<ConfigSectionId>(getInitialSection);
+  const [userFilter, setUserFilter] = useState<UserFilterTab>('all');
+  const [modalTab, setModalTab] = useState<ModalSectionTab>('cuenta');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [listSearchTerm, setListSearchTerm] = useState('');
   const [serverStatus, setServerStatus] = useState<{
     connected: boolean;
     hostname?: string;
@@ -166,7 +146,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const [applyToActiveWeek, setApplyToActiveWeek] = useState<boolean>(true);
   const [savedDeadlineToast, setSavedDeadlineToast] = useState<boolean>(false);
 
-  // Estado para configuración de credenciales SMTP en el Módulo Administrativo
+  // Estado para configuración de credenciales SMTP
   const [smtpHost, setSmtpHost] = useState<string>(emailConfig?.smtpHost || 'smtp.gmail.com');
   const [smtpPort, setSmtpPort] = useState<number>(emailConfig?.smtpPort || 587);
   const [smtpUser, setSmtpUser] = useState<string>(emailConfig?.smtpUser || '');
@@ -264,7 +244,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setSmtpFeedback({
       type: 'success',
       message:
-        '✓ Credenciales SMTP guardadas de forma segura. El sistema enviará las alertas automáticas al dispersar nómina.',
+        'Credenciales SMTP guardadas. El sistema enviará las alertas automáticas al dispersar nómina.',
     });
     setTimeout(() => {
       setSmtpFeedback(prev => (prev.type === 'success' ? { type: null, message: '' } : prev));
@@ -277,8 +257,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     onSaveEmailConfig(updatedCfg);
     setTemplatesFeedback({
       type: 'success',
-      message:
-        '✓ Plantillas de correo y alerta automática por vencimiento guardadas correctamente.',
+      message: 'Plantillas de correo y alerta automática por vencimiento guardadas.',
     });
     setTimeout(() => {
       setTemplatesFeedback(prev => (prev.type === 'success' ? { type: null, message: '' } : prev));
@@ -294,7 +273,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setMensajePorVencer(DEFAULT_EMAIL_TEMPLATES.mensajePorVencer);
     setTemplatesFeedback({
       type: 'success',
-      message: 'Plantillas restauradas a los textos recomendados. Haz clic en "Guardar Mensajes y Alertas" para aplicar.',
+      message: 'Plantillas restauradas a los valores por defecto. Guarda los cambios para aplicar.',
     });
   };
 
@@ -318,7 +297,8 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       if (data.ok && data.smtpSent > 0) {
         setTemplatesFeedback({
           type: 'success',
-          message: `✓ ${data.details?.[0] || 'Correo de prueba de alerta por vencimiento enviado con éxito.'}`,
+          message:
+            data.details?.[0] || 'Correo de prueba de alerta por vencimiento enviado con éxito.',
         });
       } else {
         setTemplatesFeedback({
@@ -326,7 +306,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
           message:
             data.details?.[0] ||
             data.error ||
-            'Para enviar la prueba por correo, asegúrate de configurar primero el Servidor SMTP.',
+            'Para enviar la prueba por correo, configura primero el Servidor SMTP.',
         });
       }
     } catch (err: any) {
@@ -419,7 +399,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const [email, setEmail] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [role, setRole] = useState<UserRole>('supervisor');
-  const [allowedModules, setAllowedModules] = useState<PortalModule[]>(['nomina', 'incidencias']);
+  const [allowedModules, setAllowedModules] = useState<PortalModule[]>([
+    'trabajar_listas',
+    'incidencias',
+  ]);
   const [assignedLists, setAssignedLists] = useState<string[]>([]);
   const [customListInput, setCustomListInput] = useState('');
   const [delegatedSupervisor, setDelegatedSupervisor] = useState('');
@@ -442,10 +425,13 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
         'smtp_correo',
       ];
     }
-    return ['nomina', 'incidencias'];
+    return ['trabajar_listas', 'incidencias'];
   };
 
-  const openNewUserModal = (presetRole: UserRole = 'supervisor') => {
+  const openNewUserModal = (
+    presetRole: UserRole = 'supervisor',
+    initialTab: ModalSectionTab = 'cuenta'
+  ) => {
     setEditingId(null);
     setName('');
     setUsername('');
@@ -459,17 +445,19 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       presetRole === 'supervisor' && supervisorsInCatalog[0] ? [supervisorsInCatalog[0]] : [];
     setAssignedLists(initialList);
     setCustomListInput('');
+    setListSearchTerm('');
     setDelegatedSupervisor('');
     setActive(true);
     setNotes(
       presetRole === 'admin'
-        ? 'Administrador General designado con acceso total a todos los módulos y configuraciones.'
+        ? 'Administrador General con acceso completo a todos los módulos.'
         : ''
     );
+    setModalTab(initialTab);
     setIsModalOpen(true);
   };
 
-  const openEditModal = (u: PortalUser) => {
+  const openEditModal = (u: PortalUser, initialTab: ModalSectionTab = 'cuenta') => {
     setEditingId(u.id);
     setName(u.name);
     setUsername(u.username || u.employeeId || u.email.split('@')[0]);
@@ -487,10 +475,31 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     );
     setAssignedLists(currentLists);
     setCustomListInput('');
+    setListSearchTerm('');
     setDelegatedSupervisor(u.delegatedSupervisor || '');
     setActive(u.active);
     setNotes(u.notes || '');
+    setModalTab(initialTab);
     setIsModalOpen(true);
+  };
+
+  // Toggle rápido en línea desde la tabla de usuarios para Dispersión de Nómina o Trabajar Listas
+  const handleQuickToggleUserModule = (u: PortalUser, mod: PortalModule) => {
+    if (u.role === 'admin') return;
+    const currentMods = getUserAllowedModules(u);
+    const exists = currentMods.includes(mod);
+    let nextMods: PortalModule[];
+    if (exists) {
+      if (currentMods.length <= 1) return;
+      nextMods = currentMods.filter(m => m !== mod);
+    } else {
+      nextMods = [...currentMods, mod];
+    }
+    const updatedUser: PortalUser = {
+      ...u,
+      allowedModules: nextMods,
+    };
+    onSaveUser(updatedUser);
   };
 
   const handleToggleModuleAccess = (mod: PortalModule) => {
@@ -523,7 +532,6 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const handleSelectRoleInModal = (newRole: UserRole) => {
     setRole(newRole);
     if (newRole === 'admin') {
-      // Garantizar que al elegir Administrador General se activen TODOS los accesos de inmediato
       setAllowedModules([...ALL_PORTAL_MODULES]);
     } else {
       setAllowedModules(getDefaultModulesForRole(newRole));
@@ -547,17 +555,19 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
         : employeeId.trim()
       : undefined;
 
-    const cleanLists =
-      role === 'supervisor'
-        ? assignedLists.map(l => l.trim().toUpperCase()).filter(Boolean)
-        : [];
-
     const finalModules: PortalModule[] =
       role === 'admin'
         ? [...ALL_PORTAL_MODULES]
         : allowedModules.length > 0
         ? allowedModules
         : getDefaultModulesForRole(role);
+
+    const hasWorkListsAccess =
+      role === 'supervisor' || finalModules.includes('trabajar_listas');
+
+    const cleanLists = hasWorkListsAccess
+      ? assignedLists.map(l => l.trim().toUpperCase()).filter(Boolean)
+      : [];
 
     const newUser: PortalUser = {
       id: editingId || `user_${Date.now()}`,
@@ -568,10 +578,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       role,
       employeeId: formattedEmployeeId,
       allowedModules: finalModules,
-      supervisorName: role === 'supervisor' && cleanLists.length > 0 ? cleanLists[0] : undefined,
-      assignedLists: role === 'supervisor' ? cleanLists : undefined,
+      supervisorName: cleanLists.length > 0 ? cleanLists[0] : undefined,
+      assignedLists: hasWorkListsAccess ? cleanLists : undefined,
       delegatedSupervisor:
-        role === 'supervisor' && delegatedSupervisor ? delegatedSupervisor : undefined,
+        hasWorkListsAccess && delegatedSupervisor ? delegatedSupervisor : undefined,
       active,
       notes: notes.trim() || undefined,
     };
@@ -583,1272 +593,1162 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const allAvailableSupervisorLists = Array.from(
     new Set([
       ...supervisorsInCatalog.map(s => s.trim().toUpperCase()),
-      ...users.flatMap(u => getUserAllowedLists(u)),
-      ...assignedLists,
+      ...assignedLists.map(s => s.trim().toUpperCase()),
     ])
   )
     .filter(Boolean)
     .sort();
 
+  const filteredModalSupervisorLists = allAvailableSupervisorLists.filter(sup => {
+    if (!listSearchTerm.trim()) return true;
+    return sup.toLowerCase().includes(listSearchTerm.toLowerCase());
+  });
+
   const filteredUsers = users.filter(u => {
+    const userMods = getUserAllowedModules(u);
+    if (userFilter === 'admin' && u.role !== 'admin') return false;
+    if (userFilter === 'rh' && u.role !== 'rh') return false;
+    if (userFilter === 'supervisor' && u.role !== 'supervisor') return false;
+    if (userFilter === 'with_dispersion' && !userMods.includes('nomina')) return false;
+    if (userFilter === 'with_work_lists' && !userMods.includes('trabajar_listas')) return false;
+
     if (!searchTerm.trim()) return true;
     const q = searchTerm.toLowerCase();
-    const listsText = getUserAllowedLists(u).join(' ').toLowerCase();
+    const lists = getUserAllowedLists(u).join(' ').toLowerCase();
     return (
       u.name.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q) ||
-      (u.username && u.username.toLowerCase().includes(q)) ||
-      (u.employeeId && u.employeeId.toLowerCase().includes(q)) ||
-      listsText.includes(q)
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.employeeId || '').toLowerCase().includes(q) ||
+      lists.includes(q)
     );
   });
 
-  // Vista previa en vivo de los correos configurados
-  const previewVars = {
-    supervisor: supervisorsInCatalog[0] || 'OSCAR VALENZUELA',
-    nombre: 'Óscar Valenzuela (Supervisor)',
-    semana: String(currentWeekNumber || 43),
-    periodo: '2026-10-22 al 2026-10-28',
-    dispersado_por: currentUser.name || 'Recursos Humanos',
-    fecha_limite: new Date(Date.now() + (deadlineHoursInput || 24) * 3600000).toLocaleString(
-      'es-MX',
-      {
-        weekday: 'short',
-        day: '2-digit',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      }
-    ),
-    horas_limite: String(deadlineHoursInput || 24),
-    tiempo_restante: `${horasAntesVencimiento || 2} hora(s)`,
+  const samplePreviewVars = {
+    supervisor: 'OSCAR VALENZUELA',
+    semana: String(currentWeekNumber || 15),
+    periodo: activeDispersal?.semanaPeriodo || '2026-04-06 al 2026-04-12',
+    horas_limite: `${deadlineHoursInput} horas`,
+    horas_restantes: `${horasAntesVencimiento}h 00m`,
+    fecha_limite: new Date(Date.now() + deadlineHoursInput * 3600000).toLocaleString('es-MX', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    dispersado_por: currentUser.name,
   };
 
-  const navItems: Array<{
-    id: ConfigSectionId;
-    label: string;
-    shortDesc: string;
-    badge?: string;
-    visible: boolean;
-    icon: React.ReactNode;
-    accentColor: string;
-  }> = [
-    {
-      id: 'usuarios',
-      label: 'Usuarios, Roles y Accesos',
-      shortDesc: `${users.length} cuentas · Rol Admin disponible`,
-      badge: `${users.filter(u => u.role === 'admin').length} Admin`,
-      visible: canManageUsers,
-      icon: <Users className="w-4 h-4" />,
-      accentColor: 'from-violet-600 to-indigo-600',
-    },
-    {
-      id: 'plantillas_correo',
-      label: 'Mensajes de Correo y Alerta por Vencer',
-      shortDesc: activarAlertaPorVencer
-        ? `Alerta automática ${horasAntesVencimiento}h antes`
-        : 'Personalizar aviso de nómina',
-      badge: activarAlertaPorVencer ? 'Auto-Alerta ON' : 'Manual',
-      visible: canManageEmailTemplates,
-      icon: <BellRing className="w-4 h-4" />,
-      accentColor: 'from-rose-600 to-amber-600',
-    },
-    {
-      id: 'tiempo_extra',
-      label: 'Reglas de Tiempo Extra',
-      shortDesc: `Desde ${overtimeRules?.minutosMinimosParaExtra ?? 30} min · Anticipada bloqueada`,
-      badge: `${overtimeRules?.minutosMinimosParaExtra ?? 30}m mín`,
-      visible: canManageOvertime && Boolean(onSaveOvertimeRules),
-      icon: <Clock className="w-4 h-4" />,
-      accentColor: 'from-indigo-600 to-blue-600',
-    },
-    {
-      id: 'tiempo_limite',
-      label: 'Tiempo Límite para Liberar',
-      shortDesc:
-        deadlineHoursInput > 0
-          ? `Plazo de ${deadlineHoursInput} hrs tras dispersar`
-          : 'Sin límite activo',
-      badge: deadlineHoursInput > 0 ? `${deadlineHoursInput} hrs` : 'Sin límite',
-      visible: canManageDeadline && Boolean(onSaveHorasLimiteLiberacion),
-      icon: <Timer className="w-4 h-4" />,
-      accentColor: 'from-amber-600 to-orange-600',
-    },
-    {
-      id: 'smtp_correo',
-      label: 'Servidor de Correo SMTP',
-      shortDesc: smtpUser ? smtpUser : 'Configurar cuenta de envío',
-      badge: smtpUser && smtpPass ? 'Configurado' : 'Pendiente',
-      visible: canManageSmtp && Boolean(onSaveEmailConfig),
-      icon: <Mail className="w-4 h-4" />,
-      accentColor: 'from-sky-600 to-indigo-600',
-    },
-    {
-      id: 'vps_hostinger',
-      label: 'Servidor VPS Hostinger',
-      shortDesc: serverStatus.connected ? 'Conectado y sincronizado' : 'Guía de comandos VPS',
-      badge: serverStatus.connected ? 'Online' : 'Local',
-      visible: canManageUsers,
-      icon: <Server className="w-4 h-4" />,
-      accentColor: 'from-emerald-600 to-teal-600',
-    },
-  ];
-
-  const visibleNavItems = navItems.filter(item => item.visible);
+  const adminsCount = users.filter(u => u.role === 'admin').length;
+  const dispersionUsersCount = users.filter(u => getUserAllowedModules(u).includes('nomina')).length;
+  const workListUsersCount = users.filter(u =>
+    getUserAllowedModules(u).includes('trabajar_listas')
+  ).length;
 
   return (
     <div className="space-y-5 animate-fade-in">
-      {/* Cabecera Principal del Centro de Configuración y Usuarios */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl border border-slate-800/80">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-violet-300 bg-violet-500/15 px-3 py-1 rounded-full border border-violet-400/20">
-                Centro de Configuración Modular y Usuarios
-              </span>
-              <span className="text-[11px] font-bold text-emerald-300 bg-emerald-500/15 px-2.5 py-1 rounded-full border border-emerald-400/20">
-                Tarjetas Desplegables Interactivas
-              </span>
-            </div>
-            <h2 className="text-xl sm:text-2xl font-black tracking-tight mt-2 flex items-center gap-2.5">
-              <Sliders className="w-6 h-6 text-violet-400" />
-              Configuración General, Alertas de Nómina y Accesos
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-3xl">
-              Haz clic en cualquiera de los sub-menús o tarjetas desplegables para abrir únicamente el módulo que deseas configurar (Usuarios y Administradores, Mensajes de Correo y Alerta por Vencer, Tiempo Extra, Tiempo Límite o Servidor SMTP).
-            </p>
+      {/* Encabezado Superior Estilo Panel de Configuraciones */}
+      <div className="bg-white border border-slate-200 rounded-2xl px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+            <span>Administración del Sistema</span>
+            <span aria-hidden="true">/</span>
+            <span className="text-slate-900 font-bold">Panel de Configuraciones</span>
           </div>
-
-          <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center">
-            {canManageUsers && (
-              <>
-                <button
-                  onClick={() => openNewUserModal('admin')}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30 font-extrabold text-xs transition-all cursor-pointer"
-                  title="Designar un nuevo usuario con todos los accesos de Administrador General"
-                >
-                  <Crown className="w-4 h-4 text-amber-300" />
-                  + Designar Administrador
-                </button>
-                <button
-                  onClick={() => openNewUserModal('supervisor')}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-violet-600 hover:bg-violet-500 text-white font-extrabold text-xs shadow-lg shadow-violet-600/30 transition-all cursor-pointer"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  + Crear Usuario
-                </button>
-              </>
-            )}
-          </div>
+          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-0.5">
+            Configuración General, Usuarios y Accesos
+          </h2>
         </div>
 
-        {/* Barra de Sub-Menús Rápidos para abrir o enfocar secciones */}
-        <div className="mt-5 pt-4 border-t border-white/10">
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-300">
-              Sub-menús de Configuración (Clic para abrir tarjeta):
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setAllSectionsOpen(true)}
-                className="text-[11px] font-bold text-indigo-300 hover:text-white px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                Expandir todas
-              </button>
-              <button
-                type="button"
-                onClick={() => setAllSectionsOpen(false)}
-                className="text-[11px] font-bold text-slate-300 hover:text-white px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
-              >
-                Contraer todas
-              </button>
-            </div>
+        {canManageUsers && (
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('usuarios');
+                openNewUserModal('admin', 'cuenta');
+              }}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-600" />
+              Designar Administrador
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSection('usuarios');
+                openNewUserModal('supervisor', 'cuenta');
+              }}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              Nuevo Usuario
+            </button>
           </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5">
-            {visibleNavItems.map(item => {
-              const isOpen = openSections[item.id];
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => toggleSection(item.id)}
-                  onDoubleClick={() => focusSingleSection(item.id)}
-                  className={`text-left p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                    isOpen
-                      ? 'bg-white text-slate-900 border-white shadow-lg scale-[1.01]'
-                      : 'bg-slate-800/70 hover:bg-slate-800 text-slate-200 border-slate-700/80'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center text-white bg-gradient-to-br ${item.accentColor} shadow-xs shrink-0`}
-                    >
-                      {item.icon}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {item.badge && (
-                        <span
-                          className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                            isOpen
-                              ? 'bg-indigo-100 text-indigo-800'
-                              : 'bg-slate-700 text-slate-200'
-                          }`}
-                        >
-                          {item.badge}
-                        </span>
-                      )}
-                      {isOpen ? (
-                        <ChevronUp className="w-4 h-4 text-indigo-600 shrink-0" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <p
-                      className={`text-xs font-extrabold leading-tight ${
-                        isOpen ? 'text-slate-900' : 'text-white'
-                      }`}
-                    >
-                      {item.label}
-                    </p>
-                    <p
-                      className={`text-[10px] mt-0.5 truncate ${
-                        isOpen ? 'text-slate-600 font-semibold' : 'text-slate-400'
-                      }`}
-                    >
-                      {item.shortDesc}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
       </div>
 
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 1: USUARIOS, ROLES (INCLUYENDO ROL ADMINISTRADOR) Y PERMISOS
-         ===================================================================================== */}
-      {canManageUsers && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('usuarios')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-violet-100 border border-violet-200 flex items-center justify-center text-violet-700 shrink-0">
-                <Users className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-violet-100 text-violet-800 border border-violet-200">
-                    Módulo de Credenciales y Roles
+      {/* Layout Principal de Dos Columnas: Menú Lateral de Configuración + Panel Activo */}
+      <div className="flex flex-col lg:flex-row items-start gap-5">
+        {/* Columna Izquierda: Menú Lateral de Categorías de Configuración */}
+        <aside className="w-full lg:w-72 shrink-0 bg-white border border-slate-200 rounded-2xl p-3 space-y-4">
+          {/* Grupo 1: Accesos y Equipo */}
+          {canManageUsers && (
+            <div>
+              <p className="px-3 pb-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Accesos y Equipo
+              </p>
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('usuarios')}
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                    activeSection === 'usuarios'
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Users
+                      className={`w-4 h-4 shrink-0 ${
+                        activeSection === 'usuarios' ? 'text-white' : 'text-slate-500'
+                      }`}
+                    />
+                    <span className="truncate">Usuarios y Permisos</span>
+                  </div>
+                  <span
+                    className={`text-[11px] font-mono tabular-nums ${
+                      activeSection === 'usuarios' ? 'text-slate-300' : 'text-slate-400'
+                    }`}
+                  >
+                    {users.length}
                   </span>
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200">
-                    {users.filter(u => u.role === 'admin').length} Administrador(es) con Acceso Total
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  1. Gestión de Usuarios, Administradores y Asignación de Listas ({users.length})
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Crea supervisores, personal de RH o designa usuarios con el <strong>Rol de Administrador General</strong> (con todos los accesos del usuario admin).
-                </p>
+                </button>
               </div>
             </div>
+          )}
 
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation();
-                  openNewUserModal('admin');
-                }}
-                className="px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Crown className="w-3.5 h-3.5 text-amber-600" />
-                + Nuevo Admin
-              </button>
-              <button
-                type="button"
-                onClick={e => {
-                  e.stopPropagation();
-                  openNewUserModal('supervisor');
-                }}
-                className="px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                + Nuevo Usuario
-              </button>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.usuarios ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
+          {/* Grupo 2: Reglas de Nómina */}
+          {(canManageOvertime || canManageDeadline) && (
+            <div>
+              <p className="px-3 pb-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Reglas de Nómina
+              </p>
+              <div className="space-y-1">
+                {canManageOvertime && onSaveOvertimeRules && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('tiempo_extra')}
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                      activeSection === 'tiempo_extra'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Clock
+                        className={`w-4 h-4 shrink-0 ${
+                          activeSection === 'tiempo_extra' ? 'text-white' : 'text-slate-500'
+                        }`}
+                      />
+                      <span className="truncate">Reglas de Tiempo Extra</span>
+                    </div>
+                    <span
+                      className={`text-[11px] font-mono tabular-nums ${
+                        activeSection === 'tiempo_extra' ? 'text-slate-300' : 'text-slate-400'
+                      }`}
+                    >
+                      +{overtimeRules?.minutosMinimosParaExtra ?? 60}m
+                    </span>
+                  </button>
+                )}
+
+                {canManageDeadline && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('tiempo_limite')}
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                      activeSection === 'tiempo_limite'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Timer
+                        className={`w-4 h-4 shrink-0 ${
+                          activeSection === 'tiempo_limite' ? 'text-white' : 'text-slate-500'
+                        }`}
+                      />
+                      <span className="truncate">Tiempo Límite Liberación</span>
+                    </div>
+                    <span
+                      className={`text-[11px] font-mono tabular-nums ${
+                        activeSection === 'tiempo_limite' ? 'text-slate-300' : 'text-slate-400'
+                      }`}
+                    >
+                      {horasLimiteLiberacion}h
+                    </span>
+                  </button>
                 )}
               </div>
             </div>
-          </div>
+          )}
 
-          {openSections.usuarios && (
-            <div className="p-5 sm:p-6 pt-0 border-t border-slate-100 space-y-5">
-              {/* Buscador rápido */}
-              <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          {/* Grupo 3: Notificaciones y Correo */}
+          {(canManageEmailTemplates || canManageSmtp) && (
+            <div>
+              <p className="px-3 pb-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Notificaciones y Correo
+              </p>
+              <div className="space-y-1">
+                {canManageEmailTemplates && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('plantillas_correo')}
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                      activeSection === 'plantillas_correo'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <BellRing
+                        className={`w-4 h-4 shrink-0 ${
+                          activeSection === 'plantillas_correo' ? 'text-white' : 'text-slate-500'
+                        }`}
+                      />
+                      <span className="truncate">Mensajes y Alertas Correo</span>
+                    </div>
+                    <ChevronRight
+                      className={`w-3.5 h-3.5 shrink-0 ${
+                        activeSection === 'plantillas_correo' ? 'text-slate-300' : 'text-slate-400'
+                      }`}
+                    />
+                  </button>
+                )}
+
+                {canManageSmtp && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('smtp_correo')}
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                      activeSection === 'smtp_correo'
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Mail
+                        className={`w-4 h-4 shrink-0 ${
+                          activeSection === 'smtp_correo' ? 'text-white' : 'text-slate-500'
+                        }`}
+                      />
+                      <span className="truncate">Servidor SMTP</span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-semibold ${
+                        emailConfig?.smtpUser
+                          ? activeSection === 'smtp_correo'
+                            ? 'text-emerald-300'
+                            : 'text-emerald-600'
+                          : activeSection === 'smtp_correo'
+                          ? 'text-amber-300'
+                          : 'text-amber-600'
+                      }`}
+                    >
+                      {emailConfig?.smtpUser ? 'Activo' : 'Pendiente'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Grupo 4: Infraestructura */}
+          {canManageUsers && (
+            <div>
+              <p className="px-3 pb-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Infraestructura
+              </p>
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveSection('vps_hostinger')}
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-bold transition-colors cursor-pointer ${
+                    activeSection === 'vps_hostinger'
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Server
+                      className={`w-4 h-4 shrink-0 ${
+                        activeSection === 'vps_hostinger' ? 'text-white' : 'text-slate-500'
+                      }`}
+                    />
+                    <span className="truncate">Servidor y Base de Datos</span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-semibold ${
+                      serverStatus.connected
+                        ? activeSection === 'vps_hostinger'
+                          ? 'text-emerald-300'
+                          : 'text-emerald-600'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {serverStatus.connected ? 'Online' : 'Local'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Resumen rápido al pie del menú lateral */}
+          <div className="pt-3 border-t border-slate-200 px-3 space-y-1.5 text-xs text-slate-500">
+            <div className="flex items-center justify-between">
+              <span>Con Dispersión Nómina</span>
+              <span className="font-mono font-bold text-slate-800 tabular-nums">
+                {dispersionUsersCount}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Con Trabajar Listas</span>
+              <span className="font-mono font-bold text-slate-800 tabular-nums">
+                {workListUsersCount}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Administradores</span>
+              <span className="font-mono font-bold text-slate-800 tabular-nums">
+                {adminsCount}
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        {/* Columna Derecha: Área de Trabajo de la Configuración Seleccionada */}
+        <div className="flex-1 min-w-0 w-full">
+          {/* ===================================================================== */}
+          {/* SECCIÓN 1: DIRECTORIO DE USUARIOS, ACCESOS Y LISTAS ASIGNADAS         */}
+          {/* ===================================================================== */}
+          {activeSection === 'usuarios' && canManageUsers && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              {/* Cabecera del Panel de Usuarios */}
+              <div className="px-6 py-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Directorio de Usuarios y Asignación de Accesos
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Activa o desactiva directamente el acceso a Dispersión de Nómina y a Trabajar Listas, o asigna qué lista(s) trabaja cada persona.
+                  </p>
+                </div>
+
+                <div className="relative w-full sm:w-72 shrink-0">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
-                    placeholder="Buscar por nombre, usuario, rol, ID o lista asignada..."
-                    className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-semibold text-slate-700 focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
+                    placeholder="Buscar nombre, usuario, lista..."
+                    className="w-full pl-9 pr-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:border-slate-900 outline-none transition-colors"
                   />
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 font-semibold">
-                  <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-bold">
-                    Total: {filteredUsers.length}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200 font-bold">
-                    Admins: {users.filter(u => u.role === 'admin').length}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
-                    RH: {users.filter(u => u.role === 'rh').length}
-                  </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-800 border border-indigo-200 font-bold">
-                    Supervisores: {users.filter(u => u.role === 'supervisor').length}
-                  </span>
-                </div>
               </div>
 
-              {/* Tarjetas de Usuarios */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredUsers.map(u => {
-                  const userLists = getUserAllowedLists(u);
-                  const isAdminRole = u.role === 'admin';
-                  return (
-                    <div
-                      key={u.id}
-                      className={`bg-white rounded-3xl border p-5 shadow-xs transition-all flex flex-col justify-between ${
-                        u.active
-                          ? isAdminRole
-                            ? 'border-amber-300/90 hover:border-amber-400 ring-1 ring-amber-200/50'
-                            : 'border-slate-200/80 hover:border-violet-300'
-                          : 'border-slate-200/50 opacity-60 bg-slate-50'
+              {/* Barra de Filtros Segmentados */}
+              <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-1 flex-wrap">
+                  {[
+                    { id: 'all', label: `Todos (${users.length})` },
+                    {
+                      id: 'with_dispersion',
+                      label: `Acceso Dispersión (${dispersionUsersCount})`,
+                    },
+                    {
+                      id: 'with_work_lists',
+                      label: `Acceso Trabajar Listas (${workListUsersCount})`,
+                    },
+                    { id: 'admin', label: `Administradores (${adminsCount})` },
+                    {
+                      id: 'rh',
+                      label: `RH / Nóminas (${users.filter(u => u.role === 'rh').length})`,
+                    },
+                    {
+                      id: 'supervisor',
+                      label: `Supervisores (${users.filter(u => u.role === 'supervisor').length})`,
+                    },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setUserFilter(tab.id as UserFilterTab)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        userFilter === tab.id
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                       }`}
                     >
-                      <div>
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black text-sm text-white shadow-sm ${
-                                u.role === 'admin'
-                                  ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                                  : u.role === 'rh'
-                                  ? 'bg-emerald-600'
-                                  : 'bg-indigo-600'
-                              }`}
-                            >
-                              {u.name.substring(0, 2).toUpperCase()}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-sm font-extrabold text-slate-900">{u.name}</h3>
-                                {u.employeeId && (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-black font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                                    <Hash className="w-2.5 h-2.5 text-slate-400" />
-                                    {u.employeeId}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                                <Mail className="w-3 h-3 text-slate-400" />
-                                {u.email}
-                              </p>
-                            </div>
-                          </div>
-
-                          <span
-                            className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg border flex items-center gap-1 ${
-                              u.role === 'admin'
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : u.role === 'rh'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                            }`}
-                          >
-                            {u.role === 'admin' && <Crown className="w-3 h-3 text-amber-600" />}
-                            {u.role === 'admin'
-                              ? 'Administrador Total'
-                              : u.role === 'rh'
-                              ? 'RH / Nóminas'
-                              : 'Supervisor'}
-                          </span>
-                        </div>
-
-                        {/* Credenciales de Acceso */}
-                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between gap-2 bg-slate-50/80 px-3 py-2 rounded-xl border border-slate-200/60">
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <KeyRound className="w-3.5 h-3.5 text-violet-600 shrink-0" />
-                            <span className="text-slate-500 font-semibold">Usuario:</span>
-                            <code className="font-mono font-extrabold text-slate-800 bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                              {u.username || u.employeeId || u.email.split('@')[0]}
-                            </code>
-                          </div>
-                          <div className="flex items-center gap-1.5 text-[11px]">
-                            <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span className="text-slate-500 font-semibold">Clave:</span>
-                            <code className="font-mono font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">
-                              {u.password || '•••••'}
-                            </code>
-                          </div>
-                        </div>
-
-                        {/* Módulos del Sistema Permitidos */}
-                        <div className="mt-2.5 bg-slate-50/70 border border-slate-200/70 rounded-xl p-2.5">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                              <LayoutGrid className="w-3 h-3 text-violet-600" />
-                              Accesos a Módulos:
-                            </p>
-                            {isAdminRole && (
-                              <span className="text-[9px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
-                                Acceso Total Admin
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {getUserAllowedModules(u).map(mod => (
-                              <span
-                                key={mod}
-                                className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-white text-slate-700 border border-slate-200 px-2 py-0.5 rounded-md shadow-2xs"
-                              >
-                                <Check className="w-2.5 h-2.5 text-emerald-600" />
-                                {PORTAL_MODULE_LABELS[mod]?.short || mod}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        {u.role === 'supervisor' && (
-                          <div className="mt-3 space-y-2">
-                            <div className="bg-indigo-50/60 rounded-xl p-2.5 border border-indigo-200/70">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-800 flex items-center gap-1 mb-1.5">
-                                <Briefcase className="w-3 h-3 text-indigo-600" />
-                                Listas de Nómina Asignadas ({userLists.length}):
-                              </p>
-                              {userLists.length > 0 ? (
-                                <div className="flex flex-wrap gap-1">
-                                  {userLists.map(listName => (
-                                    <span
-                                      key={listName}
-                                      className="inline-flex items-center gap-1 text-[10px] font-extrabold bg-white text-indigo-900 border border-indigo-200 px-2 py-0.5 rounded-lg shadow-2xs"
-                                    >
-                                      <UserCheck className="w-3 h-3 text-indigo-600" />
-                                      {listName}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-[11px] font-bold text-amber-700">
-                                  Sin lista asignada — haz clic en Configurar para asignarle su lista
-                                </p>
-                              )}
-                            </div>
-
-                            {u.delegatedSupervisor && (
-                              <div className="bg-amber-50/90 rounded-xl p-2.5 border border-amber-200/80">
-                                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1">
-                                  <ArrowRightLeft className="w-3 h-3" /> Suplencia Temporal Activa:
-                                </p>
-                                <p className="text-xs font-extrabold text-amber-900 mt-0.5">
-                                  Supliendo a: {u.delegatedSupervisor}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {u.notes && (
-                          <p className="text-[11px] text-slate-600 mt-3 italic bg-slate-50/70 p-2.5 rounded-xl border border-slate-100">
-                            "{u.notes}"
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        <span
-                          className={`inline-flex items-center gap-1 text-[11px] font-bold ${
-                            u.active ? 'text-emerald-600' : 'text-slate-400'
-                          }`}
-                        >
-                          {u.active ? (
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          ) : (
-                            <XCircle className="w-3.5 h-3.5" />
-                          )}
-                          {u.active ? 'Cuenta Activa' : 'Cuenta Inactiva'}
-                        </span>
-
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => openEditModal(u)}
-                            className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-violet-50 text-slate-700 hover:text-violet-700 transition-colors text-xs font-bold flex items-center gap-1 cursor-pointer"
-                            title="Editar usuario, rol y permisos"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                            Configurar
-                          </button>
-                          {u.id !== 'user_admin' && (
-                            <button
-                              onClick={() => {
-                                if (confirm(`¿Eliminar al usuario ${u.name}?`)) {
-                                  onDeleteUser(u.id);
-                                }
-                              }}
-                              className="p-1.5 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-500 hover:text-rose-600 transition-colors cursor-pointer"
-                              title="Eliminar usuario"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 2: MENSAJES DE CORREO Y ALERTA AUTOMÁTICA POR VENCIMIENTO
-         ===================================================================================== */}
-      {canManageEmailTemplates && onSaveEmailConfig && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('plantillas_correo')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-700 shrink-0">
-                <BellRing className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-200">
-                    Módulo de Mensajes y Alertas de Nómina
-                  </span>
-                  <span
-                    className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${
-                      activarAlertaPorVencer
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                        : 'bg-slate-100 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    {activarAlertaPorVencer
-                      ? `✓ Doble Alerta Activa (Al dispersar + ${horasAntesVencimiento}h antes de vencer)`
-                      : 'Solo Alerta al Dispersar'}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  2. Configurar Mensaje de Nómina Pendiente y Alerta Automática por Vencer
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Personaliza el correo que recibe el supervisor cuando se dispersa su nómina y el segundo correo automático cuando está a punto de finalizar su tiempo de revisión.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <span className="text-xs font-bold text-rose-700 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
-                {openSections.plantillas_correo ? 'Ocultar configuración' : 'Abrir configuración'}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.plantillas_correo ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {openSections.plantillas_correo && (
-            <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 space-y-6">
-              {/* Etiquetas dinámicas disponibles */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-indigo-600" />
-                      Variables Dinámicas Disponibles (Se reemplazan automáticamente por cada supervisor):
-                    </p>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Puedes escribir estas etiquetas en el asunto o en el cuerpo del mensaje para personalizar cada correo enviado.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleRestoreDefaultTemplates}
-                    className="text-[11px] font-bold text-slate-600 hover:text-indigo-700 bg-white hover:bg-indigo-50 px-3 py-1.5 rounded-xl border border-slate-200 transition-colors cursor-pointer shrink-0"
-                  >
-                    Restaurar textos por defecto
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-3">
-                  {[
-                    { tag: '{nombre}', desc: 'Nombre del Supervisor' },
-                    { tag: '{supervisor}', desc: 'Nombre de la Lista' },
-                    { tag: '{semana}', desc: 'Número de Semana' },
-                    { tag: '{periodo}', desc: 'Fechas del Periodo' },
-                    { tag: '{fecha_limite}', desc: 'Fecha/Hora Límite' },
-                    { tag: '{horas_limite}', desc: 'Horas de Plazo' },
-                    { tag: '{tiempo_restante}', desc: 'Tiempo Restante' },
-                    { tag: '{dispersado_por}', desc: 'Quién Dispersó' },
-                  ].map(v => (
-                    <span
-                      key={v.tag}
-                      onClick={() => {
-                        navigator.clipboard.writeText(v.tag);
-                      }}
-                      title="Clic para copiar variable"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px] font-semibold text-slate-700 hover:border-indigo-400 cursor-pointer transition-colors"
-                    >
-                      <code className="font-mono font-extrabold text-indigo-700">{v.tag}</code>
-                      <span className="text-slate-500">({v.desc})</span>
-                    </span>
+                      {tab.label}
+                    </button>
                   ))}
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* COLUMNA 1: ALERTA 1 (AL DISPERSAR LA NÓMINA) */}
-                <div className="bg-indigo-50/40 border border-indigo-200/80 rounded-2xl p-5 space-y-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white font-black text-xs flex items-center justify-center">
-                        1
-                      </span>
-                      <div>
-                        <h4 className="text-sm font-black text-slate-900">
-                          Alerta #1: Al Dispersar la Nómina (Nómina Pendiente)
-                        </h4>
-                        <p className="text-[11px] text-slate-600">
-                          Se envía inmediatamente cuando RH / Nóminas dispersa la lista al supervisor.
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg bg-indigo-100 text-indigo-800 border border-indigo-200">
-                      Envío Inmediato
-                    </span>
+              {/* Tabla / Lista Estructurada de Usuarios */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/60 text-[11px] font-bold text-slate-500">
+                      <th className="py-3 px-6">Usuario y Credenciales</th>
+                      <th className="py-3 px-4">Acceso a Módulos de Nómina</th>
+                      <th className="py-3 px-4">Lista(s) Asignada(s) para Trabajar</th>
+                      <th className="py-3 px-4">Otros Permisos</th>
+                      <th className="py-3 px-6 text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 text-xs">
+                    {filteredUsers.map(u => {
+                      const userLists = getUserAllowedLists(u);
+                      const userMods = getUserAllowedModules(u);
+                      const isAdminRole = u.role === 'admin';
+                      const hasDispersion = userMods.includes('nomina');
+                      const hasTrabajarListas = userMods.includes('trabajar_listas');
+                      const otherMods = userMods.filter(
+                        m => m !== 'nomina' && m !== 'trabajar_listas'
+                      );
+
+                      return (
+                        <tr
+                          key={u.id}
+                          className={`transition-colors hover:bg-slate-50/80 ${
+                            !u.active ? 'opacity-60' : ''
+                          }`}
+                        >
+                          {/* Columna 1: Identidad y Login */}
+                          <td className="py-4 px-6 align-top">
+                            <div className="flex items-start gap-3">
+                              <div
+                                className={`w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-xs shrink-0 ${
+                                  isAdminRole
+                                    ? 'bg-amber-100 text-amber-900'
+                                    : u.role === 'rh'
+                                    ? 'bg-emerald-100 text-emerald-900'
+                                    : 'bg-slate-100 text-slate-800'
+                                }`}
+                              >
+                                {u.name.slice(0, 2).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-extrabold text-slate-900 truncate">
+                                    {u.name}
+                                  </span>
+                                  {!u.active && (
+                                    <span className="text-[11px] font-semibold text-rose-600">
+                                      · Inactivo
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-slate-500 text-[11px] truncate mt-0.5">
+                                  {u.email}
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-1 font-mono tabular-nums">
+                                  <span className="font-semibold text-slate-700">
+                                    {isAdminRole
+                                      ? 'Administrador General'
+                                      : u.role === 'rh'
+                                      ? 'RH / Nóminas'
+                                      : 'Supervisor'}
+                                  </span>
+                                  <span aria-hidden="true">·</span>
+                                  <span>
+                                    Usuario: <strong className="text-slate-800">{u.username || u.employeeId || u.email.split('@')[0]}</strong>
+                                  </span>
+                                  {u.employeeId && (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span>ID #{u.employeeId}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Columna 2: Switches de Acceso a Dispersión de Nómina y Trabajar Listas */}
+                          <td className="py-4 px-4 align-top">
+                            <div className="space-y-2 min-w-[210px]">
+                              {/* Switch 1: Dispersión de Nómina */}
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-1.5">
+                                  <Send
+                                    className={`w-3.5 h-3.5 shrink-0 ${
+                                      hasDispersion ? 'text-emerald-600' : 'text-slate-400'
+                                    }`}
+                                  />
+                                  <span
+                                    className={`text-xs font-bold ${
+                                      hasDispersion ? 'text-slate-900' : 'text-slate-400'
+                                    }`}
+                                  >
+                                    Dispersión de Nómina
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={isAdminRole}
+                                  onClick={() => handleQuickToggleUserModule(u, 'nomina')}
+                                  title={
+                                    isAdminRole
+                                      ? 'El Administrador General tiene todos los accesos activos'
+                                      : 'Activar o desactivar acceso al Módulo de Dispersión de Nómina'
+                                  }
+                                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                                    isAdminRole ? 'cursor-default' : 'cursor-pointer'
+                                  } ${hasDispersion ? 'bg-emerald-600' : 'bg-slate-200'}`}
+                                >
+                                  <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                      hasDispersion ? 'translate-x-4' : 'translate-x-1'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+
+                              {/* Switch 2: Módulo para Trabajar Listas */}
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-1.5">
+                                  <Briefcase
+                                    className={`w-3.5 h-3.5 shrink-0 ${
+                                      hasTrabajarListas ? 'text-indigo-600' : 'text-slate-400'
+                                    }`}
+                                  />
+                                  <span
+                                    className={`text-xs font-bold ${
+                                      hasTrabajarListas ? 'text-slate-900' : 'text-slate-400'
+                                    }`}
+                                  >
+                                    Trabajar una Lista
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={isAdminRole}
+                                  onClick={() => handleQuickToggleUserModule(u, 'trabajar_listas')}
+                                  title={
+                                    isAdminRole
+                                      ? 'El Administrador General tiene todos los accesos activos'
+                                      : 'Activar o desactivar acceso al Módulo para Trabajar Listas'
+                                  }
+                                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                                    isAdminRole ? 'cursor-default' : 'cursor-pointer'
+                                  } ${hasTrabajarListas ? 'bg-indigo-600' : 'bg-slate-200'}`}
+                                >
+                                  <span
+                                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                      hasTrabajarListas ? 'translate-x-4' : 'translate-x-1'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Columna 3: Lista(s) Asignada(s) para Trabajar */}
+                          <td className="py-4 px-4 align-top">
+                            {hasTrabajarListas || u.role === 'supervisor' ? (
+                              <div className="space-y-1.5 max-w-xs">
+                                {userLists.length > 0 ? (
+                                  <div className="text-xs font-bold text-slate-900 leading-relaxed">
+                                    {userLists.join(' · ')}
+                                  </div>
+                                ) : isAdminRole ? (
+                                  <div className="text-xs font-semibold text-slate-700">
+                                    Todas las listas del catálogo
+                                  </div>
+                                ) : (
+                                  <div className="text-xs font-semibold text-amber-700">
+                                    Sin lista asignada
+                                  </div>
+                                )}
+
+                                {u.delegatedSupervisor && (
+                                  <div className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                                    <ArrowRightLeft className="w-3 h-3 shrink-0" />
+                                    <span>Supliendo a: {u.delegatedSupervisor}</span>
+                                  </div>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(u, 'nomina_listas')}
+                                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  Asignar o cambiar listas ({userLists.length})
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-slate-400">
+                                No trabaja listas individuales
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Columna 4: Otros Permisos del Sistema */}
+                          <td className="py-4 px-4 align-top">
+                            {isAdminRole ? (
+                              <span className="text-xs font-bold text-amber-800">
+                                Todos los módulos y configuraciones
+                              </span>
+                            ) : otherMods.length > 0 ? (
+                              <p className="text-xs text-slate-600 leading-relaxed max-w-xs">
+                                {otherMods
+                                  .map(mod => PORTAL_MODULE_LABELS[mod]?.short || mod)
+                                  .join(' · ')}
+                              </p>
+                            ) : (
+                              <span className="text-xs text-slate-400">Ninguno adicional</span>
+                            )}
+                          </td>
+
+                          {/* Columna 5: Acciones */}
+                          <td className="py-4 px-6 align-top text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(u, 'cuenta')}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                              >
+                                Configurar
+                              </button>
+                              {u.id !== 'user_admin_1' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      confirm(`¿Eliminar al usuario "${u.name}" del sistema?`)
+                                    ) {
+                                      onDeleteUser(u.id);
+                                    }
+                                  }}
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                                  title="Eliminar usuario"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {filteredUsers.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-12 px-6 text-center">
+                          <p className="text-sm font-bold text-slate-700">
+                            No se encontraron usuarios con ese criterio
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Prueba con otro término de búsqueda o crea un nuevo usuario.
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================================== */}
+          {/* SECCIÓN 2: REGLAS DE TIEMPO EXTRA                                     */}
+          {/* ===================================================================== */}
+          {activeSection === 'tiempo_extra' && canManageOvertime && onSaveOvertimeRules && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+              <div className="px-6 py-5 border-b border-slate-200">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Reglas de Cálculo de Tiempo Extra
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Define a partir de cuántos minutos después de la salida se contabiliza tiempo extra y bloquea que llegar temprano sume horas extras.
+                </p>
+              </div>
+              <div className="p-6">
+                <OvertimeConfigContent
+                  rules={overtimeRules || DEFAULT_OVERTIME_RULES}
+                  jornadaBase={jornadaBase}
+                  onSaveRules={onSaveOvertimeRules}
+                  isStandaloneModule={true}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================================== */}
+          {/* SECCIÓN 3: PLAZO LÍMITE DE LIBERACIÓN                                 */}
+          {/* ===================================================================== */}
+          {activeSection === 'tiempo_limite' && canManageDeadline && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-200">
+              <div className="px-6 py-5">
+                <h3 className="text-base font-extrabold text-slate-900">
+                  Plazo Límite para Liberar Nómina
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configura las horas permitidas para que los supervisores revisen y liberen su lista después de ser dispersada.
+                </p>
+              </div>
+
+              {/* Fila 1: Horas permitidas */}
+              <div className="px-6 py-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div className="max-w-md">
+                  <label className="text-sm font-bold text-slate-900">
+                    Tiempo permitido después de dispersar (Horas)
+                  </label>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Este cronómetro en cuenta regresiva se muestra en el portal de cada supervisor que trabaja listas.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      min={1}
+                      max={336}
+                      value={deadlineHoursInput}
+                      onChange={e =>
+                        setDeadlineHoursInput(
+                          Math.max(1, Math.min(336, Number(e.target.value) || 1))
+                        )
+                      }
+                      className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-extrabold text-slate-900 text-center focus:bg-white focus:border-slate-900 outline-none tabular-nums"
+                    />
+                    <span className="text-xs font-bold text-slate-600">horas</span>
                   </div>
 
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                    {[4, 8, 12, 24, 48, 72].map(preset => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setDeadlineHoursInput(preset)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer tabular-nums ${
+                          deadlineHoursInput === preset
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {preset}h
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fila 2: Semana Activa */}
+              <div className="px-6 py-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-900">
+                    Aplicar cambio a la dispersión de la semana en curso
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {activeDispersal?.limiteLiberacion
+                      ? `La Semana ${currentWeekNumber} tiene vencimiento actual el ${new Date(
+                          activeDispersal.limiteLiberacion
+                        ).toLocaleString([], {
+                          weekday: 'short',
+                          day: 'numeric',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}.`
+                      : 'Aún no hay una dispersión activa en la semana seleccionada.'}
+                  </p>
+                </div>
+
+                <label className="inline-flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToActiveWeek}
+                    onChange={e => setApplyToActiveWeek(e.target.checked)}
+                    className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900"
+                  />
+                  <span className="text-xs font-bold text-slate-800">
+                    Actualizar cuenta regresiva activa
+                  </span>
+                </label>
+              </div>
+
+              {/* Pie de Guardar */}
+              <div className="px-6 py-4 bg-slate-50 flex items-center justify-between gap-4">
+                <div className="text-xs font-semibold text-emerald-700">
+                  {savedDeadlineToast && 'Plazo límite actualizado correctamente.'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onSaveHorasLimiteLiberacion) {
+                      onSaveHorasLimiteLiberacion(deadlineHoursInput, applyToActiveWeek);
+                      setSavedDeadlineToast(true);
+                      setTimeout(() => setSavedDeadlineToast(false), 3000);
+                    }
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Guardar Plazo Límite
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================================== */}
+          {/* SECCIÓN 4: PLANTILLAS DE CORREO Y ALERTAS AUTOMÁTICAS                 */}
+          {/* ===================================================================== */}
+          {activeSection === 'plantillas_correo' && canManageEmailTemplates && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-200">
+              <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Mensajes de Correo y Alertas Automáticas
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Personaliza el correo que se envía al dispersar la nómina y el recordatorio automático antes de que venza el plazo.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRestoreDefaultTemplates}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold cursor-pointer self-start sm:self-auto whitespace-nowrap shrink-0"
+                >
+                  Restaurar Textos Base
+                </button>
+              </div>
+
+              {/* Variables disponibles */}
+              <div className="px-6 py-3.5 bg-slate-50 text-xs text-slate-600 flex flex-wrap items-center gap-2">
+                <span className="font-bold text-slate-800">Variables dinámicas:</span>
+                {[
+                  '{supervisor}',
+                  '{semana}',
+                  '{periodo}',
+                  '{horas_limite}',
+                  '{fecha_limite}',
+                  '{horas_restantes}',
+                  '{dispersado_por}',
+                ].map(tag => (
+                  <code
+                    key={tag}
+                    className="font-mono font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200"
+                  >
+                    {tag}
+                  </code>
+                ))}
+              </div>
+
+              {/* Bloque 1: Correo al dispersar */}
+              <div className="p-6 space-y-4">
+                <div>
+                  <h4 className="text-sm font-extrabold text-slate-900">
+                    1. Notificación al Dispersar Nómina
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Se envía automáticamente al correo del supervisor en cuanto se dispersa su lista.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Asunto del Correo al Dispersar *
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Asunto del Correo
                     </label>
                     <input
                       type="text"
                       value={asuntoDispersion}
                       onChange={e => setAsuntoDispersion(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Cuerpo del Mensaje (Notificación de Nómina Pendiente) *
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Cuerpo del Mensaje
                     </label>
                     <textarea
                       rows={5}
                       value={mensajeDispersion}
                       onChange={e => setMensajeDispersion(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none leading-relaxed"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:border-slate-900 outline-none leading-relaxed"
                     />
                   </div>
+                </div>
+              </div>
 
-                  {/* Vista Previa en Vivo Alerta 1 */}
-                  <div className="bg-white border border-indigo-200/80 rounded-xl p-3.5 space-y-1.5">
-                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> Vista Previa Alerta #1:
-                    </p>
-                    <p className="text-xs font-extrabold text-slate-900">
-                      {formatEmailTemplate(asuntoDispersion, previewVars)}
-                    </p>
-                    <p className="text-[11px] text-slate-600 whitespace-pre-line leading-relaxed border-t border-slate-100 pt-1.5">
-                      {formatEmailTemplate(mensajeDispersion, previewVars)}
+              {/* Bloque 2: Alerta antes de vencer */}
+              <div className="p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-extrabold text-slate-900">
+                      2. Recordatorio Automático Antes de Vencer el Tiempo Límite
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Se envía automáticamente a los supervisores que aún no han liberado su lista cuando el reloj está por expirar.
                     </p>
                   </div>
-                </div>
 
-                {/* COLUMNA 2: ALERTA 2 (AUTOMÁTICA CUANDO ESTÁ POR VENCER EL TIEMPO) */}
-                <div className="bg-rose-50/40 border border-rose-200/80 rounded-2xl p-5 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-xl bg-rose-600 text-white font-black text-xs flex items-center justify-center">
-                        2
-                      </span>
-                      <div>
-                        <h4 className="text-sm font-black text-slate-900">
-                          Alerta #2: Recordatorio Automático Antes de Vencer
-                        </h4>
-                        <p className="text-[11px] text-slate-600">
-                          Se envía en automático si el supervisor aún no libera su nómina y su tiempo está por expirar.
-                        </p>
-                      </div>
-                    </div>
-
-                    <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-xl border border-rose-200 shadow-2xs shrink-0">
+                  <div className="flex items-center gap-3">
+                    <label className="inline-flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={activarAlertaPorVencer}
                         onChange={e => setActivarAlertaPorVencer(e.target.checked)}
-                        className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500"
+                        className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900"
                       />
-                      <span className="text-xs font-extrabold text-slate-800">
-                        {activarAlertaPorVencer ? 'Alerta Activa' : 'Desactivada'}
-                      </span>
+                      <span className="text-xs font-bold text-slate-800">Alerta activa</span>
                     </label>
-                  </div>
 
-                  {/* Selector de cuántas horas antes del vencimiento se manda el correo */}
-                  <div className="bg-white border border-rose-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-extrabold text-slate-800">
-                        ¿Cuánto tiempo antes de vencer se debe enviar la alerta?
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        El servidor revisa cada minuto las listas no liberadas y dispara el correo al entrar en este umbral.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {[1, 2, 3, 4, 6].map(hrs => (
-                        <button
-                          key={hrs}
-                          type="button"
-                          onClick={() => setHorasAntesVencimiento(hrs)}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-extrabold border transition-all cursor-pointer ${
-                            horasAntesVencimiento === hrs
-                              ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-rose-50'
-                          }`}
-                        >
-                          {hrs}h antes
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-slate-500">Enviar</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={72}
+                        value={horasAntesVencimiento}
+                        onChange={e =>
+                          setHorasAntesVencimiento(
+                            Math.max(1, Math.min(72, Number(e.target.value) || 2))
+                          )
+                        }
+                        className="w-16 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 text-center tabular-nums"
+                      />
+                      <span className="text-xs text-slate-500">horas antes</span>
                     </div>
                   </div>
+                </div>
 
+                <div className="space-y-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Asunto del Correo cuando está por Vencer *
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Asunto del Recordatorio por Vencimiento
                     </label>
                     <input
                       type="text"
                       value={asuntoPorVencer}
                       onChange={e => setAsuntoPorVencer(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none"
+                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Cuerpo del Mensaje de Vencimiento Próximo *
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Mensaje de Alerta por Vencimiento
                     </label>
                     <textarea
                       rows={5}
                       value={mensajePorVencer}
                       onChange={e => setMensajePorVencer(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-xs font-medium text-slate-800 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none leading-relaxed"
+                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:border-slate-900 outline-none leading-relaxed"
                     />
                   </div>
+                </div>
 
-                  {/* Vista Previa en Vivo Alerta 2 */}
-                  <div className="bg-white border border-rose-200/80 rounded-xl p-3.5 space-y-1.5">
-                    <p className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 flex items-center gap-1">
-                      <BellRing className="w-3 h-3" /> Vista Previa Alerta #2 (Faltando {horasAntesVencimiento}h):
-                    </p>
-                    <p className="text-xs font-extrabold text-slate-900">
-                      {formatEmailTemplate(asuntoPorVencer, previewVars)}
-                    </p>
-                    <p className="text-[11px] text-slate-600 whitespace-pre-line leading-relaxed border-t border-slate-100 pt-1.5">
-                      {formatEmailTemplate(mensajePorVencer, previewVars)}
-                    </p>
-                  </div>
+                {/* Vista Previa limpia */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1.5">
+                  <p className="text-[11px] font-bold text-slate-500">
+                    Vista previa con datos reales:
+                  </p>
+                  <p className="text-xs font-bold text-slate-900">
+                    {formatEmailTemplate(asuntoDispersion, samplePreviewVars)}
+                  </p>
+                  <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
+                    {formatEmailTemplate(mensajeDispersion, samplePreviewVars)}
+                  </p>
                 </div>
               </div>
 
               {templatesFeedback.type && (
                 <div
-                  className={`p-3.5 rounded-2xl border flex items-center gap-2.5 text-xs font-bold ${
+                  className={`px-6 py-3 text-xs font-bold ${
                     templatesFeedback.type === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                      ? 'bg-emerald-50 text-emerald-800'
+                      : 'bg-rose-50 text-rose-800'
                   }`}
                 >
-                  {templatesFeedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  )}
-                  <span>{templatesFeedback.message}</span>
+                  {templatesFeedback.message}
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="px-6 py-4 bg-slate-50 flex flex-wrap items-center justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={handleTestExpiringAlert}
                   disabled={isTestingExpiringAlert}
-                  className="px-4 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-extrabold transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  onClick={handleTestExpiringAlert}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  {isTestingExpiringAlert ? (
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  Enviar Correo de Prueba (Alerta por Vencer)
+                  {isTestingExpiringAlert ? 'Enviando prueba...' : 'Probar Envío de Alerta'}
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveEmailTemplates}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-2"
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  Guardar Mensajes y Alertas Automáticas
+                  Guardar Mensajes y Alertas
                 </button>
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 3: REGLAS Y CÁLCULO DE TIEMPO EXTRA
-         ===================================================================================== */}
-      {canManageOvertime && onSaveOvertimeRules && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('tiempo_extra')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-100 border border-indigo-200 flex items-center justify-center text-indigo-700 shrink-0">
-                <Clock className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200">
-                    Módulo de Cálculo de Nómina
-                  </span>
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    Mínimo {overtimeRules?.minutosMinimosParaExtra ?? 30} min · Entrada anticipada bloqueada
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  3. Configuración de Reglas de Tiempo Extra y Entradas Anticipadas
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Define a partir de cuántos minutos posteriores a la salida cuenta como tiempo extra y descarta los minutos cuando el personal llega antes de su hora de entrada.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200">
-                {openSections.tiempo_extra ? 'Ocultar reglas' : 'Abrir reglas'}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.tiempo_extra ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {openSections.tiempo_extra && (
-            <div className="p-4 sm:p-6 pt-2 border-t border-slate-100">
-              <OvertimeConfigContent
-                rules={overtimeRules || DEFAULT_OVERTIME_RULES}
-                jornadaBase={jornadaBase}
-                onSaveRules={onSaveOvertimeRules}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 4: TIEMPO LÍMITE PARA LIBERAR NÓMINA (CUENTA REGRESIVA)
-         ===================================================================================== */}
-      {canManageDeadline && onSaveHorasLimiteLiberacion && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('tiempo_limite')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
-                <Timer className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200">
-                    Control de Plazo de Supervisores
-                  </span>
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                    {deadlineHoursInput > 0
-                      ? `Plazo actual: ${deadlineHoursInput} horas`
-                      : 'Sin límite de tiempo'}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  4. Límite de Tiempo (por Horas) para Liberación de Nómina
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Configura el plazo máximo permitido para que los supervisores trabajen y liberen su lista después de ser dispersada, mostrando el reloj en cuenta regresiva en su portal.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <span className="text-xs font-bold text-amber-800 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
-                {openSections.tiempo_limite ? 'Ocultar plazo' : 'Configurar plazo'}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.tiempo_limite ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {openSections.tiempo_limite && (
-            <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 space-y-4">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-                <div className="space-y-2 max-w-xl">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    Selecciona un plazo rápido o escribe la cantidad exacta de horas que tendrán los supervisores para revisar y liberar su nómina desde el momento en que RH realiza la dispersión.
+          {/* ===================================================================== */}
+          {/* SECCIÓN 5: SERVIDOR DE CORREO (SMTP)                                  */}
+          {/* ===================================================================== */}
+          {activeSection === 'smtp_correo' && canManageSmtp && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-200">
+              <div className="px-6 py-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Credenciales de Servidor de Correo (SMTP)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Configura la cuenta emisora para el envío automático de notificaciones de nómina.
                   </p>
-                  {activeDispersal && !activeDispersal.cancelada && (
-                    <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs font-bold">
-                      <Clock className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>
-                        Semana {currentWeekNumber || activeDispersal.semanaNumero} activa ·{' '}
-                        {activeDispersal.limiteLiberacion
-                          ? `Vence: ${new Date(activeDispersal.limiteLiberacion).toLocaleString(
-                              'es-MX',
-                              {
-                                weekday: 'short',
-                                day: '2-digit',
-                                month: 'short',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              }
-                            )}`
-                          : 'Sin hora límite asignada'}
-                      </span>
-                    </div>
-                  )}
                 </div>
-
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
-                      Accesos Rápidos (Horas)
-                    </span>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {[4, 8, 12, 24, 48, 72, 0].map(preset => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setDeadlineHoursInput(preset)}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${
-                            deadlineHoursInput === preset
-                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                          }`}
-                        >
-                          {preset === 0 ? 'Sin límite' : `${preset}h`}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="h-auto sm:h-10 w-full sm:w-px bg-slate-200" />
-
-                  <div className="flex items-center gap-2.5">
-                    <div>
-                      <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
-                        Horas Exactas
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number"
-                          min={0}
-                          max={336}
-                          value={deadlineHoursInput}
-                          onChange={e =>
-                            setDeadlineHoursInput(Math.max(0, Number(e.target.value) || 0))
-                          }
-                          className="w-20 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-900 text-center focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
-                        />
-                        <span className="text-xs font-bold text-slate-600">hrs</span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSaveHorasLimiteLiberacion(deadlineHoursInput, applyToActiveWeek);
-                        setSavedDeadlineToast(true);
-                        setTimeout(() => setSavedDeadlineToast(false), 3000);
-                      }}
-                      className="px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold shadow-sm transition-all cursor-pointer shrink-0 flex items-center gap-1.5 mt-4 sm:mt-0"
-                    >
-                      {savedDeadlineToast ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          ¡Guardado!
-                        </>
-                      ) : (
-                        <>
-                          <Clock className="w-3.5 h-3.5" />
-                          Guardar Límite
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGmailGuide(!showGmailGuide)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto whitespace-nowrap shrink-0"
+                >
+                  <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+                  {showGmailGuide ? 'Ocultar guía Gmail' : 'Guía Contraseña de Aplicación'}
+                </button>
               </div>
 
-              {activeDispersal && !activeDispersal.cancelada && (
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-between flex-wrap gap-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={applyToActiveWeek}
-                      onChange={e => setApplyToActiveWeek(e.target.checked)}
-                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-xs font-bold text-slate-700">
-                      Actualizar y reiniciar la cuenta regresiva en la dispersión activa de la Semana{' '}
-                      {currentWeekNumber || activeDispersal.semanaNumero} al guardar
-                    </span>
-                  </label>
-                  <span className="text-[11px] font-semibold text-slate-500">
-                    {deadlineHoursInput > 0
-                      ? `Los supervisores verán una cuenta regresiva de ${deadlineHoursInput} hora(s) en su portal.`
-                      : 'Modo sin límite activo: no se bloqueará por tiempo.'}
-                  </span>
+              {showGmailGuide && (
+                <div className="p-6 bg-amber-50/70 space-y-2 text-xs text-slate-700">
+                  <p className="font-bold text-slate-900">
+                    Cómo generar tu Contraseña de Aplicación de 16 letras en Google (Error 534-5.7.9):
+                  </p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Activa la verificación en 2 pasos en tu cuenta de Google.</li>
+                    <li>
+                      Abre{' '}
+                      <a
+                        href="https://myaccount.google.com/apppasswords"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-indigo-600 underline inline-flex items-center gap-1"
+                      >
+                        myaccount.google.com/apppasswords
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </li>
+                    <li>Crea una clave para "AttendancePRO" y pega las 16 letras en Contraseña SMTP.</li>
+                  </ol>
                 </div>
               )}
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 5: SERVIDOR DE CORREO SMTP (CREDENCIALES)
-         ===================================================================================== */}
-      {canManageSmtp && onSaveEmailConfig && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('smtp_correo')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 border border-sky-200 flex items-center justify-center text-sky-700 shrink-0">
-                <Mail className="w-6 h-6" />
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-sky-100 text-sky-800 border border-sky-200">
-                    Credenciales de Correo Corporativo
-                  </span>
-                  <span
-                    className={`text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${
-                      smtpUser && smtpPass
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                        : 'bg-amber-100 text-amber-800 border-amber-200'
-                    }`}
-                  >
-                    {smtpUser && smtpPass ? `Conectado: ${smtpUser}` : 'Pendiente de Configurar'}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  5. Configuración de Credenciales SMTP para Envío de Correos
-                </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Configura el servidor, puerto, correo remitente y contraseña de aplicación para que el servidor envíe los correos automáticos a cada supervisor.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <span className="text-xs font-bold text-sky-800 bg-sky-50 px-3 py-1.5 rounded-xl border border-sky-200">
-                {openSections.smtp_correo ? 'Ocultar SMTP' : 'Configurar SMTP'}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.smtp_correo ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {openSections.smtp_correo && (
-            <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 space-y-4">
-              {/* Presets rápidos de proveedor */}
-              <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
-                <span className="text-[11px] font-extrabold text-slate-600">
-                  Proveedores rápidos:
-                </span>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSmtpHost('smtp.gmail.com');
-                      setSmtpPort(587);
-                      setSmtpSecure(false);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-all cursor-pointer ${
-                      smtpHost === 'smtp.gmail.com'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    Gmail / Google Workspace
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSmtpHost('smtp.office365.com');
-                      setSmtpPort(587);
-                      setSmtpSecure(false);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-all cursor-pointer ${
-                      smtpHost === 'smtp.office365.com'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    Office 365 / Outlook
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSmtpHost('smtp.hostinger.com');
-                      setSmtpPort(465);
-                      setSmtpSecure(true);
-                    }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-extrabold border transition-all cursor-pointer ${
-                      smtpHost === 'smtp.hostinger.com'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    Hostinger Mail
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Servidor SMTP (Host) *
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Servidor SMTP (Host)
                   </label>
                   <input
                     type="text"
                     value={smtpHost}
                     onChange={e => setSmtpHost(e.target.value)}
-                    placeholder="Ej: smtp.gmail.com"
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    placeholder="smtp.gmail.com"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Puerto SMTP y Seguridad *
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Puerto SMTP
                   </label>
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       value={smtpPort}
                       onChange={e => {
-                        const val = Number(e.target.value) || 587;
-                        setSmtpPort(val);
-                        if (val === 465) setSmtpSecure(true);
-                        if (val === 587) setSmtpSecure(false);
+                        const port = Number(e.target.value) || 587;
+                        setSmtpPort(port);
+                        setSmtpSecure(port === 465);
                       }}
-                      placeholder="587"
-                      className="w-24 px-3 py-2 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                      className="w-24 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 text-center tabular-nums focus:bg-white focus:border-slate-900 outline-none"
                     />
-                    <label className="flex items-center gap-1.5 cursor-pointer bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/90 flex-1">
-                      <input
-                        type="checkbox"
-                        checked={smtpSecure}
-                        onChange={e => setSmtpSecure(e.target.checked)}
-                        className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span className="text-[11px] font-bold text-slate-700">SSL/TLS (465)</span>
-                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSmtpPort(587);
+                        setSmtpSecure(false);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold border cursor-pointer ${
+                        smtpPort === 587
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      587 TLS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSmtpPort(465);
+                        setSmtpSecure(true);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-bold border cursor-pointer ${
+                        smtpPort === 465
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      465 SSL
+                    </button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Usuario / Correo Remitente *
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nombre Visible del Remitente
+                  </label>
+                  <input
+                    type="text"
+                    value={smtpFromName}
+                    onChange={e => setSmtpFromName(e.target.value)}
+                    placeholder="AttendancePRO Nóminas"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Usuario / Correo Emisor SMTP
                   </label>
                   <input
                     type="email"
                     value={smtpUser}
                     onChange={e => setSmtpUser(e.target.value)}
                     placeholder="nominas@empresa.com"
-                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                   />
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                      Contraseña / App Password *
-                    </label>
-                    {(smtpHost.includes('gmail') || smtpUser.includes('@gmail')) && (
-                      <button
-                        type="button"
-                        onClick={() => setShowGmailGuide(prev => !prev)}
-                        className="text-[10px] font-extrabold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        <HelpCircle className="w-3 h-3" />
-                        ¿Cómo obtener clave Gmail?
-                      </button>
-                    )}
-                  </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Contraseña SMTP / Contraseña de Aplicación
+                  </label>
                   <div className="relative">
                     <input
                       type={showSmtpPass ? 'text' : 'password'}
                       value={smtpPass}
                       onChange={e => setSmtpPass(e.target.value)}
-                      placeholder="xxxx xxxx xxxx xxxx (16 letras)"
-                      className="w-full pl-3.5 pr-9 py-2 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                      placeholder="Contraseña de 16 caracteres o clave SMTP"
+                      className="w-full pl-3.5 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setShowSmtpPass(!showSmtpPass)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      title={showSmtpPass ? 'Ocultar contraseña' : 'Ver contraseña'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
                     >
                       {showSmtpPass ? (
                         <EyeOff className="w-3.5 h-3.5" />
@@ -1860,671 +1760,625 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                 </div>
               </div>
 
-              {/* Guía rápida interactiva para Contraseña de Aplicación de Google (Error 534-5.7.9) */}
-              {(showGmailGuide || smtpFeedback.requiresAppPassword) && (
-                <div className="bg-amber-50/90 border border-amber-300 rounded-2xl p-4 text-xs text-amber-950 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 font-black text-amber-900">
-                      <KeyRound className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>
-                        Importante para Gmail / Google Workspace (Código 534-5.7.9 Application-specific password required):
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowGmailGuide(false)}
-                      className="text-[11px] font-bold text-amber-700 hover:text-amber-900 cursor-pointer"
-                    >
-                      Cerrar guía ✕
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-amber-800 leading-relaxed">
-                    Google bloquea por seguridad el uso de tu contraseña normal de Gmail en sistemas externos. Para que el envío funcione sin errores, genera una <strong>Contraseña de Aplicación de 16 letras</strong> siguiendo estos 3 pasos:
-                  </p>
-                  <ol className="list-decimal list-inside space-y-1 text-[11px] font-semibold text-amber-900">
-                    <li>
-                      Entra a tu cuenta de Google en{' '}
-                      <a
-                        href="https://myaccount.google.com/security"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline font-extrabold text-indigo-700 inline-flex items-center gap-0.5"
-                      >
-                        myaccount.google.com/security <ExternalLink className="w-2.5 h-2.5" />
-                      </a>{' '}
-                      y asegúrate de tener activada la <strong>Verificación en 2 pasos</strong>.
-                    </li>
-                    <li>
-                      Abre directamente{' '}
-                      <a
-                        href="https://myaccount.google.com/apppasswords"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline font-extrabold text-indigo-700 inline-flex items-center gap-0.5"
-                      >
-                        myaccount.google.com/apppasswords <ExternalLink className="w-2.5 h-2.5" />
-                      </a>{' '}
-                      (Contraseñas de aplicaciones), escribe <strong>"AttendancePRO Nóminas"</strong> y haz clic en <strong>Crear</strong>.
-                    </li>
-                    <li>
-                      Copia el código de <strong>16 letras</strong> que te muestra Google y pégalo arriba en el campo <strong>Contraseña / App Password</strong> (el sistema quita los espacios automáticamente).
-                    </li>
-                  </ol>
-                </div>
-              )}
-
-              <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 flex-1 max-w-md">
-                  <span className="text-[11px] font-bold text-slate-600 shrink-0">
-                    Nombre visible del remitente:
-                  </span>
-                  <input
-                    type="text"
-                    value={smtpFromName}
-                    onChange={e => setSmtpFromName(e.target.value)}
-                    placeholder="AttendancePRO Nóminas"
-                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:border-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleTestSmtpConnection}
-                    disabled={isTestingSmtp}
-                    className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                  >
-                    {isTestingSmtp ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
-                    ) : (
-                      <Send className="w-3.5 h-3.5 text-indigo-600" />
-                    )}
-                    {isTestingSmtp ? 'Probando conexión...' : 'Probar Conexión y Enviar Test'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveSmtpCredentials}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Guardar Credenciales SMTP
-                  </button>
-                </div>
-              </div>
-
               {smtpFeedback.type && (
                 <div
-                  className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
+                  className={`px-6 py-3 text-xs font-bold ${
                     smtpFeedback.type === 'success'
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                      ? 'bg-emerald-50 text-emerald-800'
+                      : 'bg-rose-50 text-rose-800'
                   }`}
                 >
-                  {smtpFeedback.type === 'success' ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  ) : (
-                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                  )}
-                  <span className="font-semibold">{smtpFeedback.message}</span>
+                  {smtpFeedback.message}
                 </div>
               )}
+
+              <div className="px-6 py-4 bg-slate-50 flex flex-wrap items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  disabled={isTestingSmtp}
+                  onClick={handleTestSmtpConnection}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {isTestingSmtp ? 'Verificando...' : 'Probar Conexión SMTP'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveSmtpCredentials}
+                  className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Guardar Credenciales SMTP
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================================== */}
+          {/* SECCIÓN 6: SERVIDOR Y PERSISTENCIA                                    */}
+          {/* ===================================================================== */}
+          {activeSection === 'vps_hostinger' && canManageUsers && (
+            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-200">
+              <div className="px-6 py-5 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    Estado del Servidor y Base de Datos
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Sincronización automática de usuarios, catálogos, dispersiones y liberaciones.
+                  </p>
+                </div>
+                <span
+                  className={`text-xs font-bold ${
+                    serverStatus.connected ? 'text-emerald-600' : 'text-slate-500'
+                  }`}
+                >
+                  {serverStatus.connected
+                    ? `Conectado (${serverStatus.hostname || 'VPS'})`
+                    : 'Almacenamiento Local'}
+                </span>
+              </div>
+
+              <div className="p-6 space-y-4">
+                {serverStatus.storagePath && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-700">Ruta de base de datos:</span>
+                    <code className="font-mono text-slate-800 bg-slate-100 px-2.5 py-1 rounded">
+                      {serverStatus.storagePath}
+                    </code>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {[
+                    {
+                      label: '1. Instalar dependencias',
+                      cmd: 'npm install && npm run build',
+                    },
+                    {
+                      label: '2. Iniciar con PM2 (Puerto 3000)',
+                      cmd: 'PORT=3000 pm2 start "npx tsx server.ts" --name attendance-pro',
+                    },
+                    {
+                      label: '3. Guardar arranque automático',
+                      cmd: 'pm2 save && pm2 startup',
+                    },
+                  ].map(item => (
+                    <div
+                      key={item.label}
+                      className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col justify-between gap-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700">{item.label}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCommand(item.cmd, item.label)}
+                          className="text-slate-500 hover:text-slate-900 cursor-pointer"
+                          title="Copiar comando"
+                        >
+                          {copiedCmd === item.label ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                      <code className="text-[11px] font-mono text-slate-800 break-all">
+                        {item.cmd}
+                      </code>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
-      )}
+      </div>
 
-      {/* =====================================================================================
-          TARJETA DESPLEGABLE 6: SERVIDOR VPS HOSTINGER (COMANDOS Y ESTADO)
-         ===================================================================================== */}
-      {canManageUsers && (
-        <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all">
-          <div
-            onClick={() => toggleSection('vps_hostinger')}
-            className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer hover:bg-slate-50/80 transition-colors select-none"
-          >
-            <div className="flex items-start sm:items-center gap-3.5">
-              <div
-                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
-                  serverStatus.connected
-                    ? 'bg-emerald-100 border-emerald-200 text-emerald-700'
-                    : 'bg-slate-100 border-slate-200 text-slate-600'
-                }`}
-              >
-                <Server className="w-6 h-6" />
-              </div>
+      {/* ===================================================================== */}
+      {/* MODAL DE CONFIGURACIÓN DE USUARIO ESTILO PANEL CON PESTAÑAS           */}
+      {/* ===================================================================== */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-xl overflow-hidden my-8">
+            {/* Encabezado del Modal */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
               <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    Infraestructura y Persistencia Centralizada
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-500">
-                    {serverStatus.hostname ? `Host: ${serverStatus.hostname}` : 'VPS Ubuntu / PM2'}
-                  </span>
-                </div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900 mt-1">
-                  6. Estado del Servidor VPS Hostinger KVM 2 y Comandos de Despliegue
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {editingId ? `Configurar Usuario: ${name}` : 'Registrar Nuevo Usuario'}
                 </h3>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  Consulta la sincronización en disco (`data/portal_db.json`) y copia los comandos para desplegar en tu servidor Ubuntu 24.04 LTS.
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Configura sus credenciales, accesos a Dispersión o Trabajar Listas y las listas asignadas.
                 </p>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                {openSections.vps_hostinger ? 'Ocultar comandos' : 'Ver guía VPS'}
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
-                {openSections.vps_hostinger ? (
-                  <ChevronUp className="w-5 h-5" />
-                ) : (
-                  <ChevronDown className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {openSections.vps_hostinger && (
-            <div className="p-5 sm:p-6 pt-4 border-t border-slate-100 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="bg-slate-900 rounded-2xl p-3.5 text-slate-200 border border-slate-800">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400 flex items-center gap-1.5">
-                      <Terminal className="w-3.5 h-3.5" /> 1. Preparar Ubuntu 24.04
-                    </span>
-                    <button
-                      onClick={() =>
-                        handleCopyCommand(
-                          'curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs git nginx && sudo npm install -g pm2 tsx',
-                          'step1'
-                        )
-                      }
-                      className="text-[10px] font-bold text-slate-300 hover:text-white flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-md cursor-pointer"
-                    >
-                      {copiedCmd === 'step1' ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      {copiedCmd === 'step1' ? 'Copiado' : 'Copiar'}
-                    </button>
-                  </div>
-                  <code className="text-[11px] font-mono text-emerald-300 block break-all leading-relaxed">
-                    sudo apt update && sudo apt install -y nodejs npm git nginx && sudo npm i -g pm2 tsx
-                  </code>
-                </div>
-
-                <div className="bg-slate-900 rounded-2xl p-3.5 text-slate-200 border border-slate-800">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400 flex items-center gap-1.5">
-                      <HardDrive className="w-3.5 h-3.5" /> 2. Compilar e Iniciar con PM2
-                    </span>
-                    <button
-                      onClick={() =>
-                        handleCopyCommand(
-                          'npm install && npm run build && NODE_ENV=production PORT=3000 pm2 start "npx tsx server.ts" --name attendance-pro && pm2 save',
-                          'step2'
-                        )
-                      }
-                      className="text-[10px] font-bold text-slate-300 hover:text-white flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-md cursor-pointer"
-                    >
-                      {copiedCmd === 'step2' ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      {copiedCmd === 'step2' ? 'Copiado' : 'Copiar'}
-                    </button>
-                  </div>
-                  <code className="text-[11px] font-mono text-emerald-300 block break-all leading-relaxed">
-                    npm install && npm run build && NODE_ENV=production pm2 start "npx tsx server.ts" --name attendance-pro
-                  </code>
-                </div>
-
-                <div className="bg-slate-900 rounded-2xl p-3.5 text-slate-200 border border-slate-800">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-violet-400 flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5" /> 3. Proxy Inverso Nginx (Puerto 80)
-                    </span>
-                    <button
-                      onClick={() =>
-                        handleCopyCommand(
-                          'location / { proxy_pass http://127.0.0.1:3000; proxy_http_version 1.1; proxy_set_header Host $host; client_max_body_size 50M; }',
-                          'step3'
-                        )
-                      }
-                      className="text-[10px] font-bold text-slate-300 hover:text-white flex items-center gap-1 bg-slate-800 px-2 py-0.5 rounded-md cursor-pointer"
-                    >
-                      {copiedCmd === 'step3' ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                      {copiedCmd === 'step3' ? 'Copiado' : 'Copiar'}
-                    </button>
-                  </div>
-                  <code className="text-[11px] font-mono text-emerald-300 block break-all leading-relaxed">
-                    proxy_pass http://127.0.0.1:3000; client_max_body_size 50M;
-                  </code>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =====================================================================================
-          MODAL PARA CREAR / EDITAR USUARIO (CON OPCIÓN DE ROL ADMINISTRADOR TOTAL)
-         ===================================================================================== */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200/80 max-w-2xl w-full overflow-hidden animate-scale-in max-h-[92vh] flex flex-col">
-            <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 p-6 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-violet-500/20 border border-violet-400/30 flex items-center justify-center text-violet-300">
-                  <Shield className="w-5 h-5" />
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-violet-300">
-                    Control de Acceso, Roles y Listas
-                  </span>
-                  <h3 className="text-lg font-extrabold">
-                    {editingId ? 'Configurar Usuario y Accesos' : 'Registrar Nuevo Usuario'}
-                  </h3>
-                </div>
-              </div>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white px-2.5 py-1 rounded-lg text-sm font-bold cursor-pointer"
+                className="text-xs font-bold text-slate-500 hover:text-slate-900 px-2.5 py-1 rounded-lg cursor-pointer"
               >
-                ✕
+                Cerrar
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
-              {/* SELECTOR VISUAL DE ROL (INCLUYENDO ROL DE ADMINISTRADOR CON TODOS LOS ACCESOS) */}
-              <div className="space-y-2">
-                <label className="block text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">
-                  1. Selecciona el Rol del Usuario en el Sistema *
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectRoleInModal('supervisor')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      role === 'supervisor'
-                        ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-500/20 text-indigo-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black">Supervisor de Área</span>
-                      {role === 'supervisor' && (
-                        <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                      )}
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Revisa checadas, sube formatos, autoriza extras y libera sus listas asignadas.
-                    </p>
-                  </button>
+            {/* Navegación de Pestañas Internas del Modal */}
+            <div className="px-6 bg-slate-50 border-b border-slate-200 flex items-center gap-2 overflow-x-auto">
+              {[
+                { id: 'cuenta', label: '1. Cuenta y Rol Base' },
+                {
+                  id: 'nomina_listas',
+                  label: `2. Dispersión vs Trabajar Listas (${assignedLists.length})`,
+                },
+                { id: 'modulos', label: '3. Otros Permisos del Sistema' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setModalTab(t.id as ModalSectionTab)}
+                  className={`py-3 px-3 text-xs font-bold border-b-2 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    modalTab === t.id
+                      ? 'border-slate-900 text-slate-900'
+                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleSelectRoleInModal('rh')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      role === 'rh'
-                        ? 'bg-emerald-50 border-emerald-500 ring-2 ring-emerald-500/20 text-emerald-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black">RH / Nóminas</span>
-                      {role === 'rh' && (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      )}
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-1">
-                      Procesa checadas globales, dispersa nóminas, autoriza incidencias y exporta CONTPAQi.
-                    </p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSelectRoleInModal('admin')}
-                    className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      role === 'admin'
-                        ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-500/20 text-amber-950'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-black flex items-center gap-1">
-                        <Crown className="w-3.5 h-3.5 text-amber-600" />
-                        Administrador General
-                      </span>
-                      {role === 'admin' && (
-                        <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
-                      )}
-                    </div>
-                    <p className="text-[10px] text-amber-800 font-semibold mt-1">
-                      Otorga exactamente TODOS los accesos, módulos y permisos que tiene el usuario admin.
-                    </p>
-                  </button>
-                </div>
-
-                {role === 'admin' && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2.5 text-xs text-amber-900 font-bold">
-                    <Crown className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>
-                      Rol Administrador General activo: Esta persona tendrá acceso completo a todas las listas de nómina, semáforo, incidencias, CONTPAQi, configuración de tiempo extra, límites, correo y gestión de usuarios.
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                    Nombre Completo *
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                    placeholder="Ej: Ing. Carlos Ruiz"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                    ID Empleado (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={employeeId}
-                    onChange={e => {
-                      const val = e.target.value;
-                      setEmployeeId(val);
-                      if (!editingId && val.trim() && !username) {
-                        const padded = /^\d+$/.test(val.trim())
-                          ? val.trim().padStart(5, '0')
-                          : val.trim();
-                        setUsername(padded);
-                        if (!password) setPassword(padded);
-                      }
-                    }}
-                    placeholder="Ej: 00615"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-mono font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Credenciales de Login */}
-              <div className="bg-violet-50/60 border border-violet-200/80 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-extrabold text-violet-950 uppercase tracking-wider flex items-center gap-1.5">
-                    <KeyRound className="w-3.5 h-3.5 text-violet-600" />
-                    Credenciales de Inicio de Sesión
-                  </label>
-                  <span className="text-[10px] font-bold text-violet-700 bg-white px-2 py-0.5 rounded-md border border-violet-200">
-                    Requerido para entrar al sistema
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Usuario de Acceso *
-                    </label>
-                    <input
-                      type="text"
-                      value={username}
-                      onChange={e => setUsername(e.target.value)}
-                      placeholder="Ej: carlos.ruiz o 00615"
-                      className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
-                      required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Contraseña *
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
-                        placeholder="Contraseña de acceso"
-                        className="w-full pl-3 pr-9 py-2 bg-white border border-violet-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        {showPassword ? (
-                          <EyeOff className="w-3.5 h-3.5" />
-                        ) : (
-                          <Eye className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                    Correo Electrónico Empresarial (Para Recibir Alertas) *
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="carlos.ruiz@empresa.com"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 outline-none"
-                    required
-                  />
-                </div>
-
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2.5 cursor-pointer bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200/90 w-full">
-                    <input
-                      type="checkbox"
-                      checked={active}
-                      onChange={e => setActive(e.target.checked)}
-                      className="w-4 h-4 rounded text-violet-600 focus:ring-violet-500"
-                    />
-                    <span className="text-xs font-bold text-slate-700">
-                      Cuenta activa (Permitir inicio de sesión)
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              {/* Configuración de Accesos a Módulos del Sistema */}
-              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 space-y-2.5">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <label className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <LayoutGrid className="w-3.5 h-3.5 text-violet-600" />
-                    Módulos del Sistema a los que Tiene Acceso
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAllowedModules([...ALL_PORTAL_MODULES])}
-                      className="text-[10px] font-extrabold text-violet-700 hover:text-violet-900 bg-violet-100 px-2.5 py-1 rounded-lg cursor-pointer"
-                    >
-                      Marcar Todos los Módulos
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(Object.keys(PORTAL_MODULE_LABELS) as PortalModule[]).map(mod => {
-                    const checked = role === 'admin' || allowedModules.includes(mod);
-                    const info = PORTAL_MODULE_LABELS[mod];
-                    return (
-                      <label
-                        key={mod}
-                        className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all ${
-                          checked
-                            ? 'bg-violet-50/80 border-violet-300 text-violet-950 shadow-2xs'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-100/70'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={role === 'admin'}
-                          onChange={() => handleToggleModuleAccess(mod)}
-                          className="w-4 h-4 mt-0.5 rounded text-violet-600 focus:ring-violet-500"
-                        />
-                        <div className="min-w-0">
-                          <p className="text-xs font-extrabold leading-tight">{info.title}</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                            {info.description}
-                          </p>
-                        </div>
+            <form onSubmit={handleSubmit}>
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-5">
+                {/* PESTAÑA 1: CUENTA Y ROL BASE */}
+                {modalTab === 'cuenta' && (
+                  <div className="space-y-5">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-2">
+                        Rol Base del Usuario
                       </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Asignación de Listas de Nómina para Supervisores */}
-              {role === 'supervisor' && (
-                <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-extrabold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
-                      <Briefcase className="w-3.5 h-3.5 text-indigo-600" />
-                      Asignar Listas de Nómina que Trabajará este Supervisor ({assignedLists.length})
-                    </label>
-                    {assignedLists.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setAssignedLists([])}
-                        className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
-                      >
-                        Limpiar selección
-                      </button>
-                    )}
-                  </div>
-
-                  {allAvailableSupervisorLists.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1">
-                      {allAvailableSupervisorLists.map(sup => {
-                        const isSelected = assignedLists.includes(sup);
-                        return (
-                          <label
-                            key={sup}
-                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer transition-all text-xs font-bold ${
-                              isSelected
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                                : 'bg-white text-slate-700 border-indigo-200/80 hover:bg-indigo-50'
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        {[
+                          {
+                            id: 'supervisor' as UserRole,
+                            title: 'Supervisor de Área',
+                            desc: 'Trabaja y libera las listas de nómina asignadas.',
+                          },
+                          {
+                            id: 'rh' as UserRole,
+                            title: 'RH / Nóminas',
+                            desc: 'Procesa checadas, dispersa nóminas y exporta CONTPAQi.',
+                          },
+                          {
+                            id: 'admin' as UserRole,
+                            title: 'Administrador General',
+                            desc: 'Acceso total a todos los módulos y configuraciones.',
+                          },
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => handleSelectRoleInModal(item.id)}
+                            className={`p-3.5 rounded-xl border text-left transition-colors cursor-pointer ${
+                              role === item.id
+                                ? 'bg-slate-900 text-white border-slate-900'
+                                : 'bg-slate-50 text-slate-800 border-slate-200 hover:bg-white'
                             }`}
                           >
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-extrabold">{item.title}</span>
+                              {role === item.id && <Check className="w-3.5 h-3.5 shrink-0" />}
+                            </div>
+                            <p
+                              className={`text-[11px] mt-1 leading-snug ${
+                                role === item.id ? 'text-slate-300' : 'text-slate-500'
+                              }`}
+                            >
+                              {item.desc}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Nombre Completo *
+                        </label>
+                        <input
+                          type="text"
+                          value={name}
+                          onChange={e => setName(e.target.value)}
+                          placeholder="Ej: Ing. Carlos Ruiz"
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          ID Empleado (Opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={employeeId}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setEmployeeId(val);
+                            if (!editingId && val.trim() && !username) {
+                              const padded = /^\d+$/.test(val.trim())
+                                ? val.trim().padStart(5, '0')
+                                : val.trim();
+                              setUsername(padded);
+                              if (!password) setPassword(padded);
+                            }
+                          }}
+                          placeholder="Ej: 00615"
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none tabular-nums"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Usuario para Iniciar Sesión *
+                        </label>
+                        <input
+                          type="text"
+                          value={username}
+                          onChange={e => setUsername(e.target.value)}
+                          placeholder="carlos.ruiz o 00615"
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Contraseña *
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? 'text' : 'password'}
+                            value={password}
+                            onChange={e => setPassword(e.target.value)}
+                            placeholder="Contraseña de acceso"
+                            className="w-full pl-3.5 pr-9 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
+                            required
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                          >
+                            {showPassword ? (
+                              <EyeOff className="w-3.5 h-3.5" />
+                            ) : (
+                              <Eye className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Correo Electrónico (Para recibir alertas) *
+                        </label>
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={e => setEmail(e.target.value)}
+                          placeholder="carlos.ruiz@empresa.com"
+                          className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
+                          required
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <label className="flex items-center gap-2.5 cursor-pointer bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200 w-full">
+                          <input
+                            type="checkbox"
+                            checked={active}
+                            onChange={e => setActive(e.target.checked)}
+                            className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900"
+                          />
+                          <span className="text-xs font-bold text-slate-800">
+                            Cuenta activa para iniciar sesión
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Notas u Observaciones (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={e => setNotes(e.target.value)}
+                        placeholder="Ej: Responsable de planta / Suplencia autorizada..."
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:border-slate-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* PESTAÑA 2: DISPERSIÓN DE NÓMINA VS TRABAJAR LISTAS */}
+                {modalTab === 'nomina_listas' && (
+                  <div className="space-y-5">
+                    {/* Dos filas estilo Settings Switch para los 2 módulos principales */}
+                    <div className="border border-slate-200 rounded-xl divide-y divide-slate-200">
+                      {/* Fila 1: Módulo de Dispersión de Nómina */}
+                      {(() => {
+                        const hasDispersion =
+                          role === 'admin' || allowedModules.includes('nomina');
+                        return (
+                          <div className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <Send
+                                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                                  hasDispersion ? 'text-emerald-600' : 'text-slate-400'
+                                }`}
+                              />
+                              <div>
+                                <p className="text-xs font-extrabold text-slate-900">
+                                  Acceso al Módulo de Dispersión de Nómina
+                                </p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Permite subir archivos del reloj checador, generar el cálculo global y dispersar las listas a los supervisores.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={role === 'admin'}
+                              onClick={() => handleToggleModuleAccess('nomina')}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                hasDispersion ? 'bg-emerald-600' : 'bg-slate-200'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  hasDispersion ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Fila 2: Módulo para Trabajar una Lista */}
+                      {(() => {
+                        const hasTrabajarListas =
+                          role === 'admin' || allowedModules.includes('trabajar_listas');
+                        return (
+                          <div className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <Briefcase
+                                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                                  hasTrabajarListas ? 'text-indigo-600' : 'text-slate-400'
+                                }`}
+                              />
+                              <div>
+                                <p className="text-xs font-extrabold text-slate-900">
+                                  Acceso al Módulo para Trabajar Listas
+                                </p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">
+                                  Permite entrar a revisar checadas, justificar faltas/omisiones, autorizar tiempo extra y liberar las listas seleccionadas abajo.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={role === 'admin'}
+                              onClick={() => handleToggleModuleAccess('trabajar_listas')}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                hasTrabajarListas ? 'bg-indigo-600' : 'bg-slate-200'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  hasTrabajarListas ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Selector de Listas Asignadas cuando Trabajar Listas está activo */}
+                    {(role === 'supervisor' ||
+                      role === 'admin' ||
+                      allowedModules.includes('trabajar_listas')) && (
+                      <div className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50/60">
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div>
+                            <p className="text-xs font-extrabold text-slate-900">
+                              Listas de Nómina Asignadas a este Usuario ({assignedLists.length})
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                              Marca qué lista o listas específicas puede abrir y trabajar esta persona.
+                            </p>
+                          </div>
+                          {assignedLists.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setAssignedLists([])}
+                              className="text-xs font-bold text-rose-600 hover:underline cursor-pointer"
+                            >
+                              Desmarcar todas
+                            </button>
+                          )}
+                        </div>
+
+                        {allAvailableSupervisorLists.length > 4 && (
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              value={listSearchTerm}
+                              onChange={e => setListSearchTerm(e.target.value)}
+                              placeholder="Filtrar listas del catálogo..."
+                              className="w-full pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 outline-none focus:border-slate-900"
+                            />
+                          </div>
+                        )}
+
+                        {filteredModalSupervisorLists.length > 0 ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-1">
+                            {filteredModalSupervisorLists.map(sup => {
+                              const isSelected = assignedLists.includes(sup);
+                              return (
+                                <label
+                                  key={sup}
+                                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-colors text-xs font-bold ${
+                                    isSelected
+                                      ? 'bg-slate-900 text-white border-slate-900'
+                                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleToggleAssignedList(sup)}
+                                    className="w-3.5 h-3.5 rounded text-slate-900 focus:ring-slate-900"
+                                  />
+                                  <span className="truncate">{sup}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-500 py-2">
+                            No hay listas cargadas en el catálogo o que coincidan con el filtro. Puedes añadir el nombre manualmente abajo.
+                          </p>
+                        )}
+
+                        {/* Agregar lista manualmente */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            value={customListInput}
+                            onChange={e => setCustomListInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddCustomList();
+                              }
+                            }}
+                            placeholder="Escribir nombre de lista manualmente (ej: OSCAR VALENZUELA)..."
+                            className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:border-slate-900 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddCustomList}
+                            className="px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            Añadir Lista
+                          </button>
+                        </div>
+
+                        {/* Suplencia temporal */}
+                        <div className="pt-2 border-t border-slate-200">
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            Suplencia Temporal por Vacaciones (Opcional)
+                          </label>
+                          <select
+                            value={delegatedSupervisor}
+                            onChange={e => setDelegatedSupervisor(e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:border-slate-900 outline-none"
+                          >
+                            <option value="">-- Sin suplencia activa --</option>
+                            {allAvailableSupervisorLists
+                              .filter(s => !assignedLists.includes(s))
+                              .map(sup => (
+                                <option key={sup} value={sup}>
+                                  Suplir temporalmente a: {sup}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* PESTAÑA 3: OTROS PERMISOS Y MÓDULOS DEL SISTEMA */}
+                {modalTab === 'modulos' && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-slate-700">
+                        Selecciona los módulos adicionales a los que tendrá acceso este usuario
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setAllowedModules([...ALL_PORTAL_MODULES])}
+                        className="text-xs font-bold text-indigo-600 hover:underline cursor-pointer"
+                      >
+                        Habilitar todos
+                      </button>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl divide-y divide-slate-200">
+                      {(Object.keys(PORTAL_MODULE_LABELS) as PortalModule[]).map(mod => {
+                        const checked = role === 'admin' || allowedModules.includes(mod);
+                        const info = PORTAL_MODULE_LABELS[mod];
+                        return (
+                          <label
+                            key={mod}
+                            className="p-3.5 flex items-center justify-between gap-4 hover:bg-slate-50 cursor-pointer transition-colors"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-extrabold text-slate-900">{info.title}</p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {info.description}
+                              </p>
+                            </div>
                             <input
                               type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleToggleAssignedList(sup)}
-                              className="w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500"
+                              checked={checked}
+                              disabled={role === 'admin'}
+                              onChange={() => handleToggleModuleAccess(mod)}
+                              className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900 shrink-0"
                             />
-                            <span className="truncate">{sup}</span>
                           </label>
                         );
                       })}
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-xs text-amber-800 bg-amber-100/70 p-2.5 rounded-xl">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span>
-                        Aún no se ha cargado el catálogo de empleados, pero puedes escribir el nombre de la lista manualmente abajo.
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Agregar lista manual */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <input
-                      type="text"
-                      value={customListInput}
-                      onChange={e => setCustomListInput(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleAddCustomList();
-                        }
-                      }}
-                      placeholder="Agregar otra lista manualmente (ej: OSCAR VALENZUELA)..."
-                      className="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-indigo-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddCustomList}
-                      className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold flex items-center gap-1 cursor-pointer shrink-0"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Añadir Lista
-                    </button>
                   </div>
-
-                  {/* Suplencia Temporal */}
-                  <div className="pt-2 border-t border-indigo-200/60">
-                    <label className="block text-[11px] font-extrabold text-amber-900 uppercase tracking-wider mb-1">
-                      Suplencia Temporal por Vacaciones (Opcional)
-                    </label>
-                    <select
-                      value={delegatedSupervisor}
-                      onChange={e => setDelegatedSupervisor(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                    >
-                      <option value="">-- Sin suplencia activa --</option>
-                      {allAvailableSupervisorLists
-                        .filter(s => !assignedLists.includes(s))
-                        .map(sup => (
-                          <option key={sup} value={sup}>
-                            Suplir temporalmente a: {sup}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1">
-                  Notas / Observaciones
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  placeholder="Ej: Administrador designado / Suplencia autorizada..."
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200/90 rounded-xl text-xs font-medium text-slate-700 focus:bg-white focus:outline-none"
-                />
+                )}
               </div>
 
-              <div className="pt-3 border-t border-slate-200/80 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-extrabold shadow-md shadow-violet-600/20 transition-all cursor-pointer"
-                >
-                  {editingId ? 'Guardar Cambios de Usuario' : 'Crear Usuario'}
-                </button>
+              {/* Pie de Acciones del Modal */}
+              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  {modalTab !== 'nomina_listas' && (
+                    <button
+                      type="button"
+                      onClick={() => setModalTab('nomina_listas')}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                    >
+                      Ir a Dispersión y Listas Asignadas →
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    {editingId ? 'Guardar Cambios' : 'Crear Usuario'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

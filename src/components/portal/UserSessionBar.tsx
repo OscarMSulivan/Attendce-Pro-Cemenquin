@@ -117,6 +117,10 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
     switch (activeTab) {
       case 'inicio':
         return 'Panel de Inicio y Bienvenida';
+      case 'nomina':
+        return 'Módulo de Dispersión y Cálculo de Nómina';
+      case 'trabajar_listas':
+        return 'Módulo para Trabajar y Liberar Listas';
       case 'semaforo':
         return 'Semáforo de Liberación de Nóminas';
       case 'incidencias':
@@ -124,11 +128,9 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
       case 'contpaqi':
         return 'Exportación CONTPAQi® Nóminas';
       case 'usuarios':
-        return 'Gestión de Usuarios y Permisos';
+        return 'Centro de Configuración, Usuarios y Accesos';
       default:
-        return currentUser.role === 'supervisor'
-          ? 'Portal de Validación de Supervisor'
-          : 'Panel de Control de Asistencia';
+        return 'Panel de Control de Asistencia';
     }
   };
 
