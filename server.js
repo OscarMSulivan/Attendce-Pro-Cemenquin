@@ -1,0 +1,591 @@
+// server.ts
+import express from "express";
+import fs from "fs";
+import path from "path";
+import os from "os";
+import nodemailer from "nodemailer";
+import { createServer as createViteServer } from "vite";
+var PORT = Number(process.env.PORT) || 3e3;
+var DATA_DIR = path.resolve(process.cwd(), "data");
+var DB_FILE = path.join(DATA_DIR, "portal_db.json");
+function renderServerEmailTemplate(template, vars) {
+  let out = template || "";
+  Object.entries(vars).forEach(([k, v]) => {
+    out = out.replace(new RegExp(`\\{${k}\\}`, "gi"), v ?? "");
+  });
+  return out;
+}
+function ensureDataDir() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+}
+function readDatabase() {
+  try {
+    ensureDataDir();
+    if (!fs.existsSync(DB_FILE)) {
+      return {};
+    }
+    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn("Error leyendo base de datos local:", err);
+    return {};
+  }
+}
+function writeDatabase(partial) {
+  ensureDataDir();
+  const current = readDatabase();
+  const mergedConfig = partial.config && typeof partial.config === "object" ? { ...current.config || {}, ...partial.config } : current.config;
+  const updated = {
+    ...current,
+    ...partial,
+    ...mergedConfig ? { config: mergedConfig } : {},
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), "utf-8");
+  return updated;
+}
+function resolveEmailConfig(override) {
+  const db = readDatabase();
+  const fromConfig = db.config?.emailServer || {};
+  const fromRoot = db.emailConfig || {};
+  return {
+    asuntoDispersion: "[AttendancePRO] N\xF3mina Semana {semana} Lista para Validaci\xF3n \u2014 {supervisor}",
+    mensajeDispersion: "Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una n\xF3mina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).",
+    activarAlertaPorVencer: true,
+    horasAntesVencimiento: 2,
+    asuntoPorVencer: "\u26A0\uFE0F [URGENTE] Tu tiempo para liberar la N\xF3mina Semana {semana} est\xE1 por finalizar \u2014 {supervisor}",
+    mensajePorVencer: "Hola {nombre},\n\nTe recordamos que tienes la N\xF3mina de la Semana {semana} ({periodo}) pendiente de liberar y el tiempo asignado est\xE1 a punto de finalizar (restan aprox. {tiempo_restante}).\n\nFecha y hora l\xEDmite: {fecha_limite}.\nPor favor ingresa de inmediato al portal para concluir la revisi\xF3n y liberar tu lista.",
+    ...fromConfig,
+    ...fromRoot,
+    ...override || {}
+  };
+}
+function createSmtpTransporter(emailConfig, timeoutMs = 8e3) {
+  const cleanUser = String(emailConfig.smtpUser || "").trim();
+  const rawPass = String(emailConfig.smtpPass || "").trim();
+  const host = String(
+    emailConfig.smtpHost || (cleanUser.toLowerCase().includes("@gmail") ? "smtp.gmail.com" : "smtp.office365.com")
+  ).trim();
+  const port = Number(emailConfig.smtpPort) || 587;
+  const secure = Boolean(emailConfig.smtpSecure) || port === 465;
+  const isGoogleHost = host.toLowerCase().includes("gmail") || cleanUser.toLowerCase().includes("@gmail");
+  const cleanPass = isGoogleHost && /^[a-zA-Z]{4}(\s+[a-zA-Z]{4}){3}$/.test(rawPass) ? rawPass.replace(/\s+/g, "") : rawPass;
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: {
+      user: cleanUser,
+      pass: cleanPass
+    },
+    connectionTimeout: timeoutMs
+  });
+  return { transporter, cleanUser, cleanPass, host, port, secure };
+}
+async function checkAndSendExpiringReminders(options) {
+  const db = readDatabase();
+  const emailCfg = resolveEmailConfig(options?.overrideEmailConfig);
+  if (!options?.forceTest && emailCfg.activarAlertaPorVencer === false) {
+    return { checked: false, remindersSent: 0, smtpSent: 0, details: ["Alerta por vencer desactivada"] };
+  }
+  const horasUmbral = Number(emailCfg.horasAntesVencimiento ?? 2) || 2;
+  const umbralMs = horasUmbral * 36e5;
+  const nowMs = Date.now();
+  const nowISO = (/* @__PURE__ */ new Date()).toISOString();
+  if (options?.forceTest) {
+    if (!emailCfg.smtpUser || !emailCfg.smtpPass) {
+      return {
+        checked: true,
+        remindersSent: 0,
+        smtpSent: 0,
+        details: ["Configura y guarda tus credenciales SMTP primero para enviar el correo de prueba."]
+      };
+    }
+    const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8e3);
+    const sampleVars = {
+      supervisor: "OSCAR VALENZUELA",
+      nombre: "\xD3scar Valenzuela (Supervisor)",
+      semana: "43",
+      periodo: "2026-10-22 al 2026-10-28",
+      dispersado_por: "Recursos Humanos",
+      fecha_limite: new Date(nowMs + umbralMs).toLocaleString("es-MX", {
+        weekday: "long",
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit"
+      }),
+      horas_limite: "24",
+      tiempo_restante: `${horasUmbral} hora(s)`
+    };
+    const subject = renderServerEmailTemplate(
+      emailCfg.asuntoPorVencer || "\u26A0\uFE0F [URGENTE] Tu tiempo para liberar la N\xF3mina Semana {semana} est\xE1 por finalizar \u2014 {supervisor}",
+      sampleVars
+    );
+    const bodyText = renderServerEmailTemplate(
+      emailCfg.mensajePorVencer || "Hola {nombre}, el plazo para liberar la n\xF3mina de la Semana {semana} vence en {tiempo_restante} ({fecha_limite}).",
+      sampleVars
+    );
+    await transporter.sendMail({
+      from: `"${emailCfg.smtpFromName || "AttendancePRO N\xF3minas"}" <${cleanUser}>`,
+      to: cleanUser,
+      subject: `[PRUEBA] ${subject}`,
+      text: bodyText,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #fecaca; border-radius: 14px; overflow: hidden;">
+          <div style="background: #7f1d1d; padding: 18px 24px; color: #ffffff;">
+            <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO \xB7 Alerta Autom\xE1tica por Vencimiento</div>
+            <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">\u23F3 Tiempo L\xEDmite a Punto de Finalizar</h2>
+          </div>
+          <div style="padding: 24px;">
+            <div style="white-space: pre-line; color: #334155; font-size: 14px; line-height: 1.6;">${bodyText}</div>
+            <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 16px; margin-top: 18px;">
+              <div style="color: #b91c1c; font-weight: bold; font-size: 12px; text-transform: uppercase;">Tiempo Restante Estimado: ${sampleVars.tiempo_restante}</div>
+              <div style="color: #0f172a; font-size: 13px; font-weight: bold; margin-top: 4px;">Vence el: ${sampleVars.fecha_limite}</div>
+            </div>
+          </div>
+        </div>
+      `
+    });
+    return {
+      checked: true,
+      remindersSent: 1,
+      smtpSent: 1,
+      details: [`Correo de prueba de alerta por vencimiento enviado a ${cleanUser}`]
+    };
+  }
+  const dispersals = Array.isArray(db.dispersals) ? db.dispersals : [];
+  const releases = db.releases && typeof db.releases === "object" ? db.releases : {};
+  const users = Array.isArray(db.users) ? db.users : [];
+  const notifications = Array.isArray(db.notifications) ? db.notifications : [];
+  let remindersSent = 0;
+  let smtpSent = 0;
+  let dbModified = false;
+  const details = [];
+  for (const disp of dispersals) {
+    if (!disp || disp.cancelada || !disp.limiteLiberacion) continue;
+    const deadlineMs = new Date(disp.limiteLiberacion).getTime();
+    if (isNaN(deadlineMs)) continue;
+    const remainingMs = deadlineMs - nowMs;
+    if (remainingMs <= 0 || remainingMs > umbralMs) continue;
+    const alreadyReminded = Array.isArray(disp.recordatoriosVencimientoEnviados) ? disp.recordatoriosVencimientoEnviados.map((s) => String(s).toUpperCase()) : [];
+    const notifiedSups = Array.isArray(disp.supervisoresNotificados) ? disp.supervisoresNotificados.map((s) => String(s).toUpperCase()) : [];
+    const pendingSupsToRemind = notifiedSups.filter((supName) => {
+      if (alreadyReminded.includes(supName)) return false;
+      const relKey = `${disp.semanaNumero}_${supName}`;
+      const rel = releases[relKey];
+      return !rel || rel.status !== "liberado";
+    });
+    if (pendingSupsToRemind.length === 0) continue;
+    const minsLeft = Math.max(1, Math.round(remainingMs / 6e4));
+    const hoursLeft = Math.floor(minsLeft / 60);
+    const remMins = minsLeft % 60;
+    const tiempoRestanteStr = hoursLeft > 0 ? `${hoursLeft}h ${remMins}m` : `${minsLeft} minutos`;
+    const limiteFormatted = new Date(deadlineMs).toLocaleString("es-MX", {
+      weekday: "long",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+    for (const supName of pendingSupsToRemind) {
+      const matchedUser = users.find((u) => {
+        if (!u || !u.active || u.role !== "supervisor") return false;
+        const supMain = String(u.supervisorName || "").trim().toUpperCase();
+        const assigned = Array.isArray(u.assignedLists) ? u.assignedLists.map((l) => String(l).trim().toUpperCase()) : [];
+        return supMain === supName || assigned.includes(supName);
+      });
+      const recipientEmail = matchedUser?.email || `${supName.toLowerCase().replace(/\s+/g, ".")}@empresa.com`;
+      const recipientName = matchedUser?.name || supName;
+      const vars = {
+        supervisor: supName,
+        nombre: recipientName,
+        semana: String(disp.semanaNumero),
+        periodo: String(disp.semanaPeriodo || "").replace("|", " al "),
+        dispersado_por: String(disp.dispersadoPor || "N\xF3minas / RH"),
+        fecha_limite: limiteFormatted,
+        horas_limite: String(disp.horasLimite || 24),
+        tiempo_restante: tiempoRestanteStr
+      };
+      const subject = renderServerEmailTemplate(
+        emailCfg.asuntoPorVencer || "\u26A0\uFE0F [URGENTE] Tu tiempo para liberar la N\xF3mina Semana {semana} est\xE1 por finalizar \u2014 {supervisor}",
+        vars
+      );
+      const bodyText = renderServerEmailTemplate(
+        emailCfg.mensajePorVencer || "Hola {nombre},\n\nTe recordamos que tienes la N\xF3mina de la Semana {semana} ({periodo}) pendiente de liberar y el tiempo asignado est\xE1 a punto de finalizar (restan aprox. {tiempo_restante}).\n\nFecha y hora l\xEDmite: {fecha_limite}.\nPor favor ingresa de inmediato al portal para concluir la revisi\xF3n y liberar tu lista.",
+        vars
+      );
+      const newNotif = {
+        id: `notif_exp_${disp.semanaNumero}_${supName.replace(/\s+/g, "_")}_${Date.now()}`,
+        targetSupervisor: supName,
+        targetUserId: matchedUser?.id,
+        recipientEmail,
+        semanaNumero: disp.semanaNumero,
+        semanaPeriodo: disp.semanaPeriodo,
+        titulo: `\u23F3 Tiempo por Vencer (${tiempoRestanteStr}) \u2014 N\xF3mina Semana ${disp.semanaNumero}`,
+        mensaje: bodyText,
+        enviadoPor: "Alerta Autom\xE1tica de Vencimiento",
+        fechaEnvio: nowISO,
+        leida: false,
+        emailEnviado: Boolean(emailCfg.smtpUser && emailCfg.smtpPass)
+      };
+      notifications.unshift(newNotif);
+      if (emailCfg.smtpUser && emailCfg.smtpPass) {
+        try {
+          const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8e3);
+          await transporter.sendMail({
+            from: `"${emailCfg.smtpFromName || "AttendancePRO N\xF3minas"}" <${cleanUser}>`,
+            to: recipientEmail,
+            subject,
+            text: bodyText,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #fecaca; border-radius: 14px; overflow: hidden;">
+                <div style="background: #7f1d1d; padding: 18px 24px; color: #ffffff;">
+                  <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO \xB7 Alerta Autom\xE1tica por Vencimiento</div>
+                  <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">\u23F3 Tiempo L\xEDmite a Punto de Finalizar</h2>
+                  <div style="color: #fecaca; font-size: 12px; margin-top: 4px;">Semana ${disp.semanaNumero} \xB7 Lista: ${supName}</div>
+                </div>
+                <div style="padding: 24px;">
+                  <div style="white-space: pre-line; color: #334155; font-size: 14px; line-height: 1.6;">${bodyText}</div>
+                  <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 16px; margin-top: 18px;">
+                    <div style="color: #b91c1c; font-weight: bold; font-size: 12px; text-transform: uppercase;">\u23F3 Tiempo Restante: ${tiempoRestanteStr}</div>
+                    <div style="color: #0f172a; font-size: 13px; font-weight: bold; margin-top: 4px;">Fecha y Hora L\xEDmite: ${limiteFormatted}</div>
+                  </div>
+                </div>
+              </div>
+            `
+          });
+          smtpSent++;
+        } catch {
+        }
+      }
+      alreadyReminded.push(supName);
+      remindersSent++;
+      details.push(`${supName} (${recipientEmail}) \u2014 restan ${tiempoRestanteStr}`);
+    }
+    disp.recordatoriosVencimientoEnviados = Array.from(new Set(alreadyReminded));
+    dbModified = true;
+  }
+  if (dbModified) {
+    writeDatabase({
+      dispersals,
+      notifications: notifications.slice(0, 120)
+    });
+  }
+  return {
+    checked: true,
+    remindersSent,
+    smtpSent,
+    details
+  };
+}
+async function startServer() {
+  const app = express();
+  app.use(express.json({ limit: "50mb" }));
+  app.get("/api/health", (_req, res) => {
+    res.json({
+      status: "ok",
+      service: "AttendancePRO v10 \u2014 Servidor RH, N\xF3minas y CONTPAQi",
+      hostname: os.hostname(),
+      uptime: Math.round(process.uptime()),
+      storagePath: DB_FILE
+    });
+  });
+  app.get("/api/portal/state", (_req, res) => {
+    const db = readDatabase();
+    res.json({
+      ...db,
+      serverInfo: {
+        hostname: os.hostname(),
+        uptime: Math.round(process.uptime()),
+        storagePath: DB_FILE
+      }
+    });
+  });
+  app.post("/api/portal/sync", (req, res) => {
+    try {
+      const body = req.body || {};
+      const emailServerFromConfig = body.config && typeof body.config === "object" && body.config.emailServer ? body.config.emailServer : void 0;
+      const updated = writeDatabase({
+        ...Array.isArray(body.users) ? { users: body.users } : {},
+        ...Array.isArray(body.incidents) ? { incidents: body.incidents } : {},
+        ...body.releases && typeof body.releases === "object" ? { releases: body.releases } : {},
+        ...Array.isArray(body.dispersals) ? { dispersals: body.dispersals } : {},
+        ...Array.isArray(body.notifications) ? { notifications: body.notifications } : {},
+        ...body.empleadosDB && typeof body.empleadosDB === "object" ? { empleadosDB: body.empleadosDB } : {},
+        ...body.eventosDB && typeof body.eventosDB === "object" ? { eventosDB: body.eventosDB } : {},
+        ...body.vacacionesDB && typeof body.vacacionesDB === "object" ? { vacacionesDB: body.vacacionesDB } : {},
+        ...Array.isArray(body.reportes) ? { reportes: body.reportes } : {},
+        ...body.resumen !== void 0 ? { resumen: body.resumen } : {},
+        ...typeof body.selectedWeek === "string" ? { selectedWeek: body.selectedWeek } : {},
+        ...body.horarios && typeof body.horarios === "object" ? { horarios: body.horarios } : {},
+        ...body.asignaciones && typeof body.asignaciones === "object" ? { asignaciones: body.asignaciones } : {},
+        ...body.config && typeof body.config === "object" ? { config: body.config } : {},
+        ...body.emailConfig && typeof body.emailConfig === "object" ? { emailConfig: body.emailConfig } : emailServerFromConfig ? { emailConfig: emailServerFromConfig } : {}
+      });
+      res.json({ ok: true, updatedAt: updated.updatedAt });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post("/api/notifications/test-smtp", async (req, res) => {
+    try {
+      const activeEmailConfig = resolveEmailConfig(req.body || {});
+      const { transporter, cleanUser, cleanPass, host, port } = createSmtpTransporter(activeEmailConfig, 8e3);
+      if (!cleanUser || !cleanPass) {
+        return res.status(200).json({
+          ok: false,
+          error: "Faltan credenciales: se requiere Correo de N\xF3minas y Contrase\xF1a / Clave de aplicaci\xF3n."
+        });
+      }
+      writeDatabase({
+        emailConfig: activeEmailConfig,
+        config: { emailServer: activeEmailConfig }
+      });
+      await transporter.verify();
+      const info = await transporter.sendMail({
+        from: `"${activeEmailConfig.smtpFromName || "AttendancePRO N\xF3minas"}" <${cleanUser}>`,
+        to: cleanUser,
+        subject: "\u2713 [AttendancePRO] Prueba de Conexi\xF3n Exitosa",
+        text: `Hola,
+
+Este es un mensaje de prueba para verificar que el servidor de correo est\xE1 correctamente conectado y listo para enviar alertas autom\xE1ticas de n\xF3mina.
+
+Servidor: ${host}:${port}
+Usuario: ${cleanUser}
+Fecha: ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
+            <div style="background: #0f172a; padding: 12px 18px; border-radius: 8px; color: #a9dfd8; font-weight: bold; font-size: 14px; margin-bottom: 16px;">
+              AttendancePRO \xB7 Validaci\xF3n SMTP
+            </div>
+            <h2 style="color: #0f172a; margin-top: 0; font-size: 18px;">\u2713 Conexi\xF3n de Correo Exitosa</h2>
+            <p style="color: #475569; font-size: 13px; line-height: 1.5;">
+              Tu servidor de correo ha sido verificado correctamente. A partir de ahora, cuando N\xF3minas / RH disperse una lista, se enviar\xE1 autom\xE1ticamente la alerta a cada supervisor.
+            </p>
+            <div style="background: #f8fafc; border-left: 4px solid #a9dfd8; padding: 10px 14px; margin: 16px 0; font-size: 12px; color: #334155;">
+              <strong>Servidor:</strong> ${host}:${port}<br/>
+              <strong>Cuenta conectada:</strong> ${cleanUser}<br/>
+              <strong>Fecha:</strong> ${(/* @__PURE__ */ new Date()).toLocaleString()}
+            </div>
+          </div>
+        `
+      });
+      return res.status(200).json({
+        ok: true,
+        message: `Conexi\xF3n verificada con \xE9xito. Se envi\xF3 un correo de prueba a ${cleanUser}.`,
+        messageId: info.messageId
+      });
+    } catch (err) {
+      const rawMsg = String(err?.message || "");
+      let friendlyError = "No se pudo autenticar con el servidor SMTP. Verifica el correo y la contrase\xF1a.";
+      let requiresAppPassword = false;
+      if (rawMsg.includes("Cannot find package 'nodemailer'") || err?.code === "ERR_MODULE_NOT_FOUND") {
+        friendlyError = "El paquete 'nodemailer' a\xFAn no est\xE1 instalado en este servidor VPS. Para activarlo, ejecuta en la terminal de tu servidor: npm install y luego reinicia con pm2 restart all.";
+      } else if (rawMsg.includes("534-5.7.9") || rawMsg.toLowerCase().includes("application-specific password required")) {
+        requiresAppPassword = true;
+        friendlyError = 'Google exige una "Contrase\xF1a de Aplicaci\xF3n" de 16 letras (no tu contrase\xF1a normal de Gmail). Activa la Verificaci\xF3n en 2 pasos en tu cuenta de Google y genera una Contrase\xF1a de Aplicaci\xF3n en myaccount.google.com/apppasswords.';
+      } else if (rawMsg.includes("535") || rawMsg.toLowerCase().includes("username and password not accepted")) {
+        requiresAppPassword = true;
+        friendlyError = "Usuario o contrase\xF1a rechazados por el servidor (C\xF3digo 535). Si usas Gmail u Office 365, aseg\xFArate de colocar una Contrase\xF1a de Aplicaci\xF3n de 16 caracteres en lugar de tu contrase\xF1a habitual.";
+      } else if (rawMsg) {
+        friendlyError = `No se pudo conectar al servidor SMTP: ${rawMsg}`;
+      }
+      return res.status(200).json({
+        ok: false,
+        requiresAppPassword,
+        error: friendlyError
+      });
+    }
+  });
+  app.post("/api/notifications/send-email", async (req, res) => {
+    try {
+      const {
+        dispatches,
+        semanaNumero,
+        semanaPeriodo,
+        dispersadoPor,
+        emailConfig,
+        limiteLiberacion,
+        horasLimite,
+        mensaje
+      } = req.body || {};
+      let smtpSuccessCount = 0;
+      const deliveryResults = [];
+      const resolvedEmailConfig = resolveEmailConfig(emailConfig);
+      if (resolvedEmailConfig.smtpUser && resolvedEmailConfig.smtpPass && Array.isArray(dispatches)) {
+        try {
+          const { transporter, cleanUser } = createSmtpTransporter(resolvedEmailConfig, 1e4);
+          for (const d of dispatches) {
+            try {
+              const limiteText = limiteLiberacion ? new Date(limiteLiberacion).toLocaleString("es-MX", {
+                weekday: "long",
+                year: "numeric",
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit"
+              }) : horasLimite ? `${horasLimite} horas posteriores a este aviso` : "A la brevedad posible";
+              const templateVars = {
+                supervisor: String(d.supervisorName || ""),
+                nombre: String(d.recipientName || d.supervisorName || ""),
+                semana: String(semanaNumero || ""),
+                periodo: String(semanaPeriodo || "").replace("|", " al "),
+                dispersado_por: String(dispersadoPor || "N\xF3minas / RH"),
+                fecha_limite: limiteText,
+                horas_limite: String(horasLimite || 24),
+                tiempo_restante: `${horasLimite || 24} horas`
+              };
+              const renderedSubject = d.subject || renderServerEmailTemplate(
+                resolvedEmailConfig.asuntoDispersion || "[AttendancePRO] N\xF3mina Semana {semana} Lista para Validaci\xF3n \u2014 {supervisor}",
+                templateVars
+              );
+              const renderedBodyText = renderServerEmailTemplate(
+                resolvedEmailConfig.mensajeDispersion || `Hola {nombre},
+
+El \xE1rea de N\xF3minas ({dispersado_por}) ha dispersado tu lista de asistencia para la Semana {semana} ({periodo}).
+
+TIEMPO L\xCDMITE DE LIBERACI\xD3N: {fecha_limite}
+
+Por favor ingresa al portal AttendancePRO para revisar tu equipo y liberar tu n\xF3mina dentro del plazo establecido.`,
+                templateVars
+              );
+              await transporter.sendMail({
+                from: `"${resolvedEmailConfig.smtpFromName || "AttendancePRO N\xF3minas"}" <${cleanUser}>`,
+                to: d.recipientEmail,
+                subject: renderedSubject,
+                text: renderedBodyText + (mensaje ? `
+
+Nota adicional: ${mensaje}` : "") + `
+
+Atentamente,
+Recursos Humanos / N\xF3minas`,
+                html: `
+                  <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+                    <div style="background: #171821; padding: 18px 24px; color: #ffffff;">
+                      <div style="color: #a9dfd8; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO \xB7 Notificaci\xF3n de N\xF3mina</div>
+                      <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">N\xF3mina Semana ${semanaNumero} Dispersada</h2>
+                      <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Per\xEDodo: ${templateVars.periodo} \xB7 Lista: ${d.supervisorName}</div>
+                    </div>
+                    <div style="padding: 24px;">
+                      <div style="white-space: pre-line; color: #334155; font-size: 14px; line-height: 1.6; margin-top: 0;">${renderedBodyText}</div>
+                      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #20aef3; border-radius: 8px; padding: 14px 16px; margin: 18px 0;">
+                        <div style="color: #0369a1; font-weight: bold; font-size: 12px; text-transform: uppercase; margin-bottom: 4px;">\u23F3 Tiempo L\xEDmite para Liberar:</div>
+                        <div style="color: #0f172a; font-size: 14px; font-weight: bold;">${limiteText}</div>
+                        ${horasLimite ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px;">(Plazo configurado de ${horasLimite} horas)</div>` : ""}
+                      </div>
+                      ${mensaje ? `<div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 12px 14px; margin-bottom: 18px; font-size: 12px; color: #92400e;">
+                              <strong>Instrucci\xF3n de N\xF3minas:</strong> ${mensaje}
+                            </div>` : ""}
+                      <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
+                        Ingresa a tu cuenta de supervisor en el sistema para autorizar tiempos extras, agregar formatos de checada sin gafete y liberar la lista a tiempo.
+                      </p>
+                    </div>
+                  </div>
+                `
+              });
+              smtpSuccessCount++;
+              deliveryResults.push({ email: d.recipientEmail, ok: true });
+            } catch (singleErr) {
+              deliveryResults.push({ email: d.recipientEmail, ok: false, info: singleErr.message });
+            }
+          }
+        } catch (_smtpInitErr) {
+        }
+      }
+      const current = readDatabase();
+      const prevLogs = Array.isArray(current.emailLogs) ? current.emailLogs : [];
+      const newEntry = {
+        id: `mail_${Date.now()}`,
+        semanaNumero,
+        semanaPeriodo,
+        dispersadoPor,
+        dispatches: Array.isArray(dispatches) ? dispatches : [],
+        smtpSuccessCount,
+        deliveryResults,
+        sentAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      writeDatabase({
+        emailLogs: [newEntry, ...prevLogs].slice(0, 200)
+      });
+      res.json({
+        ok: true,
+        sentCount: Array.isArray(dispatches) ? dispatches.length : 0,
+        smtpSentCount: smtpSuccessCount,
+        timestamp: newEntry.sentAt
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post("/api/notifications/check-expiring", async (req, res) => {
+    try {
+      const { forceTest, emailConfig } = req.body || {};
+      const result = await checkAndSendExpiringReminders({
+        forceTest: Boolean(forceTest),
+        overrideEmailConfig: emailConfig
+      });
+      const db = readDatabase();
+      res.json({
+        ok: true,
+        ...result,
+        dispersals: db.dispersals,
+        notifications: db.notifications
+      });
+    } catch (err) {
+      res.status(200).json({
+        ok: false,
+        error: err?.message || "Error al procesar recordatorios de vencimiento"
+      });
+    }
+  });
+  setInterval(() => {
+    checkAndSendExpiringReminders().catch(() => {
+    });
+  }, 6e4);
+  app.post("/api/notifications/cancel-email", async (req, res) => {
+    try {
+      const { semanaNumero, canceladoPor, targetSupervisors, motivo } = req.body || {};
+      const current = readDatabase();
+      const prevLogs = Array.isArray(current.emailLogs) ? current.emailLogs : [];
+      const cancelEntry = {
+        id: `mail_cancel_${Date.now()}`,
+        type: "cancellation",
+        semanaNumero,
+        canceladoPor,
+        targetSupervisors,
+        motivo,
+        cancelledAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      writeDatabase({
+        emailLogs: [cancelEntry, ...prevLogs].slice(0, 200)
+      });
+      res.json({ ok: true, timestamp: cancelEntry.cancelledAt });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa"
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`\u2713 AttendancePRO v10 Server corriendo en http://0.0.0.0:${PORT}`);
+  });
+}
+startServer();
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
