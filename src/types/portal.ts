@@ -352,6 +352,10 @@ export interface PayrollDispersal {
   canceladoPor?: string;            // Nombre de quien canceló
   motivoCancelacion?: string;       // Motivo (ej: "No trabajó su nómina", etc.)
   supervisoresCancelados?: string[]; // Si se cancelaron listas específicas
+  empleadosCount?: number;          // Total de colaboradores incluidos en la dispersión
+  totalHorasNormales?: number;      // Suma de horas normales al momento de dispersar
+  totalHorasExtras?: number;        // Suma de horas extras al momento de dispersar
+  reportesSnapshot?: any[];         // Respaldo de reportes de la semana dispersada para consulta/edición posterior
 }
 
 export interface PortalNotification {

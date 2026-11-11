@@ -59,6 +59,10 @@ import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
 import { DayResolutionPayload } from './components/portal/MissingPunchFormatModal';
 import { WelcomeDashboard } from './components/portal/WelcomeDashboard';
+import {
+  DispersionModeSelector,
+  DispersionWorkspaceMode,
+} from './components/portal/DispersionModeSelector';
 import { PortalService } from './services/portalService';
 import {
   PortalUser,
@@ -137,6 +141,7 @@ export default function App() {
   const [activeUserId, setActiveUserId] = useState<string>(() => PortalService.loadActiveUserId());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => PortalService.isSessionAuthenticated());
   const [portalTab, setPortalTab] = useState<string>('nomina');
+  const [dispersionMode, setDispersionMode] = useState<DispersionWorkspaceMode>('prompt');
   const [incidents, setIncidents] = useState<IncidentRequest[]>(() => PortalService.loadIncidents());
   const [releases, setReleases] = useState<Record<string, PayrollRelease>>(() => PortalService.loadReleases());
   const [dispersals, setDispersals] = useState<PayrollDispersal[]>(() => PortalService.loadDispersals());
@@ -1995,6 +2000,8 @@ Saludos.`
     const effectiveHorasLimite =
       horasLimite !== undefined ? horasLimite : config.horasLimiteLiberacion ?? 24;
     const targets = targetSupervisors && targetSupervisors.length > 0 ? targetSupervisors : supervisorsList;
+    const totalNorm = reportes.reduce((s, r) => s + r.totalNormal, 0);
+    const totalExt = reportes.reduce((s, r) => s + r.totalExtra, 0);
     const { dispersal, emailDispatches } = PortalService.recordDispersal(
       semanaNum,
       semanaPer,
@@ -2004,7 +2011,13 @@ Saludos.`
       portalUsers,
       sendCorporateEmail,
       effectiveHorasLimite,
-      limiteLiberacion
+      limiteLiberacion,
+      {
+        empleadosCount: reportes.length,
+        totalHorasNormales: totalNorm,
+        totalHorasExtras: totalExt,
+        reportesSnapshot: reportes,
+      }
     );
     setDispersals(PortalService.loadDispersals());
     setNotifications(PortalService.loadNotifications());
@@ -2270,6 +2283,75 @@ Saludos.`
     return logs;
   }, [reportes]);
 
+  // Cambiar de pestaña y mostrar siempre el selector al entrar a Dispersión de Nómina
+  const handleNavigatePortalTab = useCallback((nextTab: string) => {
+    if (nextTab === 'nomina') {
+      setDispersionMode('prompt');
+    }
+    setPortalTab(nextTab);
+  }, []);
+
+  // Abrir una nómina ya dispersada para consultarla o trabajarla
+  const handleOpenDispersedPayroll = useCallback(
+    (disp: PayrollDispersal) => {
+      if (disp.semanaPeriodo) {
+        setSelectedWeek(disp.semanaPeriodo);
+      }
+      setSelectedSupervisor('');
+
+      if (Array.isArray(disp.reportesSnapshot) && disp.reportesSnapshot.length > 0) {
+        setReportes(disp.reportesSnapshot);
+        setResumen(recomputeSummaryFromReports(disp.reportesSnapshot));
+      } else if (
+        Object.keys(empleadosDB).length > 0 &&
+        Object.keys(eventosDB).length > 0 &&
+        disp.semanaPeriodo &&
+        disp.semanaPeriodo.includes('|')
+      ) {
+        const [startISO, endISO] = disp.semanaPeriodo.split('|');
+        const { reportes: calculados, resumen: sum } = generarReporteAsistencia(
+          Object.values(empleadosDB),
+          eventosDB,
+          vacacionesDB,
+          horarios,
+          startISO,
+          endISO,
+          {
+            jornadaBase: config.jornadaBase,
+            modoLectura: config.modoLectura,
+            minutosRebote: config.minutosRebote,
+            overtimeRules: config.overtimeRules,
+          }
+        );
+        setReportes(calculados);
+        setResumen(sum);
+      }
+
+      setDispersionMode('existing');
+      setPortalTab('nomina');
+      setStatusMessage(
+        `✓ Consultando nómina dispersada: Semana ${disp.semanaNumero} (${disp.semanaPeriodo.replace(
+          '|',
+          ' al '
+        )})`
+      );
+      setStatusType('info');
+    },
+    [empleadosDB, eventosDB, vacacionesDB, horarios, config, recomputeSummaryFromReports]
+  );
+
+  // Iniciar o continuar una nueva dispersión de nómina
+  const handleStartNewPayroll = useCallback((clearCurrentReport = false) => {
+    if (clearCurrentReport) {
+      setReportes([]);
+      setResumen(null);
+      setSelectedSupervisor('');
+      setStatusMessage('Listo para cargar archivos o seleccionar periodo para una nueva dispersión.');
+      setStatusType('info');
+    }
+    setDispersionMode('new');
+  }, []);
+
   // Si el usuario no ha iniciado sesión, mostrar el Módulo de Login
   if (!isAuthenticated) {
     return (
@@ -2287,7 +2369,7 @@ Saludos.`
         userRole={currentUser.role}
         currentUser={currentUser}
         activeTab={portalTab}
-        onTabChange={setPortalTab}
+        onTabChange={handleNavigatePortalTab}
         pendingIncidentsCount={pendingIncidentsCount}
         pendingReleasesCount={pendingReleasesCount}
         onOpenSchedules={() => setIsSchedulesOpen(true)}
@@ -2313,7 +2395,7 @@ Saludos.`
           onSwitchUser={handleSwitchUser}
           onLogout={handleLogout}
           activeTab={portalTab}
-          onTabChange={setPortalTab}
+          onTabChange={handleNavigatePortalTab}
           pendingIncidentsCount={pendingIncidentsCount}
           pendingReleasesCount={pendingReleasesCount}
           notifications={notifications}
@@ -2338,7 +2420,7 @@ Saludos.`
             reportesCount={reportes.length}
             hasEmployees={Object.keys(empleadosDB).length > 0}
             hasEvents={Object.keys(eventosDB).length > 0}
-            onNavigateTab={setPortalTab}
+            onNavigateTab={handleNavigatePortalTab}
             pendingIncidentsCount={pendingIncidentsCount}
             pendingReleasesCount={pendingReleasesCount}
             isPayrollReleased={isPayrollReleased}
@@ -2399,92 +2481,117 @@ Saludos.`
         {/* MÓDULO DE DISPERSIÓN Y CÁLCULO DE NÓMINA (Cualquier usuario con el acceso 'nomina' habilitado) */}
         {portalTab === 'nomina' && userHasModuleAccess(currentUser, 'nomina') && (
           <>
-            {/* Panel de Estadísticas superiores (Today's Sales + Level) */}
-            {activeSummary && (
-              <StatsPanel summary={activeSummary} reports={filteredReports} />
+            {/* Selector de Entrada (Nueva Dispersión vs Trabajar Dispersada) + Barra Superior de Regreso */}
+            <DispersionModeSelector
+              mode={dispersionMode}
+              onSelectMode={setDispersionMode}
+              dispersals={dispersals}
+              releases={releases}
+              currentWeekNumber={currentWeekNumber}
+              currentWeekPeriod={selectedWeek}
+              reportesCount={reportes.length}
+              hasEmployees={Object.keys(empleadosDB).length > 0}
+              hasEvents={Object.keys(eventosDB).length > 0}
+              onOpenDispersedPayroll={handleOpenDispersedPayroll}
+              onStartNewPayroll={handleStartNewPayroll}
+              onNavigateToSemaforo={(disp) => {
+                if (disp?.semanaPeriodo) {
+                  setSelectedWeek(disp.semanaPeriodo);
+                }
+                setPortalTab('semaforo');
+              }}
+            />
+
+            {dispersionMode !== 'prompt' && (
+              <>
+                {/* Panel de Estadísticas superiores */}
+                {activeSummary && (
+                  <StatsPanel summary={activeSummary} reports={filteredReports} />
+                )}
+
+                {/* Resumen Ejecutivo (Listas y Estado de Dispersión + Pendientes y Límite de Tiempo + Incidencias) */}
+                {activeSummary && (
+                  <ExecutiveSummary
+                    summary={activeSummary}
+                    reports={reportes}
+                    selectedSupervisor={selectedSupervisor}
+                    onSelectSupervisor={setSelectedSupervisor}
+                    dispersals={dispersals}
+                    releases={releases}
+                    supervisors={supervisorsList}
+                    semanaNumero={currentWeekNumber}
+                    semanaPeriodo={selectedWeek}
+                    onNavigateToMonitor={() => setPortalTab('semaforo')}
+                  />
+                )}
+
+                {/* Panel de Carga de Archivos (Exclusivo RH / Nóminas) */}
+                <FileDropzoneSection
+                  onLoadEmployees={handleLoadEmployees}
+                  onLoadEvents={handleLoadEvents}
+                  onLoadVacations={handleLoadVacations}
+                  isLoadingEmployees={isLoadingEmployees}
+                  isLoadingEvents={isLoadingEvents}
+                  isLoadingVacations={isLoadingVacations}
+                  employeesCount={Object.keys(empleadosDB).length}
+                  eventsCount={Object.keys(eventosDB).length}
+                  vacationsCount={Object.keys(vacacionesDB).length}
+                  savedEmployeesInfo={savedEmployeesInfo}
+                  onUseSavedEmployees={handleUseSavedEmployees}
+                  onClearSavedEmployees={handleClearSavedEmployees}
+                />
+
+                {/* Barra de Controles, Búsqueda y Filtros */}
+                <ControlsBar
+                  payrollWeeks={payrollWeeks}
+                  selectedWeek={selectedWeek}
+                  onSelectWeek={setSelectedWeek}
+                  supervisors={allowedSupervisors}
+                  selectedSupervisor={selectedSupervisor}
+                  onSelectSupervisor={setSelectedSupervisor}
+                  readingMode={config.modoLectura}
+                  onReadingModeChange={handleReadingModeChange}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  emailDestino={emailDestino}
+                  onEmailChange={setEmailDestino}
+                  onGenerateReport={handleGenerateReport}
+                  onDisperseAllPayroll={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, supervisorsList, true)}
+                  onDisperseActiveList={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, activeListSupervisors, true)}
+                  activeListSupervisorLabel={activeListSupervisorLabel}
+                  isActiveListDispersed={isActiveListDispersed}
+                  dispersedSupervisorsCount={dispersedSupervisorsCount}
+                  onExportExcel={handleExportExcel}
+                  onSendEmail={handleSendEmail}
+                  onPrint={handlePrint}
+                  canGenerate={Object.keys(empleadosDB).length > 0 && Object.keys(eventosDB).length > 0}
+                  canDisperse={reportes.length > 0}
+                  isWeekDispersed={isCurrentWeekDispersed}
+                  canExport={filteredReports.length > 0}
+                  isGenerating={isGenerating}
+                  isExporting={isExporting}
+                  isSupervisor={false}
+                  onReleasePayroll={() => setIsReleaseModalOpen(true)}
+                  isPayrollReleased={isPayrollReleased}
+                  releaseTooltip="Módulo exclusivo de revisión global de nóminas"
+                  overtimeRules={config.overtimeRules}
+                  onOpenOvertimeConfig={() => setIsOvertimeConfigOpen(true)}
+                />
+
+                {/* Tabla de Asistencia y Empleados */}
+                <AttendanceTable
+                  reports={filteredReports}
+                  onUpdateDayIncidence={handleUpdateDayIncidence}
+                  onUpdateDayTimes={handleUpdateDayTimes}
+                  onUpdateDayNote={handleUpdateDayNote}
+                  onQuickConfirmFalta={handleQuickConfirmFalta}
+                  horarios={horarios}
+                  onAssignSchedule={handleAssignIndividual}
+                  filteredCount={reportes.length}
+                  onToggleOvertimeApproval={handleToggleOvertimeApproval}
+                />
+              </>
             )}
-
-            {/* Resumen Ejecutivo (Listas y Estado de Dispersión + Pendientes y Límite de Tiempo + Incidencias) */}
-            {activeSummary && (
-              <ExecutiveSummary
-                summary={activeSummary}
-                reports={reportes}
-                selectedSupervisor={selectedSupervisor}
-                onSelectSupervisor={setSelectedSupervisor}
-                dispersals={dispersals}
-                releases={releases}
-                supervisors={supervisorsList}
-                semanaNumero={currentWeekNumber}
-                semanaPeriodo={selectedWeek}
-                onNavigateToMonitor={() => setPortalTab('semaforo')}
-              />
-            )}
-
-            {/* Panel de Carga de Archivos (Exclusivo RH / Nóminas) */}
-            <FileDropzoneSection
-              onLoadEmployees={handleLoadEmployees}
-              onLoadEvents={handleLoadEvents}
-              onLoadVacations={handleLoadVacations}
-              isLoadingEmployees={isLoadingEmployees}
-              isLoadingEvents={isLoadingEvents}
-              isLoadingVacations={isLoadingVacations}
-              employeesCount={Object.keys(empleadosDB).length}
-              eventsCount={Object.keys(eventosDB).length}
-              vacationsCount={Object.keys(vacacionesDB).length}
-              savedEmployeesInfo={savedEmployeesInfo}
-              onUseSavedEmployees={handleUseSavedEmployees}
-              onClearSavedEmployees={handleClearSavedEmployees}
-            />
-
-            {/* Barra de Controles, Búsqueda y Filtros */}
-            <ControlsBar
-              payrollWeeks={payrollWeeks}
-              selectedWeek={selectedWeek}
-              onSelectWeek={setSelectedWeek}
-              supervisors={allowedSupervisors}
-              selectedSupervisor={selectedSupervisor}
-              onSelectSupervisor={setSelectedSupervisor}
-              readingMode={config.modoLectura}
-              onReadingModeChange={handleReadingModeChange}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              emailDestino={emailDestino}
-              onEmailChange={setEmailDestino}
-              onGenerateReport={handleGenerateReport}
-              onDisperseAllPayroll={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, supervisorsList, true)}
-              onDisperseActiveList={() => handleDisperseWeek(currentWeekNumber, selectedWeek, undefined, activeListSupervisors, true)}
-              activeListSupervisorLabel={activeListSupervisorLabel}
-              isActiveListDispersed={isActiveListDispersed}
-              dispersedSupervisorsCount={dispersedSupervisorsCount}
-              onExportExcel={handleExportExcel}
-              onSendEmail={handleSendEmail}
-              onPrint={handlePrint}
-              canGenerate={Object.keys(empleadosDB).length > 0 && Object.keys(eventosDB).length > 0}
-              canDisperse={reportes.length > 0}
-              isWeekDispersed={isCurrentWeekDispersed}
-              canExport={filteredReports.length > 0}
-              isGenerating={isGenerating}
-              isExporting={isExporting}
-              isSupervisor={false}
-              onReleasePayroll={() => setIsReleaseModalOpen(true)}
-              isPayrollReleased={isPayrollReleased}
-              releaseTooltip="Módulo exclusivo de revisión global de nóminas"
-              overtimeRules={config.overtimeRules}
-              onOpenOvertimeConfig={() => setIsOvertimeConfigOpen(true)}
-            />
-
-            {/* Tabla de Asistencia y Empleados */}
-            <AttendanceTable
-              reports={filteredReports}
-              onUpdateDayIncidence={handleUpdateDayIncidence}
-              onUpdateDayTimes={handleUpdateDayTimes}
-              onUpdateDayNote={handleUpdateDayNote}
-              onQuickConfirmFalta={handleQuickConfirmFalta}
-              horarios={horarios}
-              onAssignSchedule={handleAssignIndividual}
-              filteredCount={reportes.length}
-              onToggleOvertimeApproval={handleToggleOvertimeApproval}
-            />
           </>
         )}
 
@@ -2514,6 +2621,7 @@ Saludos.`
             onDownloadExcel={handleDownloadSupervisorExcel}
             onInspectSupervisor={(sup) => {
               setSelectedSupervisor(sup);
+              setDispersionMode('existing');
               setPortalTab('nomina');
             }}
             onDisperseWeek={handleDisperseWeek}

@@ -513,7 +513,13 @@ export class PortalService {
     users?: PortalUser[],
     sendCorporateEmail = true,
     horasLimite?: number,
-    limiteLiberacion?: string
+    limiteLiberacion?: string,
+    snapshotMeta?: {
+      empleadosCount?: number;
+      totalHorasNormales?: number;
+      totalHorasExtras?: number;
+      reportesSnapshot?: any[];
+    }
   ): {
     dispersal: PayrollDispersal;
     newNotifications: PortalNotification[];
@@ -678,6 +684,10 @@ export class PortalService {
       supervisoresCancelados: (existingDispersal?.supervisoresCancelados || []).filter(
         s => !normalizedTargets.includes(s.toUpperCase())
       ),
+      empleadosCount: snapshotMeta?.empleadosCount ?? existingDispersal?.empleadosCount,
+      totalHorasNormales: snapshotMeta?.totalHorasNormales ?? existingDispersal?.totalHorasNormales,
+      totalHorasExtras: snapshotMeta?.totalHorasExtras ?? existingDispersal?.totalHorasExtras,
+      reportesSnapshot: snapshotMeta?.reportesSnapshot ?? existingDispersal?.reportesSnapshot,
     };
 
     if (existingIndex >= 0) {
