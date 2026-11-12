@@ -380,7 +380,7 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
       ? `Fecha límite de liberación: ${new Date(currentDispersal.limiteLiberacion).toLocaleString()}\n\n`
       : '';
     const subject = encodeURIComponent(
-      `[AttendancePRO] Nómina Semana ${semanaNumero} Dispersada — Lista ${supName}`
+      `[CemenQtime] Nómina Semana ${semanaNumero} Dispersada — Lista ${supName}`
     );
     const body = encodeURIComponent(
       `Hola ${supName},\n\n` +
@@ -390,7 +390,7 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
         )}).\n\n` +
         `${deadlineTxt}` +
         `${dispersalMessage ? `Nota de RH: ${dispersalMessage}\n\n` : ''}` +
-        `Por favor ingresa al portal AttendancePRO para revisar tus colaboradores, registrar formatos de checada/permiso o confirmar faltas y liberar tu nómina dentro del plazo establecido.\n\n` +
+        `Por favor ingresa al portal CemenQtime para revisar tus colaboradores, registrar formatos de checada/permiso o confirmar faltas y liberar tu nómina dentro del plazo establecido.\n\n` +
         `Atentamente,\n${currentUser.name}`
     );
     window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;

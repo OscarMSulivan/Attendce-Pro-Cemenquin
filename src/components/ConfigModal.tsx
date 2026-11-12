@@ -74,7 +74,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         smtpUser: (smtpForm.smtpUser || '').trim(),
         smtpPass: (smtpForm.smtpPass || '').trim(),
         smtpSecure: Boolean(smtpForm.smtpSecure) || Number(smtpForm.smtpPort) === 465,
-        smtpFromName: (smtpForm.smtpFromName || 'AttendancePRO Nóminas').trim(),
+        smtpFromName: (smtpForm.smtpFromName || 'CemenQtime Nóminas').trim(),
       };
       PortalService.saveEmailConfig(cleaned);
       if (onSaveEmailConfig) onSaveEmailConfig(cleaned);
@@ -114,7 +114,7 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
         smtpUser: (smtpForm.smtpUser || '').trim(),
         smtpPass: (smtpForm.smtpPass || '').trim(),
         smtpSecure: Boolean(smtpForm.smtpSecure) || Number(smtpForm.smtpPort) === 465,
-        smtpFromName: (smtpForm.smtpFromName || 'AttendancePRO Nóminas').trim(),
+        smtpFromName: (smtpForm.smtpFromName || 'CemenQtime Nóminas').trim(),
       };
       PortalService.saveEmailConfig(cleanedSmtp);
       if (onSaveEmailConfig) {

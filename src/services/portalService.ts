@@ -472,8 +472,10 @@ export class PortalService {
       smtpUser: 'nominas@empresa.com',
       smtpPass: '',
       smtpSecure: false,
-      smtpFromName: 'AttendancePRO Nóminas',
-      asuntoDispersion: '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+      smtpFromName: 'CemenQtime Nóminas',
+      portalUrl: '',
+      textoBotonCorreo: 'Ir al Sistema a Revisar y Liberar Nómina',
+      asuntoDispersion: '[CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}',
       mensajeDispersion:
         'Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una nómina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).',
       activarAlertaPorVencer: true,
@@ -627,7 +629,7 @@ export class PortalService {
             );
 
       const personalizedSubject = renderTemplate(
-        emailCfg.asuntoDispersion || '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+        emailCfg.asuntoDispersion || '[CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}',
         templateVars
       );
 
@@ -713,6 +715,7 @@ export class PortalService {
 
     // Disparar envío automático en servidor Express con credenciales SMTP
     if (sendCorporateEmail && typeof window !== 'undefined' && window.location.protocol !== 'file:') {
+      const resolvedOrigin = (emailCfg.portalUrl || '').trim() || window.location.origin;
       fetch('/api/notifications/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -721,7 +724,11 @@ export class PortalService {
           semanaPeriodo,
           dispersadoPor,
           dispatches: emailDispatches,
-          emailConfig: emailCfg,
+          emailConfig: {
+            ...emailCfg,
+            portalUrl: resolvedOrigin,
+          },
+          portalUrl: resolvedOrigin,
           limiteLiberacion: newDispersal.limiteLiberacion,
           horasLimite: newDispersal.horasLimite,
           mensaje: customMsg,
@@ -881,9 +888,10 @@ export class PortalService {
     const result: Record<string, Record<string, string>> = {};
 
     incidents
-      .filter(inc => inc.status === 'aprobada')
+      .filter(inc => inc.status === 'aprobada' && inc.tipo !== 'Cambio de horario')
       .forEach(inc => {
-        const fechas = getDateRangeISO(inc.fechaInicio, inc.fechaFin);
+        const endIso = !inc.fechaFin || inc.fechaFin === 'INDEFINIDO' ? inc.fechaInicio : inc.fechaFin;
+        const fechas = getDateRangeISO(inc.fechaInicio, endIso);
         if (!result[inc.empleadoId]) {
           result[inc.empleadoId] = {};
         }

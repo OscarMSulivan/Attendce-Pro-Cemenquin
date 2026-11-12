@@ -25,6 +25,7 @@ interface IncidentsManagementViewProps {
   onOpenNewModal: () => void;
   onApproveIncident: (incidentId: string, notes?: string) => void;
   onRejectIncident: (incidentId: string, notes?: string) => void;
+  onOpenAssignSchedules?: () => void;
 }
 
 export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = ({
@@ -33,6 +34,7 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
   onOpenNewModal,
   onApproveIncident,
   onRejectIncident,
+  onOpenAssignSchedules,
 }) => {
   const isRHOrAdmin = currentUser.role === 'rh' || currentUser.role === 'admin';
   const [statusFilter, setStatusFilter] = useState<string>('todos');
@@ -42,6 +44,10 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
     if (isRHOrAdmin) return true;
     return inc.solicitanteId === currentUser.id;
   });
+
+  const pendingScheduleChangeRequests = userFiltered.filter(
+    (inc) => inc.tipo === 'Cambio de horario' && inc.status === 'pendiente'
+  );
 
   const displayList = userFiltered.filter((inc) => {
     if (statusFilter !== 'todos' && inc.status !== statusFilter) return false;
@@ -60,9 +66,21 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
     return true;
   });
 
-  const getStatusBadge = (status: IncidentStatus) => {
+  const getStatusBadge = (inc: IncidentRequest) => {
+    const status: IncidentStatus = inc.status;
     switch (status) {
       case 'aprobada':
+        if (
+          inc.autoAprobadaPorSupervisor ||
+          inc.tipo === 'Permiso sin goce' ||
+          (inc.revisadoPor && inc.revisadoPor.toLowerCase().includes('supervisor'))
+        ) {
+          return (
+            <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/35">
+              <CheckCircle2 className="w-3 h-3" /> Aprobada por Supervisor (Sin validación RH)
+            </span>
+          );
+        }
         return (
           <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/35">
             <CheckCircle2 className="w-3 h-3" /> Aprobada por RH
@@ -78,7 +96,7 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
       default:
         return (
           <span className="flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-[#FEB95A]/15 text-[#FEB95A] border border-[#FEB95A]/35">
-            <Clock className="w-3 h-3" /> Pendiente de Revisión
+            <Clock className="w-3 h-3" /> Pendiente de Validación RH
           </span>
         );
     }
@@ -90,6 +108,88 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
 
   return (
     <div className="space-y-6 animate-fade-up">
+      {/* Alerta Destacada para RH cuando un Supervisor solicitó un Cambio de Horario */}
+      {isRHOrAdmin && pendingScheduleChangeRequests.length > 0 && (
+        <div className="rounded-2xl p-4 sm:p-5 bg-sky-950/40 border border-sky-500/40 shadow-lg space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300 shrink-0 mt-0.5">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-extrabold text-white">
+                  🔔 Alerta RH: El supervisor solicitó un cambio de horario — Hay que aplicarlo en el sistema ({pendingScheduleChangeRequests.length})
+                </h3>
+                <p className="text-xs text-sky-200/80 mt-0.5">
+                  Revisa las solicitudes de cambio de turno abajo, aplícalas en el módulo de Asignar Turno y aprueba la solicitud para actualizar la nómina.
+                </p>
+              </div>
+            </div>
+            {onOpenAssignSchedules && (
+              <button
+                type="button"
+                onClick={onOpenAssignSchedules}
+                className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-extrabold transition-colors cursor-pointer shrink-0 self-start sm:self-center"
+              >
+                Abrir Asignación de Turnos en Sistema
+              </button>
+            )}
+          </div>
+          <div className="space-y-1.5 pt-1">
+            {pendingScheduleChangeRequests.map((req) => (
+              <div
+                key={req.id}
+                className="px-3.5 py-2.5 rounded-xl bg-[#171821]/90 border border-sky-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+              >
+                <div className="text-slate-200">
+                  <span className="font-bold text-sky-300">
+                    Supervisor {req.solicitanteNombre}
+                  </span>{' '}
+                  solicitó cambio de horario para{' '}
+                  <strong className="text-white">
+                    #{req.empleadoId} {req.empleadoNombre}
+                  </strong>{' '}
+                  · Vigencia:{' '}
+                  <span className="font-mono font-bold text-amber-300">
+                    {req.esIndefinido || req.fechaFin === 'INDEFINIDO'
+                      ? `Indefinido / Permanente (desde ${req.fechaInicio})`
+                      : `${req.fechaInicio} al ${req.fechaFin}`}
+                  </span>
+                  {req.horarioSolicitado ? (
+                    <span className="ml-2 px-2 py-0.5 rounded bg-sky-500/20 text-sky-200 font-mono font-bold text-[11px]">
+                      Turno: {req.horarioSolicitado}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {onOpenAssignSchedules && (
+                    <button
+                      type="button"
+                      onClick={onOpenAssignSchedules}
+                      className="px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-400/30 text-[11px] font-bold cursor-pointer"
+                    >
+                      Aplicar en Sistema
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onApproveIncident(
+                        req.id,
+                        'Cambio de horario aplicado en el sistema y validado por RH'
+                      )
+                    }
+                    className="px-2.5 py-1 rounded-lg bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] text-[11px] font-extrabold cursor-pointer"
+                  >
+                    Marcar Aplicado y Aprobar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Encabezado Principal y Resumen Bento (#21222D / #171821 / #A9DFD8) */}
       <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -263,13 +363,23 @@ export const IncidentsManagementView: React.FC<IncidentsManagementViewProps> = (
                       Checada Supervisor: {inc.entradaPropuesta} - {inc.salidaPropuesta}
                     </span>
                   )}
-                  {getStatusBadge(inc.status)}
+                  {inc.tipo === 'Cambio de horario' && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-sky-500/15 text-sky-300 border border-sky-500/35 font-mono">
+                      {inc.esIndefinido || inc.fechaFin === 'INDEFINIDO'
+                        ? 'Vigencia: Indefinido / Permanente'
+                        : 'Cambio Temporal'}
+                      {inc.horarioSolicitado ? ` · ${inc.horarioSolicitado}` : ''}
+                    </span>
+                  )}
+                  {getStatusBadge(inc)}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 text-[11px] text-[#87888C]">
                   <span className="flex items-center gap-1 font-mono text-[#E8E8EA]">
                     <Calendar className="w-3.5 h-3.5 text-[#FEB95A]" />
-                    {inc.fechaInicio} al {inc.fechaFin}
+                    {inc.esIndefinido || inc.fechaFin === 'INDEFINIDO'
+                      ? `Desde ${inc.fechaInicio} (Indefinido)`
+                      : `${inc.fechaInicio} al ${inc.fechaFin}`}
                   </span>
                   <span>·</span>
                   <span>

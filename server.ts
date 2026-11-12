@@ -21,6 +21,8 @@ interface ServerEmailConfig {
   smtpPass?: string;
   smtpSecure?: boolean;
   smtpFromName?: string;
+  portalUrl?: string;
+  textoBotonCorreo?: string;
   asuntoDispersion?: string;
   mensajeDispersion?: string;
   activarAlertaPorVencer?: boolean;
@@ -35,6 +37,19 @@ function renderServerEmailTemplate(template: string, vars: Record<string, string
     out = out.replace(new RegExp(`\\{${k}\\}`, 'gi'), v ?? '');
   });
   return out;
+}
+
+function buildSupervisorPortalLink(
+  baseUrl: string | undefined,
+  semanaNumero: string | number,
+  supervisorName: string
+): string {
+  const fallbackOrigin = process.env.APP_URL || `http://localhost:${PORT}`;
+  const rawBase = String(baseUrl || fallbackOrigin).trim().replace(/\/+$/, '');
+  const cleanBase = /^https?:\/\//i.test(rawBase) ? rawBase : `https://${rawBase}`;
+  return `${cleanBase}/?action=liberar_nomina&semana=${encodeURIComponent(
+    String(semanaNumero || '')
+  )}&supervisor=${encodeURIComponent(String(supervisorName || ''))}`;
 }
 
 interface ServerPortalDatabase {
@@ -100,7 +115,8 @@ function resolveEmailConfig(override?: Partial<ServerEmailConfig>): ServerEmailC
   const fromConfig = (db.config?.emailServer as ServerEmailConfig | undefined) || {};
   const fromRoot = db.emailConfig || {};
   return {
-    asuntoDispersion: '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+    textoBotonCorreo: 'Ir al Sistema a Revisar y Liberar Nómina',
+    asuntoDispersion: '[CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}',
     mensajeDispersion:
       'Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una nómina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).',
     activarAlertaPorVencer: true,
@@ -182,6 +198,8 @@ async function checkAndSendExpiringReminders(options?: {
       };
     }
     const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8000);
+    const actionUrl = buildSupervisorPortalLink(emailCfg.portalUrl, '43', 'OSCAR VALENZUELA');
+    const buttonLabel = (emailCfg.textoBotonCorreo || '').trim() || 'Ir al Sistema a Revisar y Liberar Nómina';
     const sampleVars = {
       supervisor: 'OSCAR VALENZUELA',
       nombre: 'Óscar Valenzuela (Supervisor)',
@@ -197,6 +215,7 @@ async function checkAndSendExpiringReminders(options?: {
       }),
       horas_limite: '24',
       tiempo_restante: `${horasUmbral} hora(s)`,
+      url_portal: actionUrl,
     };
     const subject = renderServerEmailTemplate(
       emailCfg.asuntoPorVencer ||
@@ -210,14 +229,14 @@ async function checkAndSendExpiringReminders(options?: {
     );
 
     await transporter.sendMail({
-      from: `"${emailCfg.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
+      from: `"${emailCfg.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
       to: cleanUser,
       subject: `[PRUEBA] ${subject}`,
-      text: bodyText,
+      text: `${bodyText}\n\n👉 ${buttonLabel}:\n${actionUrl}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #fecaca; border-radius: 14px; overflow: hidden;">
           <div style="background: #7f1d1d; padding: 18px 24px; color: #ffffff;">
-            <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO · Alerta Automática por Vencimiento</div>
+            <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">CemenQtime · Alerta Automática por Vencimiento</div>
             <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">⏳ Tiempo Límite a Punto de Finalizar</h2>
           </div>
           <div style="padding: 24px;">
@@ -225,6 +244,15 @@ async function checkAndSendExpiringReminders(options?: {
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 16px; margin-top: 18px;">
               <div style="color: #b91c1c; font-weight: bold; font-size: 12px; text-transform: uppercase;">Tiempo Restante Estimado: ${sampleVars.tiempo_restante}</div>
               <div style="color: #0f172a; font-size: 13px; font-weight: bold; margin-top: 4px;">Vence el: ${sampleVars.fecha_limite}</div>
+            </div>
+            <div style="text-align: center; margin: 24px 0 12px 0;">
+              <a href="${actionUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #b91c1c; color: #ffffff; font-weight: bold; font-size: 14px; text-decoration: none; padding: 14px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(185, 28, 28, 0.25);">
+                ${buttonLabel} &rarr;
+              </a>
+              <div style="margin-top: 10px; font-size: 11px; color: #64748b;">
+                ¿No puedes ver el botón? Haz clic o copia este enlace:<br/>
+                <a href="${actionUrl}" style="color: #b91c1c; word-break: break-all;">${actionUrl}</a>
+              </div>
             </div>
           </div>
         </div>
@@ -302,6 +330,9 @@ async function checkAndSendExpiringReminders(options?: {
         matchedUser?.email || `${supName.toLowerCase().replace(/\s+/g, '.')}@empresa.com`;
       const recipientName = matchedUser?.name || supName;
 
+      const actionUrl = buildSupervisorPortalLink(emailCfg.portalUrl, disp.semanaNumero, supName);
+      const buttonLabel = (emailCfg.textoBotonCorreo || '').trim() || 'Ir al Sistema a Revisar y Liberar Nómina';
+
       const vars = {
         supervisor: supName,
         nombre: recipientName,
@@ -311,6 +342,7 @@ async function checkAndSendExpiringReminders(options?: {
         fecha_limite: limiteFormatted,
         horas_limite: String(disp.horasLimite || 24),
         tiempo_restante: tiempoRestanteStr,
+        url_portal: actionUrl,
       };
 
       const subject = renderServerEmailTemplate(
@@ -346,14 +378,14 @@ async function checkAndSendExpiringReminders(options?: {
         try {
           const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8000);
           await transporter.sendMail({
-            from: `"${emailCfg.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
+            from: `"${emailCfg.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
             to: recipientEmail,
             subject,
-            text: bodyText,
+            text: `${bodyText}\n\n👉 ${buttonLabel}:\n${actionUrl}`,
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #fecaca; border-radius: 14px; overflow: hidden;">
                 <div style="background: #7f1d1d; padding: 18px 24px; color: #ffffff;">
-                  <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO · Alerta Automática por Vencimiento</div>
+                  <div style="color: #fca5a5; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">CemenQtime · Alerta Automática por Vencimiento</div>
                   <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">⏳ Tiempo Límite a Punto de Finalizar</h2>
                   <div style="color: #fecaca; font-size: 12px; margin-top: 4px;">Semana ${disp.semanaNumero} · Lista: ${supName}</div>
                 </div>
@@ -362,6 +394,15 @@ async function checkAndSendExpiringReminders(options?: {
                   <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 14px 16px; margin-top: 18px;">
                     <div style="color: #b91c1c; font-weight: bold; font-size: 12px; text-transform: uppercase;">⏳ Tiempo Restante: ${tiempoRestanteStr}</div>
                     <div style="color: #0f172a; font-size: 13px; font-weight: bold; margin-top: 4px;">Fecha y Hora Límite: ${limiteFormatted}</div>
+                  </div>
+                  <div style="text-align: center; margin: 24px 0 12px 0;">
+                    <a href="${actionUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #b91c1c; color: #ffffff; font-weight: bold; font-size: 14px; text-decoration: none; padding: 14px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(185, 28, 28, 0.25);">
+                      ${buttonLabel} &rarr;
+                    </a>
+                    <div style="margin-top: 10px; font-size: 11px; color: #64748b;">
+                      ¿No puedes ver el botón? Haz clic o copia este enlace:<br/>
+                      <a href="${actionUrl}" style="color: #b91c1c; word-break: break-all;">${actionUrl}</a>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -407,7 +448,7 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     res.json({
       status: 'ok',
-      service: 'AttendancePRO v10 — Servidor RH, Nóminas y CONTPAQi',
+      service: 'CemenQtime — Servidor RH, Nóminas y CONTPAQi',
       hostname: os.hostname(),
       uptime: Math.round(process.uptime()),
       storagePath: DB_FILE,
@@ -485,14 +526,14 @@ async function startServer() {
 
       // Enviar correo de prueba al mismo remitente
       const info = await transporter.sendMail({
-        from: `"${activeEmailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
+        from: `"${activeEmailConfig.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
         to: cleanUser,
-        subject: '✓ [AttendancePRO] Prueba de Conexión Exitosa',
+        subject: '✓ [CemenQtime] Prueba de Conexión Exitosa',
         text: `Hola,\n\nEste es un mensaje de prueba para verificar que el servidor de correo está correctamente conectado y listo para enviar alertas automáticas de nómina.\n\nServidor: ${host}:${port}\nUsuario: ${cleanUser}\nFecha: ${new Date().toLocaleString()}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
             <div style="background: #0f172a; padding: 12px 18px; border-radius: 8px; color: #a9dfd8; font-weight: bold; font-size: 14px; margin-bottom: 16px;">
-              AttendancePRO · Validación SMTP
+              CemenQtime · Validación SMTP
             </div>
             <h2 style="color: #0f172a; margin-top: 0; font-size: 18px;">✓ Conexión de Correo Exitosa</h2>
             <p style="color: #475569; font-size: 13px; line-height: 1.5;">
@@ -549,6 +590,7 @@ async function startServer() {
         semanaPeriodo,
         dispersadoPor,
         emailConfig,
+        portalUrl,
         limiteLiberacion,
         horasLimite,
         mensaje,
@@ -557,8 +599,20 @@ async function startServer() {
       let smtpSuccessCount = 0;
       const deliveryResults: Array<{ email: string; ok: boolean; info?: string }> = [];
 
+      const requestOrigin =
+        portalUrl ||
+        emailConfig?.portalUrl ||
+        (req.headers.origin ? String(req.headers.origin) : `${req.protocol}://${req.get('host')}`);
+
       // Inicializar transporte usando el estado emailConfig del proyecto (combinado con lo enviado en la petición)
-      const resolvedEmailConfig = resolveEmailConfig(emailConfig);
+      const resolvedEmailConfig = resolveEmailConfig({
+        ...(emailConfig || {}),
+        ...(requestOrigin && !emailConfig?.portalUrl ? { portalUrl: requestOrigin } : {}),
+      });
+      const buttonLabel =
+        (resolvedEmailConfig.textoBotonCorreo || '').trim() ||
+        'Ir al Sistema a Revisar y Liberar Nómina';
+
       if (resolvedEmailConfig.smtpUser && resolvedEmailConfig.smtpPass && Array.isArray(dispatches)) {
         try {
           const { transporter, cleanUser } = createSmtpTransporter(resolvedEmailConfig, 10000);
@@ -578,6 +632,12 @@ async function startServer() {
                 ? `${horasLimite} horas posteriores a este aviso`
                 : 'A la brevedad posible';
 
+              const actionUrl = buildSupervisorPortalLink(
+                resolvedEmailConfig.portalUrl || requestOrigin,
+                semanaNumero,
+                String(d.supervisorName || '')
+              );
+
               const templateVars = {
                 supervisor: String(d.supervisorName || ''),
                 nombre: String(d.recipientName || d.supervisorName || ''),
@@ -587,34 +647,36 @@ async function startServer() {
                 fecha_limite: limiteText,
                 horas_limite: String(horasLimite || 24),
                 tiempo_restante: `${horasLimite || 24} horas`,
+                url_portal: actionUrl,
               };
 
               const renderedSubject =
                 d.subject ||
                 renderServerEmailTemplate(
                   resolvedEmailConfig.asuntoDispersion ||
-                    '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+                    '[CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}',
                   templateVars
                 );
 
               const renderedBodyText = renderServerEmailTemplate(
                 resolvedEmailConfig.mensajeDispersion ||
-                  `Hola {nombre},\n\nEl área de Nóminas ({dispersado_por}) ha dispersado tu lista de asistencia para la Semana {semana} ({periodo}).\n\nTIEMPO LÍMITE DE LIBERACIÓN: {fecha_limite}\n\nPor favor ingresa al portal AttendancePRO para revisar tu equipo y liberar tu nómina dentro del plazo establecido.`,
+                  `Hola {nombre},\n\nEl área de Nóminas ({dispersado_por}) ha dispersado tu lista de asistencia para la Semana {semana} ({periodo}).\n\nTIEMPO LÍMITE DE LIBERACIÓN: {fecha_limite}\n\nPor favor ingresa al portal CemenQtime para revisar tu equipo y liberar tu nómina dentro del plazo establecido.`,
                 templateVars
               );
 
               await transporter.sendMail({
-                from: `"${resolvedEmailConfig.smtpFromName || 'AttendancePRO Nóminas'}" <${cleanUser}>`,
+                from: `"${resolvedEmailConfig.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
                 to: d.recipientEmail,
                 subject: renderedSubject,
                 text:
                   renderedBodyText +
                   (mensaje ? `\n\nNota adicional: ${mensaje}` : '') +
+                  `\n\n👉 ${buttonLabel}:\n${actionUrl}` +
                   `\n\nAtentamente,\nRecursos Humanos / Nóminas`,
                 html: `
                   <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
                     <div style="background: #171821; padding: 18px 24px; color: #ffffff;">
-                      <div style="color: #a9dfd8; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">AttendancePRO · Notificación de Nómina</div>
+                      <div style="color: #a9dfd8; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">CemenQtime · Notificación de Nómina</div>
                       <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">Nómina Semana ${semanaNumero} Dispersada</h2>
                       <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Período: ${templateVars.periodo} · Lista: ${d.supervisorName}</div>
                     </div>
@@ -632,7 +694,16 @@ async function startServer() {
                             </div>`
                           : ''
                       }
-                      <p style="color: #64748b; font-size: 12px; line-height: 1.4;">
+                      <div style="text-align: center; margin: 24px 0 20px 0;">
+                        <a href="${actionUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #0f172a; color: #ffffff; font-weight: bold; font-size: 14px; text-decoration: none; padding: 14px 28px; border-radius: 10px; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);">
+                          ${buttonLabel} &rarr;
+                        </a>
+                        <div style="margin-top: 10px; font-size: 11px; color: #64748b;">
+                          ¿No puedes hacer clic en el botón? Abre directamente este enlace:<br/>
+                          <a href="${actionUrl}" style="color: #0284c7; word-break: break-all;">${actionUrl}</a>
+                        </div>
+                      </div>
+                      <p style="color: #64748b; font-size: 12px; line-height: 1.4; margin-bottom: 0;">
                         Ingresa a tu cuenta de supervisor en el sistema para autorizar tiempos extras, agregar formatos de checada sin gafete y liberar la lista a tiempo.
                       </p>
                     </div>
@@ -731,6 +802,109 @@ async function startServer() {
     }
   });
 
+  // Endpoint para recuperación de contraseña por correo electrónico
+  app.post('/api/auth/recover-password', async (req, res) => {
+    try {
+      const { identifier, users: clientUsers } = req.body || {};
+      const cleanId = String(identifier || '').trim().toLowerCase();
+      if (!cleanId) {
+        return res.status(200).json({
+          ok: false,
+          error: 'Por favor ingresa tu correo electrónico, usuario o número de empleado.',
+        });
+      }
+
+      const db = readDatabase();
+      const allUsers =
+        Array.isArray(clientUsers) && clientUsers.length > 0
+          ? clientUsers
+          : Array.isArray(db.users)
+          ? db.users
+          : [];
+
+      const cleanIdNumeric = cleanId.replace(/^0+/, '');
+      const matchedUser: any = allUsers.find((u: any) => {
+        if (!u || u.active === false) return false;
+        const emailMatch = String(u.email || '').trim().toLowerCase() === cleanId;
+        const usernameMatch = String(u.username || '').trim().toLowerCase() === cleanId;
+        const empIdRaw = String(u.employeeId || '').trim().toLowerCase();
+        const empIdMatch =
+          Boolean(empIdRaw) &&
+          (empIdRaw === cleanId || (Boolean(cleanIdNumeric) && empIdRaw.replace(/^0+/, '') === cleanIdNumeric));
+        return emailMatch || usernameMatch || empIdMatch;
+      });
+
+      if (!matchedUser) {
+        return res.status(200).json({
+          ok: false,
+          error: 'No se encontró ningún usuario activo con ese correo, usuario o número de empleado.',
+        });
+      }
+
+      const targetEmail = String(matchedUser.email || '').trim();
+      const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+      const emailCfg = resolveEmailConfig();
+
+      let emailSent = false;
+      let smtpErrorMsg = '';
+
+      if (emailCfg.smtpUser && emailCfg.smtpPass && targetEmail.includes('@')) {
+        try {
+          const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8000);
+          await transporter.sendMail({
+            from: `"${emailCfg.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
+            to: targetEmail,
+            subject: `🔐 [CemenQtime] Código de Recuperación de Contraseña — ${matchedUser.name}`,
+            text: `Hola ${matchedUser.name},\n\nRecibimos una solicitud para recuperar tu contraseña de acceso al portal CemenQtime.\n\nCódigo de verificación: ${verificationCode}\nUsuario: ${matchedUser.username || matchedUser.email}\n${matchedUser.employeeId ? `No. de Empleado: #${matchedUser.employeeId}\n` : ''}\nIngresa este código de 6 dígitos en la pantalla de recuperación del sistema para establecer tu nueva contraseña.\n\nAtentamente,\nCemenQtime · Recursos Humanos y Nóminas`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
+                <div style="background: #171821; padding: 18px 24px; color: #ffffff;">
+                  <div style="color: #a9dfd8; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">CemenQtime · Seguridad de Cuenta</div>
+                  <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">🔐 Recuperación de Contraseña</h2>
+                </div>
+                <div style="padding: 24px; color: #334155; font-size: 14px; line-height: 1.6;">
+                  <p style="margin-top: 0;">Hola <strong>${matchedUser.name}</strong>,</p>
+                  <p>Recibimos una solicitud para restablecer tu contraseña de acceso al sistema <strong>CemenQtime</strong>. Utiliza el siguiente código de verificación de 6 dígitos:</p>
+                  <div style="background: #f8fafc; border: 2px dashed #0f172a; border-radius: 12px; padding: 16px; text-align: center; margin: 20px 0;">
+                    <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Código de Verificación</div>
+                    <div style="font-size: 28px; font-family: monospace; font-weight: 900; letter-spacing: 6px; color: #0f172a; margin-top: 6px;">${verificationCode}</div>
+                  </div>
+                  <div style="background: #f1f5f9; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #475569;">
+                    <strong>Datos de tu cuenta:</strong><br/>
+                    Usuario: <strong>${matchedUser.username || matchedUser.email}</strong><br/>
+                    Correo registrado: <strong>${targetEmail}</strong>
+                    ${matchedUser.employeeId ? `<br/>No. de Empleado: <strong>#${matchedUser.employeeId}</strong>` : ''}
+                  </div>
+                  <p style="font-size: 12px; color: #64748b; margin-top: 18px; margin-bottom: 0;">
+                    Si tú no solicitaste este cambio, puedes ignorar este mensaje.
+                  </p>
+                </div>
+              </div>
+            `,
+          });
+          emailSent = true;
+        } catch (err: any) {
+          smtpErrorMsg = String(err?.message || '');
+        }
+      }
+
+      return res.status(200).json({
+        ok: true,
+        emailSent,
+        userId: matchedUser.id,
+        userName: matchedUser.name,
+        userEmail: targetEmail,
+        verificationCode,
+        smtpErrorMsg: smtpErrorMsg || undefined,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        ok: false,
+        error: err?.message || 'Error al procesar la solicitud de recuperación.',
+      });
+    }
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -746,7 +920,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✓ AttendancePRO v10 Server corriendo en http://0.0.0.0:${PORT}`);
+    console.log(`✓ CemenQtime Server corriendo en http://0.0.0.0:${PORT}`);
   });
 }
 

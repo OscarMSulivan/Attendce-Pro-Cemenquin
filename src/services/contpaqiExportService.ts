@@ -559,7 +559,7 @@ export async function exportContpaqiExcel(
   );
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'AttendancePRO — Módulo CONTPAQi Nóminas';
+  workbook.creator = 'CemenQtime — Módulo CONTPAQi Nóminas';
   workbook.created = new Date();
 
   const wsFormat = workbook.addWorksheet('Incidencias_CONTPAQi', {

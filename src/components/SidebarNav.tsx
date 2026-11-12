@@ -157,6 +157,12 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     },
   ].filter(item => item.show);
 
+  const canAccessBackupAndPortable =
+    !currentUser ||
+    currentUser.role === 'admin' ||
+    checkAccess('usuarios') ||
+    hasAdminPanelAccess;
+
   const toolItems = [
     {
       id: 'horarios',
@@ -196,7 +202,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       icon: Settings,
       onClick: () => handleAction(onOpenSettings),
       disabled: false,
-      show: true,
+      show: hasAdminPanelAccess,
     },
   ].filter(item => item.show);
 
@@ -215,7 +221,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 leading-none">
                   <span className="text-sm font-extrabold tracking-tight text-white truncate">
-                    Attendance<span className="text-[#A9DFD8]">PRO</span>
+                    Cemen<span className="text-[#A9DFD8]">Qtime</span>
                   </span>
                 </div>
                 <span className="text-[10px] font-medium text-[#87888C] block mt-1 truncate">
@@ -299,83 +305,85 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             })}
           </div>
 
-          {/* Herramientas y Catálogos */}
-          <div className="space-y-1.5 pt-3 border-t border-white/[0.06]">
-            {!isCompact && (
-              <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-[#87888C]/80 mb-2">
-                Herramientas
-              </p>
-            )}
-            {toolItems.map(item => {
-              const Icon = item.icon;
-              return (
+          {/* Herramientas y Catálogos (Oculto para supervisores sin accesos de configuración/administración) */}
+          {(toolItems.length > 0 || canAccessBackupAndPortable) && (
+            <div className="space-y-1.5 pt-3 border-t border-white/[0.06]">
+              {!isCompact && (
+                <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-[#87888C]/80 mb-2">
+                  Herramientas
+                </p>
+              )}
+              {toolItems.map(item => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={item.onClick}
+                    disabled={item.disabled}
+                    title={isCompact ? item.label : undefined}
+                    className={`w-full flex items-center ${
+                      isCompact ? 'justify-center px-2' : 'gap-3 px-3.5'
+                    } py-2.5 rounded-xl text-xs font-medium text-[#87888C] hover:text-white hover:bg-[#21222D] transition-all cursor-pointer disabled:opacity-35 disabled:pointer-events-none`}
+                  >
+                    <Icon className="w-4 h-4 shrink-0 text-[#87888C]" />
+                    {!isCompact && <span className="truncate">{item.label}</span>}
+                  </button>
+                );
+              })}
+
+              {canAccessBackupAndPortable && !isLocalFile && (
                 <button
-                  key={item.id}
                   type="button"
-                  onClick={item.onClick}
-                  disabled={item.disabled}
-                  title={isCompact ? item.label : undefined}
+                  onClick={() => handleAction(onDownloadPortable)}
+                  title="Descargar versión HTML Portable"
                   className={`w-full flex items-center ${
                     isCompact ? 'justify-center px-2' : 'gap-3 px-3.5'
-                  } py-2.5 rounded-xl text-xs font-medium text-[#87888C] hover:text-white hover:bg-[#21222D] transition-all cursor-pointer disabled:opacity-35 disabled:pointer-events-none`}
+                  } py-2.5 rounded-xl text-xs font-medium text-[#A9DFD8] hover:bg-[#A9DFD8]/10 transition-all cursor-pointer`}
                 >
-                  <Icon className="w-4 h-4 shrink-0 text-[#87888C]" />
-                  {!isCompact && <span className="truncate">{item.label}</span>}
+                  <Laptop className="w-4 h-4 shrink-0 text-[#A9DFD8]" />
+                  {!isCompact && <span className="truncate">HTML Portable</span>}
                 </button>
-              );
-            })}
+              )}
 
-            {!isLocalFile && (
-              <button
-                type="button"
-                onClick={() => handleAction(onDownloadPortable)}
-                title="Descargar versión HTML Portable"
-                className={`w-full flex items-center ${
-                  isCompact ? 'justify-center px-2' : 'gap-3 px-3.5'
-                } py-2.5 rounded-xl text-xs font-medium text-[#A9DFD8] hover:bg-[#A9DFD8]/10 transition-all cursor-pointer`}
-              >
-                <Laptop className="w-4 h-4 shrink-0 text-[#A9DFD8]" />
-                {!isCompact && <span className="truncate">HTML Portable</span>}
-              </button>
-            )}
-
-            {!isCompact && (
-              <div className="grid grid-cols-2 gap-1.5 pt-2 px-1">
-                <button
-                  type="button"
-                  onClick={() => handleAction(onExportBackup)}
-                  className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
-                  title="Exportar respaldo JSON"
-                >
-                  <Download className="w-3 h-3" />
-                  <span>Respaldo</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
-                  title="Importar respaldo JSON"
-                >
-                  <Upload className="w-3 h-3" />
-                  <span>Restaurar</span>
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json"
-                  className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      onImportBackup(file);
-                      e.target.value = '';
-                      if (onCloseMobile) onCloseMobile();
-                    }
-                  }}
-                />
-              </div>
-            )}
-          </div>
+              {canAccessBackupAndPortable && !isCompact && (
+                <div className="grid grid-cols-2 gap-1.5 pt-2 px-1">
+                  <button
+                    type="button"
+                    onClick={() => handleAction(onExportBackup)}
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                    title="Exportar respaldo JSON"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Respaldo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                    title="Importar respaldo JSON"
+                  >
+                    <Upload className="w-3 h-3" />
+                    <span>Restaurar</span>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        onImportBackup(file);
+                        e.target.value = '';
+                        if (onCloseMobile) onCloseMobile();
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer Signout */}

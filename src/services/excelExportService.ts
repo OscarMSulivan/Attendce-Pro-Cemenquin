@@ -142,7 +142,7 @@ export async function exportPayrollExcelBySupervisor(
       : 'Todos';
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'AttendancePRO';
+  workbook.creator = 'CemenQtime';
   workbook.created = new Date();
 
   // ============================================================================

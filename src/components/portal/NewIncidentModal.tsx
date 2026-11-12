@@ -20,6 +20,7 @@ import {
   IncidentType,
   PortalUser,
   doesIncidentRequireMandatoryFile,
+  doesIncidentSkipRHValidation,
 } from '../../types/portal';
 import { EmpleadoProcesado } from '../../types/attendance';
 
@@ -61,6 +62,8 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
   const [fechaFin, setFechaFin] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
+  const [esIndefinido, setEsIndefinido] = useState<boolean>(false);
+  const [horarioSolicitado, setHorarioSolicitado] = useState<string>('');
   const [entradaPropuesta, setEntradaPropuesta] = useState<string>('08:00');
   const [salidaPropuesta, setSalidaPropuesta] = useState<string>('17:00');
   const [motivo, setMotivo] = useState<string>('');
@@ -95,6 +98,12 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
 
   // Regla de obligatoriedad de archivo según tipo de solicitud
   const isFileMandatory = doesIncidentRequireMandatoryFile(
+    tipo,
+    punchStatusForSelectedDate.missingBothPunches
+  );
+
+  // Determinar si la incidencia queda aprobada directamente por el supervisor sin requerir validación de RH
+  const skipsRHValidation = doesIncidentSkipRHValidation(
     tipo,
     punchStatusForSelectedDate.missingBothPunches
   );
@@ -194,7 +203,16 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
     <tr><th>Nombre del Colaborador</th><td><strong>${empNombre}</strong></td></tr>
     <tr><th>Supervisor que Autoriza</th><td>${supNombre}</td></tr>
     <tr><th>Tipo de Solicitud</th><td><strong>${conceptoMostrado}</strong></td></tr>
-    <tr><th>Periodo Solicitado</th><td>Del <strong>${fechaInicio}</strong> al <strong>${tipo === 'Checado sin Gafete' ? fechaInicio : fechaFin}</strong></td></tr>
+    <tr><th>Periodo Solicitado</th><td>${
+      tipo === 'Cambio de horario' && esIndefinido
+        ? `A partir del <strong>${fechaInicio}</strong> (<strong>INDEFINIDO / PERMANENTE</strong>)`
+        : `Del <strong>${fechaInicio}</strong> al <strong>${tipo === 'Checado sin Gafete' ? fechaInicio : fechaFin}</strong>`
+    }</td></tr>
+    ${
+      tipo === 'Cambio de horario' && horarioSolicitado.trim()
+        ? `<tr><th>Nuevo Horario / Turno Solicitado</th><td><strong>${horarioSolicitado.trim()}</strong></td></tr>`
+        : ''
+    }
     ${
       tipo === 'Checado sin Gafete'
         ? `<tr><th>Horas Validada por Supervisor</th><td><strong>Entrada: ${entradaPropuesta} | Salida: ${salidaPropuesta}</strong></td></tr>`
@@ -268,7 +286,13 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
     const finalMotivo =
       tipo === 'Otro' && especificacionOtro.trim()
         ? `[${especificacionOtro.trim()}] ${motivo.trim()}`
+        : tipo === 'Cambio de horario' && horarioSolicitado.trim()
+        ? `[Nuevo horario solicitado: ${horarioSolicitado.trim()} · Vigencia: ${
+            esIndefinido ? `Indefinido desde ${fechaInicio}` : `${fechaInicio} al ${fechaFin}`
+          }] ${motivo.trim()}`
         : motivo.trim();
+
+    const nowISO = new Date().toISOString();
 
     const newIncident: IncidentRequest = {
       id: `inc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -282,10 +306,32 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
       tipo,
       especificacionOtro: tipo === 'Otro' ? especificacionOtro.trim() : undefined,
       fechaInicio,
-      fechaFin: tipo === 'Checado sin Gafete' ? fechaInicio : (fechaFin < fechaInicio ? fechaInicio : fechaFin),
+      fechaFin:
+        tipo === 'Checado sin Gafete'
+          ? fechaInicio
+          : tipo === 'Cambio de horario' && esIndefinido
+          ? 'INDEFINIDO'
+          : fechaFin < fechaInicio
+          ? fechaInicio
+          : fechaFin,
+      esIndefinido: tipo === 'Cambio de horario' ? esIndefinido : undefined,
+      horarioSolicitado:
+        tipo === 'Cambio de horario' && horarioSolicitado.trim()
+          ? horarioSolicitado.trim()
+          : undefined,
+      autoAprobadaPorSupervisor: skipsRHValidation,
       motivo: finalMotivo,
-      status: 'pendiente',
-      fechaCreacion: new Date().toISOString(),
+      status: skipsRHValidation ? 'aprobada' : 'pendiente',
+      fechaCreacion: nowISO,
+      revisadoPor: skipsRHValidation
+        ? `${currentUser.name} (Aprobación Directa Supervisor — No requiere validación RH)`
+        : undefined,
+      fechaRevision: skipsRHValidation ? nowISO : undefined,
+      notasResolucion: skipsRHValidation
+        ? tipo === 'Permiso sin goce'
+          ? 'Permiso sin goce aprobado directamente por el supervisor (no requiere validación de RH).'
+          : 'Checada sin gafete (solo faltaba 1 asistencia) aprobada directamente por el supervisor (no requiere validación de RH).'
+        : undefined,
       entradaPropuesta: tipo === 'Checado sin Gafete' ? entradaPropuesta : undefined,
       salidaPropuesta: tipo === 'Checado sin Gafete' ? salidaPropuesta : undefined,
       archivoFormatoNombre: uploadedFile?.nombre,
@@ -461,11 +507,92 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
             </div>
           )}
 
+          {/* Aviso de Regla de Aprobación Directa por Supervisor vs Validación RH */}
+          {skipsRHValidation ? (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/35 text-emerald-300 text-[11px] flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block text-emerald-200">
+                  ✓ Aprobación Directa del Supervisor (No requiere validación de RH)
+                </span>
+                <span>
+                  {tipo === 'Permiso sin goce'
+                    ? 'Los Permisos sin goce aprobados por el supervisor quedan aplicados de inmediato sin requerir autorización adicional de RH.'
+                    : 'Al faltar únicamente 1 checada en el día seleccionado, esta Checada sin Gafete queda aprobada directamente por el supervisor sin requerir validación de RH.'}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[11px] flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                Este formato requiere revisión y autorización por parte de <strong>RH / Nóminas</strong>.
+              </span>
+            </div>
+          )}
+
+          {/* Opciones adicionales cuando es Cambio de Horario (Vigencia con Fecha Fin o Indefinido + Nuevo Horario) */}
+          {tipo === 'Cambio de horario' && (
+            <div className="p-3.5 rounded-xl bg-sky-950/25 border border-sky-500/35 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-sky-300 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Vigencia del Cambio de Horario:</span>
+                </label>
+                <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setEsIndefinido(false)}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
+                      !esIndefinido
+                        ? 'bg-sky-600 text-white'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Con Fecha Inicio y Fin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEsIndefinido(true)}
+                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition-colors cursor-pointer ${
+                      esIndefinido
+                        ? 'bg-sky-600 text-white'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Indefinido / Permanente
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                  Nuevo Horario o Turno Solicitado
+                </label>
+                <input
+                  type="text"
+                  value={horarioSolicitado}
+                  onChange={e => setHorarioSolicitado(e.target.value)}
+                  placeholder="Ej: Turno Matutino 07:00 a 15:00, Horario ADMO 08:00 a 17:30..."
+                  className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-sky-500/40 text-slate-100 text-xs font-semibold outline-none focus:border-sky-400"
+                />
+              </div>
+
+              <p className="text-[10px] text-sky-300/90 leading-relaxed">
+                🔔 Al enviar esta solicitud, llegará una alerta automática al módulo de <strong>RH / Nóminas</strong> indicando que el supervisor solicitó un cambio de horario para aplicarlo en el sistema.
+              </p>
+            </div>
+          )}
+
           {/* Rango de Fechas */}
           <div className="grid grid-cols-2 gap-3">
-            <div>
+            <div className={tipo === 'Cambio de horario' && esIndefinido ? 'col-span-2' : ''}>
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                {tipo === 'Checado sin Gafete' ? 'Fecha de la Checada' : 'Fecha Inicio'}
+                {tipo === 'Checado sin Gafete'
+                  ? 'Fecha de la Checada'
+                  : tipo === 'Cambio de horario' && esIndefinido
+                  ? 'Fecha de Inicio (Aplica de forma indefinida a partir de este día)'
+                  : 'Fecha Inicio'}
               </label>
               <input
                 type="date"
@@ -481,7 +608,7 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
                 required
               />
             </div>
-            {tipo !== 'Checado sin Gafete' && (
+            {tipo !== 'Checado sin Gafete' && !(tipo === 'Cambio de horario' && esIndefinido) && (
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
                   Fecha Fin
@@ -638,7 +765,7 @@ export const NewIncidentModal: React.FC<NewIncidentModalProps> = ({
               className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold uppercase tracking-wider text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Palmtree className="w-3.5 h-3.5" />
-              Enviar a RH
+              {skipsRHValidation ? 'Aplicar y Aprobar Directo' : 'Enviar a RH'}
             </button>
           </div>
         </form>

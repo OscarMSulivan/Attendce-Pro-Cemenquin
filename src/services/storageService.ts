@@ -180,7 +180,7 @@ export class StorageService {
 
   static exportBackup(empleadosDB: Record<string, Employee>): Blob {
     const payload = {
-      tipo: 'AttendancePRO_Respaldo',
+      tipo: 'CemenQtime_Respaldo',
       version: 2,
       exportadoEn: new Date().toISOString(),
       horarios: this.loadHorarios(),
@@ -202,8 +202,13 @@ export class StorageService {
     const text = await file.text();
     const payload = JSON.parse(text);
 
-    if (!payload || (payload.tipo && !payload.tipo.includes('AttendancePRO'))) {
-      throw new Error('El archivo seleccionado no es un respaldo válido de AttendancePRO.');
+    if (
+      !payload ||
+      (payload.tipo &&
+        !payload.tipo.includes('CemenQtime') &&
+        !payload.tipo.includes('AttendancePRO'))
+    ) {
+      throw new Error('El archivo seleccionado no es un respaldo válido de CemenQtime.');
     }
 
     if (payload.horarios) this.saveHorarios(payload.horarios);

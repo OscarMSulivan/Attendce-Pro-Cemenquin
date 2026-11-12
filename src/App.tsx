@@ -76,6 +76,7 @@ import {
   getUserAllowedLists,
   userHasModuleAccess,
   userHasAnyAdminPanelAccess,
+  doesIncidentSkipRHValidation,
 } from './types/portal';
 import { ListChecks, Send, Mail, CheckCircle2 } from 'lucide-react';
 import { ToastContainer, ToastItem, ToastType } from './components/Toast';
@@ -1226,6 +1227,17 @@ export default function App() {
           ? payload.tipoIncidencia
           : 'Permiso con goce';
 
+      // Revisar si originalmente faltaban ambas checadas o solo 1 asistencia
+      const existingEmpRep = reportes.find(r => r.empleado.id === payload.employeeId);
+      const existingDay = existingEmpRep?.dias.find(d => d.isoDate === payload.isoDate);
+      const origEnt = existingDay ? existingDay.entradaOriginal ?? existingDay.entrada : '--:--';
+      const origSal = existingDay ? existingDay.salidaOriginal ?? existingDay.salida : '--:--';
+      const hasExistingEnt = Boolean(origEnt && origEnt !== '--:--');
+      const hasExistingSal = Boolean(origSal && origSal !== '--:--');
+      const missingBothPunches = !hasExistingEnt && !hasExistingSal;
+
+      const skipRH = doesIncidentSkipRHValidation(tipoInc, missingBothPunches);
+
       const newInc: IncidentRequest = {
         id: `inc_fmt_${Date.now()}`,
         empleadoId: payload.employeeId,
@@ -1240,7 +1252,15 @@ export default function App() {
         fechaInicio: payload.isoDate,
         fechaFin: payload.isoDate,
         motivo: payload.motivo,
-        status: 'pendiente',
+        status: skipRH ? 'aprobada' : 'pendiente',
+        autoAprobadaPorSupervisor: skipRH,
+        revisadoPor: skipRH ? `${currentUser.name} (Aprobación directa de Supervisor)` : undefined,
+        fechaRevision: skipRH ? new Date().toISOString() : undefined,
+        notasResolucion: skipRH
+          ? tipoInc === 'Permiso sin goce'
+            ? 'Aprobada directamente por el supervisor — Permiso sin goce no requiere validación de RH.'
+            : 'Aprobada directamente por el supervisor — Checada sin gafete con 1 asistencia registrada no requiere validación de RH.'
+          : undefined,
         fechaCreacion: new Date().toISOString(),
         entradaPropuesta: payload.mode === 'checada_sin_gafete' ? payload.entrada : undefined,
         salidaPropuesta: payload.mode === 'checada_sin_gafete' ? payload.salida : undefined,
@@ -1505,7 +1525,7 @@ Saludos.`
   const handleExportBackup = () => {
     const blob = StorageService.exportBackup(empleadosDB);
     const dateStr = new Date().toISOString().split('T')[0];
-    saveAs(blob, `AttendancePRO_Respaldo_${dateStr}.json`);
+    saveAs(blob, `CemenQtime_Respaldo_${dateStr}.json`);
     setStatusMessage('✓ Respaldo exportado correctamente');
     setStatusType('success');
     showToast('Archivo de respaldo descargado correctamente.', 'success', 'Respaldo Generado');
@@ -1639,8 +1659,8 @@ Saludos.`
       const res = await fetch('/AttendancePRO_v10_Portable.html');
       if (!res.ok) throw new Error('No disponible');
       const blob = await res.blob();
-      saveAs(blob, 'AttendancePRO_v10_Portable.html');
-      setStatusMessage('✓ Archivo AttendancePRO_v10_Portable.html descargado');
+      saveAs(blob, 'CemenQtime_Portable.html');
+      setStatusMessage('✓ Archivo CemenQtime_Portable.html descargado');
       setStatusType('success');
     } catch (e: any) {
       console.error(e);
@@ -1704,6 +1724,97 @@ Saludos.`
     };
   }, [supervisorTeamReports]);
 
+  // Estado para redirección directa desde el botón del correo (?action=liberar_nomina&semana=X&supervisor=Y)
+  const [pendingEmailAction, setPendingEmailAction] = useState<{
+    action: string;
+    semana?: number;
+    supervisor?: string;
+  } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    if (action === 'liberar_nomina' || action === 'revisar_nomina') {
+      const semanaRaw = params.get('semana');
+      const supervisorRaw = params.get('supervisor');
+      return {
+        action,
+        semana: semanaRaw ? Number(semanaRaw) : undefined,
+        supervisor: supervisorRaw ? supervisorRaw.trim().toUpperCase() : undefined,
+      };
+    }
+    return null;
+  });
+
+  const applyEmailRedirectAction = useCallback(
+    (user: PortalUser, redirect: { action: string; semana?: number; supervisor?: string }) => {
+      const allowedLists = getUserAllowedLists(user);
+      if (redirect.supervisor) {
+        if (
+          user.role === 'admin' ||
+          user.role === 'rh' ||
+          allowedLists.includes(redirect.supervisor)
+        ) {
+          setSelectedSupervisor(redirect.supervisor);
+        } else if (allowedLists.length > 0) {
+          setSelectedSupervisor(allowedLists[0]);
+        }
+      } else if (allowedLists.length > 0) {
+        setSelectedSupervisor(allowedLists[0]);
+      }
+
+      if (redirect.semana) {
+        const matchedDispersal = dispersals.find(d => d.semanaNumero === redirect.semana);
+        if (matchedDispersal) {
+          if (matchedDispersal.semanaPeriodo) {
+            setSelectedWeek(matchedDispersal.semanaPeriodo);
+          }
+          if (
+            reportes.length === 0 &&
+            Array.isArray(matchedDispersal.reportesSnapshot) &&
+            matchedDispersal.reportesSnapshot.length > 0
+          ) {
+            const snap = matchedDispersal.reportesSnapshot as EmployeeReport[];
+            setReportes(snap);
+            setResumen(recomputeSummaryFromReports(snap));
+          }
+        }
+      }
+
+      if (userHasModuleAccess(user, 'trabajar_listas')) {
+        setPortalTab('trabajar_listas');
+      } else if (userHasModuleAccess(user, 'semaforo')) {
+        setPortalTab('semaforo');
+      } else if (userHasModuleAccess(user, 'nomina')) {
+        setPortalTab('nomina');
+        setDispersionMode('existing');
+      } else {
+        setPortalTab('inicio');
+      }
+
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+
+      setPendingEmailAction(null);
+      showToast(
+        `Acceso directo desde correo: Lista ${redirect.supervisor || ''} ${
+          redirect.semana ? `(Semana ${redirect.semana})` : ''
+        } abierta para revisión y liberación.`,
+        'info',
+        'Revisión y Liberación de Nómina'
+      );
+    },
+    [dispersals, recomputeSummaryFromReports, reportes.length, showToast]
+  );
+
+  // Si el usuario ya tiene sesión iniciada y abrió el link del correo, redirigir en cuanto cargue el estado del servidor
+  useEffect(() => {
+    if (isAuthenticated && isServerHydrated && pendingEmailAction && currentUser) {
+      applyEmailRedirectAction(currentUser, pendingEmailAction);
+    }
+  }, [isAuthenticated, isServerHydrated, pendingEmailAction, currentUser, applyEmailRedirectAction]);
+
   // Cambiar usuario / rol o iniciar sesión
   const handleSwitchUser = (userId: string) => {
     setActiveUserId(userId);
@@ -1732,7 +1843,11 @@ Saludos.`
 
   const handleLoginSuccess = (user: PortalUser) => {
     handleSwitchUser(user.id);
-    setPortalTab('inicio');
+    if (pendingEmailAction) {
+      applyEmailRedirectAction(user, pendingEmailAction);
+    } else {
+      setPortalTab('inicio');
+    }
   };
 
   const handleLogout = () => {
@@ -1817,16 +1932,87 @@ Saludos.`
     showToast('La solicitud de incidencia fue rechazada.', 'info', 'Incidencia Rechazada');
   };
 
+  const handleResetUserPassword = (userId: string, newPassword: string) => {
+    setPortalUsers(prev => {
+      const updated = prev.map(u => (u.id === userId ? { ...u, password: newPassword } : u));
+      PortalService.saveUsers(updated);
+      return updated;
+    });
+    setStatusMessage('✓ Contraseña restablecida exitosamente');
+    setStatusType('success');
+    showToast('Tu contraseña ha sido actualizada correctamente. Ya puedes iniciar sesión.', 'success', 'Contraseña Restablecida');
+  };
+
   const handleSubmitNewIncident = (newIncident: IncidentRequest) => {
     setIncidents(prev => {
       const updated = [newIncident, ...prev];
       PortalService.saveIncidents(updated);
       return updated;
     });
+
+    // Si es Cambio de horario, enviar alerta inmediata a RH / Nóminas
+    if (newIncident.tipo === 'Cambio de horario') {
+      const vigenciaText = newIncident.esIndefinido
+        ? `Indefinido / Permanente (desde ${newIncident.fechaInicio})`
+        : `Del ${newIncident.fechaInicio} al ${newIncident.fechaFin}`;
+      const rhAlertNotif: PortalNotification = {
+        id: `notif_horario_${Date.now()}`,
+        targetSupervisor: 'ALL',
+        semanaNumero: currentWeekNumber,
+        semanaPeriodo: selectedWeek,
+        titulo: `🔔 Alerta RH: El supervisor solicitó un cambio de horario — Hay que aplicarlo en el sistema`,
+        mensaje: `El supervisor ${newIncident.solicitanteNombre} solicitó un cambio de horario para ${newIncident.empleadoNombre} (#${newIncident.empleadoId}). Vigencia: ${vigenciaText}.${
+          newIncident.horarioSolicitado ? ` Horario solicitado: ${newIncident.horarioSolicitado}.` : ''
+        } Motivo: ${newIncident.motivo}. Hay que aplicarlo en el sistema.`,
+        enviadoPor: newIncident.solicitanteNombre,
+        fechaEnvio: new Date().toISOString(),
+        leida: false,
+        emailEnviado: false,
+      };
+      setNotifications(prev => {
+        const updatedNotifs = [rhAlertNotif, ...prev].slice(0, 100);
+        PortalService.saveNotifications(updatedNotifs);
+        return updatedNotifs;
+      });
+    }
+
+    // Si es Checado sin Gafete auto-aprobado por supervisor, reflejar la hora en la tabla activa si existe
+    if (
+      newIncident.autoAprobadaPorSupervisor &&
+      newIncident.tipo === 'Checado sin Gafete' &&
+      newIncident.entradaPropuesta &&
+      newIncident.salidaPropuesta
+    ) {
+      handleUpdateDayTimes(
+        newIncident.empleadoId,
+        newIncident.fechaInicio,
+        newIncident.entradaPropuesta,
+        newIncident.salidaPropuesta
+      );
+    }
+
     setIsNewIncidentModalOpen(false);
-    setStatusMessage('✓ Solicitud de incidencia enviada exitosamente a RH');
-    setStatusType('success');
-    showToast('Solicitud de incidencia enviada exitosamente a Recursos Humanos.', 'success', 'Incidencia Registrada');
+    if (newIncident.autoAprobadaPorSupervisor) {
+      setStatusMessage(`✓ ${newIncident.tipo} aprobada directamente por el supervisor (No requiere validación de RH)`);
+      setStatusType('success');
+      showToast(
+        `${newIncident.tipo} aprobada automáticamente por el supervisor sin requerir validación de RH.`,
+        'success',
+        'Aprobación Directa Aplicada'
+      );
+    } else if (newIncident.tipo === 'Cambio de horario') {
+      setStatusMessage('✓ Solicitud de Cambio de Horario enviada con alerta a RH para aplicarlo en sistema');
+      setStatusType('success');
+      showToast(
+        'Se envió alerta al módulo de RH: "El supervisor solicitó un cambio de horario — Hay que aplicarlo en el sistema".',
+        'info',
+        'Cambio de Horario Solicitado'
+      );
+    } else {
+      setStatusMessage('✓ Solicitud de incidencia enviada exitosamente a RH para revisión');
+      setStatusType('success');
+      showToast('Solicitud de incidencia enviada exitosamente a Recursos Humanos / Nóminas.', 'success', 'Incidencia Registrada');
+    }
   };
 
   // Liberar nómina formalmente a RH (Supervisor)
@@ -2358,6 +2544,7 @@ Saludos.`
       <LoginView
         users={portalUsers}
         onLoginSuccess={handleLoginSuccess}
+        onResetUserPassword={handleResetUserPassword}
       />
     );
   }
@@ -2648,6 +2835,7 @@ Saludos.`
             onOpenNewModal={() => handleOpenIncidentModalForEmp(undefined)}
             onApproveIncident={handleApproveIncident}
             onRejectIncident={handleRejectIncident}
+            onOpenAssignSchedules={() => setIsAssignOpen(true)}
           />
         )}
 

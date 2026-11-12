@@ -479,15 +479,15 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
                   }}
                   className="w-full rounded-lg px-3 py-2 bg-slate-950 border border-blue-500/40 text-slate-100 text-xs font-semibold outline-none focus:border-blue-400"
                 >
-                  <option value="Permiso con goce">📑 Permiso con goce de sueldo (Requiere formato)</option>
-                  <option value="Vacaciones">🏖️ Día de Vacaciones (Requiere formato)</option>
-                  <option value="Permiso de viaje">✈️ Permiso de viaje / Comisión (Requiere formato)</option>
-                  <option value="Home Office">🏠 Solicitud de Home Office (Requiere formato)</option>
-                  <option value="Permiso sin goce">⚖️ Permiso sin goce de sueldo (Formato opcional)</option>
-                  <option value="Pase Médico">🏥 Pase Médico / IMSS (Formato opcional)</option>
-                  <option value="Incapacidad">🩺 Incapacidad Médica (Formato opcional)</option>
-                  <option value="Cambio de horario">🔄 Cambio de horario / Descanso laborado</option>
-                  <option value="Otro">📝 Otra Justificación Especial (Ej. Permiso de Paternidad - Requiere formato)</option>
+                  <option value="Permiso con goce">📑 Permiso con goce de sueldo (Requiere formato y validación RH)</option>
+                  <option value="Vacaciones">🏖️ Día de Vacaciones (Requiere formato y validación RH)</option>
+                  <option value="Permiso de viaje">✈️ Permiso de viaje / Comisión (Requiere formato y validación RH)</option>
+                  <option value="Home Office">🏠 Solicitud de Home Office (Requiere formato y validación RH)</option>
+                  <option value="Permiso sin goce">⚖️ Permiso sin goce de sueldo (Aprobación directa Supervisor — Sin validación RH)</option>
+                  <option value="Pase Médico">🏥 Pase Médico / IMSS (Revisión RH)</option>
+                  <option value="Incapacidad">🩺 Incapacidad Médica (Revisión RH)</option>
+                  <option value="Cambio de horario">🔄 Cambio de horario / Descanso laborado (Alerta a RH)</option>
+                  <option value="Otro">📝 Otra Justificación Especial (Requiere formato y validación RH)</option>
                 </select>
               </div>
 

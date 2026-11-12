@@ -229,6 +229,23 @@ export function doesIncidentRequireMandatoryFile(
   }
 }
 
+/**
+ * Determina si una incidencia aprobada/registrada por el supervisor NO requiere validación de RH:
+ * - Permiso sin goce
+ * - Checado sin Gafete cuando solo falta 1 asistencia/checada (!missingBothPunches)
+ * Todos los demás formatos (Vacaciones, Permiso con goce, Cambio de horario, Permiso de viaje,
+ * Home Office, Pase Médico, Incapacidad, Otro y Checado sin Gafete cuando faltan las 2 checadas)
+ * SÍ requieren revisión y validación por RH / Nóminas.
+ */
+export function doesIncidentSkipRHValidation(
+  tipo: IncidentType,
+  missingBothPunches = false
+): boolean {
+  if (tipo === 'Permiso sin goce') return true;
+  if (tipo === 'Checado sin Gafete' && !missingBothPunches) return true;
+  return false;
+}
+
 export type IncidentStatus = 'pendiente' | 'aprobada' | 'rechazada';
 
 export interface IncidentRequest {
@@ -245,7 +262,13 @@ export interface IncidentRequest {
   // Cuando tipo === 'Otro', especifica el concepto exacto (ej. "Permiso de Paternidad")
   especificacionOtro?: string;
   fechaInicio: string; // ISO YYYY-MM-DD
-  fechaFin: string;    // ISO YYYY-MM-DD
+  fechaFin: string;    // ISO YYYY-MM-DD (o "INDEFINIDO" cuando esIndefinido === true)
+  // Para Cambio de horario: indica si el cambio es indefinido / permanente y qué horario se solicita
+  esIndefinido?: boolean;
+  horarioSolicitado?: string;
+  aplicadoEnSistemaRH?: boolean;
+  // Indica si fue aprobada directamente por el supervisor sin requerir validación de RH
+  autoAprobadaPorSupervisor?: boolean;
   motivo: string;
   status: IncidentStatus;
   fechaCreacion: string;
@@ -305,6 +328,9 @@ export interface EmailServerConfig {
   smtpPass?: string;
   smtpSecure?: boolean;
   smtpFromName?: string;
+  // Enlace y botón de acción hacia el sistema en los correos
+  portalUrl?: string;
+  textoBotonCorreo?: string;
   // Plantillas personalizables para correo de dispersión inicial
   asuntoDispersion?: string;
   mensajeDispersion?: string;
@@ -316,7 +342,9 @@ export interface EmailServerConfig {
 }
 
 export const DEFAULT_EMAIL_TEMPLATES = {
-  asuntoDispersion: '[AttendancePRO] Nómina Semana {semana} Lista para Validación — {supervisor}',
+  portalUrl: '',
+  textoBotonCorreo: 'Ir al Sistema a Revisar y Liberar Nómina',
+  asuntoDispersion: '[CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}',
   mensajeDispersion:
     'Hola {nombre},\n\nTu lista de asistencia de la Semana {semana} ({periodo}) ha sido dispersada por {dispersado_por}.\n\nTienes una nómina pendiente por revisar, autorizar tiempos extras o formatos y liberar antes del {fecha_limite} ({horas_limite} horas de plazo).',
   activarAlertaPorVencer: true,

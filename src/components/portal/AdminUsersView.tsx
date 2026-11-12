@@ -153,7 +153,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const [smtpPass, setSmtpPass] = useState<string>(emailConfig?.smtpPass || '');
   const [smtpSecure, setSmtpSecure] = useState<boolean>(Boolean(emailConfig?.smtpSecure));
   const [smtpFromName, setSmtpFromName] = useState<string>(
-    emailConfig?.smtpFromName || 'AttendancePRO Nóminas'
+    emailConfig?.smtpFromName || 'CemenQtime Nóminas'
   );
   const [showSmtpPass, setShowSmtpPass] = useState<boolean>(false);
   const [showGmailGuide, setShowGmailGuide] = useState<boolean>(false);
@@ -165,6 +165,15 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   }>({ type: null, message: '' });
 
   // Estado para Plantillas de Mensajes de Correo y Alerta Automática por Vencimiento
+  const [portalUrl, setPortalUrl] = useState<string>(
+    emailConfig?.portalUrl ||
+      (typeof window !== 'undefined' && window.location.protocol !== 'file:'
+        ? window.location.origin
+        : '')
+  );
+  const [textoBotonCorreo, setTextoBotonCorreo] = useState<string>(
+    emailConfig?.textoBotonCorreo || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo
+  );
   const [asuntoDispersion, setAsuntoDispersion] = useState<string>(
     emailConfig?.asuntoDispersion || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion
   );
@@ -200,7 +209,13 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       setSmtpUser(emailConfig.smtpUser || '');
       setSmtpPass(emailConfig.smtpPass || '');
       setSmtpSecure(Boolean(emailConfig.smtpSecure));
-      setSmtpFromName(emailConfig.smtpFromName || 'AttendancePRO Nóminas');
+      setSmtpFromName(emailConfig.smtpFromName || 'CemenQtime Nóminas');
+      if (emailConfig.portalUrl) {
+        setPortalUrl(emailConfig.portalUrl);
+      }
+      setTextoBotonCorreo(
+        emailConfig.textoBotonCorreo || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo
+      );
       setAsuntoDispersion(
         emailConfig.asuntoDispersion || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion
       );
@@ -228,7 +243,13 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     smtpUser: smtpUser.trim(),
     smtpPass: smtpPass.trim(),
     smtpSecure,
-    smtpFromName: smtpFromName.trim() || 'AttendancePRO Nóminas',
+    smtpFromName: smtpFromName.trim() || 'CemenQtime Nóminas',
+    portalUrl:
+      portalUrl.trim() ||
+      (typeof window !== 'undefined' && window.location.protocol !== 'file:'
+        ? window.location.origin
+        : ''),
+    textoBotonCorreo: textoBotonCorreo.trim() || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo,
     asuntoDispersion: asuntoDispersion.trim() || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion,
     mensajeDispersion: mensajeDispersion.trim() || DEFAULT_EMAIL_TEMPLATES.mensajeDispersion,
     activarAlertaPorVencer,
@@ -265,6 +286,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   };
 
   const handleRestoreDefaultTemplates = () => {
+    setTextoBotonCorreo(DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo);
     setAsuntoDispersion(DEFAULT_EMAIL_TEMPLATES.asuntoDispersion);
     setMensajeDispersion(DEFAULT_EMAIL_TEMPLATES.mensajeDispersion);
     setActivarAlertaPorVencer(DEFAULT_EMAIL_TEMPLATES.activarAlertaPorVencer);
@@ -624,12 +646,23 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     );
   });
 
+  const previewActionUrl = `${(
+    portalUrl.trim() ||
+    (typeof window !== 'undefined' && window.location.protocol !== 'file:'
+      ? window.location.origin
+      : 'https://nomina.empresa.com')
+  ).replace(/\/+$/, '')}/?action=liberar_nomina&semana=${encodeURIComponent(
+    String(currentWeekNumber || 15)
+  )}&supervisor=${encodeURIComponent('OSCAR VALENZUELA')}`;
+
   const samplePreviewVars = {
     supervisor: 'OSCAR VALENZUELA',
+    nombre: 'Óscar Valenzuela',
     semana: String(currentWeekNumber || 15),
     periodo: activeDispersal?.semanaPeriodo || '2026-04-06 al 2026-04-12',
     horas_limite: `${deadlineHoursInput} horas`,
     horas_restantes: `${horasAntesVencimiento}h 00m`,
+    tiempo_restante: `${horasAntesVencimiento}h 00m`,
     fecha_limite: new Date(Date.now() + deadlineHoursInput * 3600000).toLocaleString('es-MX', {
       weekday: 'short',
       day: 'numeric',
@@ -638,6 +671,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       minute: '2-digit',
     }),
     dispersado_por: currentUser.name,
+    url_portal: previewActionUrl,
   };
 
   const adminsCount = users.filter(u => u.role === 'admin').length;
@@ -1433,12 +1467,14 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                 <span className="font-bold text-slate-800">Variables dinámicas:</span>
                 {[
                   '{supervisor}',
+                  '{nombre}',
                   '{semana}',
                   '{periodo}',
                   '{horas_limite}',
                   '{fecha_limite}',
-                  '{horas_restantes}',
+                  '{tiempo_restante}',
                   '{dispersado_por}',
+                  '{url_portal}',
                 ].map(tag => (
                   <code
                     key={tag}
@@ -1447,6 +1483,52 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     {tag}
                   </code>
                 ))}
+              </div>
+
+              {/* Bloque de Botón de Redirección al Sistema */}
+              <div className="p-6 bg-slate-50/70 space-y-4">
+                <div>
+                  <h4 className="text-sm font-extrabold text-slate-900">
+                    Botón de Redirección Directa al Sistema en el Correo
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Cada correo incluirá un botón interactivo que lleva al supervisor directamente al sistema para revisar y liberar su nómina.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Texto del Botón en el Correo
+                    </label>
+                    <input
+                      type="text"
+                      value={textoBotonCorreo}
+                      onChange={e => setTextoBotonCorreo(e.target.value)}
+                      placeholder="Ir al Sistema a Revisar y Liberar Nómina"
+                      className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:border-slate-900 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      URL del Sistema (Dominio / Servidor)
+                    </label>
+                    <input
+                      type="url"
+                      value={portalUrl}
+                      onChange={e => setPortalUrl(e.target.value)}
+                      placeholder={
+                        typeof window !== 'undefined'
+                          ? window.location.origin
+                          : 'https://tu-dominio.com'
+                      }
+                      className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-semibold text-slate-900 focus:border-slate-900 outline-none"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Se detecta automáticamente tu servidor actual, o puedes fijar tu dominio de Hostinger.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Bloque 1: Correo al dispersar */}
@@ -1553,17 +1635,38 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                   </div>
                 </div>
 
-                {/* Vista Previa limpia */}
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-1.5">
-                  <p className="text-[11px] font-bold text-slate-500">
-                    Vista previa con datos reales:
-                  </p>
-                  <p className="text-xs font-bold text-slate-900">
-                    {formatEmailTemplate(asuntoDispersion, samplePreviewVars)}
-                  </p>
-                  <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
-                    {formatEmailTemplate(mensajeDispersion, samplePreviewVars)}
-                  </p>
+                {/* Vista Previa limpia con el botón real */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      Vista previa del correo que recibe el supervisor:
+                    </p>
+                    <span className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
+                      {previewActionUrl}
+                    </span>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+                    <p className="text-xs font-extrabold text-slate-900 border-b border-slate-100 pb-2">
+                      {formatEmailTemplate(asuntoDispersion, samplePreviewVars)}
+                    </p>
+                    <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">
+                      {formatEmailTemplate(mensajeDispersion, samplePreviewVars)}
+                    </p>
+                    <div className="pt-2 pb-1 flex flex-col items-center justify-center border-t border-slate-100">
+                      <a
+                        href={previewActionUrl}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-sm transition-colors no-underline"
+                      >
+                        <span>
+                          {textoBotonCorreo.trim() || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo}
+                        </span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      <span className="text-[10px] text-slate-400 mt-1.5">
+                        Al hacer clic, redirige al supervisor a su lista en el sistema para revisar y liberar
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -1642,7 +1745,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                         <ExternalLink className="w-3 h-3" />
                       </a>
                     </li>
-                    <li>Crea una clave para "AttendancePRO" y pega las 16 letras en Contraseña SMTP.</li>
+                    <li>Crea una clave para "CemenQtime" y pega las 16 letras en Contraseña SMTP.</li>
                   </ol>
                 </div>
               )}
@@ -1715,7 +1818,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     type="text"
                     value={smtpFromName}
                     onChange={e => setSmtpFromName(e.target.value)}
-                    placeholder="AttendancePRO Nóminas"
+                    placeholder="CemenQtime Nóminas"
                     className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:border-slate-900 outline-none"
                   />
                 </div>
