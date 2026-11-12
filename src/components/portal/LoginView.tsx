@@ -22,6 +22,8 @@ import {
   Users,
   BarChart3,
   FileCheck2,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { PortalUser, getUserAllowedLists } from '../../types/portal';
 import { PortalService } from '../../services/portalService';
@@ -30,6 +32,8 @@ interface LoginViewProps {
   users: PortalUser[];
   onLoginSuccess: (user: PortalUser) => void;
   onResetUserPassword?: (userId: string, newPassword: string) => void;
+  theme?: 'dark' | 'light';
+  onToggleTheme?: () => void;
 }
 
 const REMEMBER_USER_KEY = 'cemenqtime_remembered_user_v1';
@@ -40,7 +44,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
   users,
   onLoginSuccess,
   onResetUserPassword,
+  theme = 'dark',
+  onToggleTheme,
 }) => {
+  const isLight = theme === 'light';
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -274,20 +281,36 @@ export const LoginView: React.FC<LoginViewProps> = ({
         </div>
       )}
 
-      {/* CONTENEDOR PRINCIPAL SPLIT-SCREEN (ESTILO FREE DARK ADMIN DASHBOARD) */}
-      <div className="relative z-10 w-full max-w-[1120px] grid grid-cols-1 lg:grid-cols-12 rounded-3xl bg-[#21222D] border border-white/[0.07] shadow-[0_30px_90px_rgba(0,0,0,0.65)] overflow-hidden">
-        {/* COLUMNA IZQUIERDA (7 COLUMNAS): IDENTIDAD CEMENQUIN + PREVIEW DARK ADMIN DASHBOARD */}
-        <div className="lg:col-span-7 bg-[#1B1C26] p-7 sm:p-10 lg:p-11 flex flex-col justify-between relative overflow-hidden border-b lg:border-b-0 lg:border-r border-white/[0.06]">
+      {/* CONTENEDOR PRINCIPAL SPLIT-SCREEN (ESTILO FREE DARK ADMIN DASHBOARD / EJECUTIVO CLARO) */}
+      <div
+        className={`relative z-10 w-full max-w-[1120px] grid grid-cols-1 lg:grid-cols-12 rounded-3xl border overflow-hidden transition-colors ${
+          isLight
+            ? 'bg-white border-slate-200 shadow-[0_25px_70px_rgba(15,23,42,0.12)]'
+            : 'bg-[#21222D] border-white/[0.07] shadow-[0_30px_90px_rgba(0,0,0,0.65)]'
+        }`}
+      >
+        {/* COLUMNA IZQUIERDA (7 COLUMNAS): IDENTIDAD CEMENQUIN + PREVIEW ADMIN DASHBOARD */}
+        <div
+          className={`lg:col-span-7 p-7 sm:p-10 lg:p-11 flex flex-col justify-between relative overflow-hidden border-b lg:border-b-0 lg:border-r transition-colors ${
+            isLight
+              ? 'bg-slate-50/90 border-slate-200 text-slate-900'
+              : 'bg-[#1B1C26] border-white/[0.06] text-white'
+          }`}
+        >
           {/* Decoración geométrica sutil inspirada en el ángulo corporativo de Cemenquin */}
-          <div className="pointer-events-none absolute -right-24 -top-24 w-72 h-72 rounded-full bg-[#A9DFD8]/[0.04] blur-2xl" />
-          <div className="pointer-events-none absolute -left-20 -bottom-20 w-72 h-72 rounded-full bg-[#091f5c]/30 blur-2xl" />
+          <div className="pointer-events-none absolute -right-24 -top-24 w-72 h-72 rounded-full bg-[#A9DFD8]/[0.06] blur-2xl" />
+          <div className="pointer-events-none absolute -left-20 -bottom-20 w-72 h-72 rounded-full bg-[#091f5c]/15 blur-2xl" />
 
           {/* Encabezado Superior con Logo Oficial Cemenquin y Nombre del Sistema */}
           <div className="relative z-10">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-7 border-b border-white/[0.06]">
+            <div
+              className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-7 border-b ${
+                isLight ? 'border-slate-200' : 'border-white/[0.06]'
+              }`}
+            >
               <div className="flex items-center gap-4">
                 {/* Tarjeta con el Logo Oficial de Cemenquin */}
-                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#0a1e5e] p-1 border border-white/15 shadow-xl shadow-black/40 shrink-0 overflow-hidden flex items-center justify-center">
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#0a1e5e] p-1 border border-slate-300 dark:border-white/15 shadow-xl shadow-slate-900/20 dark:shadow-black/40 shrink-0 overflow-hidden flex items-center justify-center">
                   {!logoError ? (
                     <img
                       src={CEMENQUIN_LOGO_PATH}
@@ -299,21 +322,33 @@ export const LoginView: React.FC<LoginViewProps> = ({
                   ) : (
                     <div className="w-full h-full rounded-xl bg-[#0a1e5e] flex flex-col items-center justify-center text-white font-black text-xs">
                       <span className="text-red-500 text-lg leading-none">CQ</span>
-                      <span className="text-[9px] tracking-tight mt-0.5">Cemenquin</span>
+                      <span className="text-[9px] tracking-tight mt-0.5 text-white">Cemenquin</span>
                     </div>
                   )}
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2.5">
-                    <span className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-                      Cemen<span className="text-[#A9DFD8]">Qtime</span>
+                    <span
+                      className="text-2xl sm:text-3xl font-black tracking-tight"
+                      style={{ color: isLight ? '#0a1e5e' : '#ffffff' }}
+                    >
+                      Cemen
+                      <span style={{ color: isLight ? '#0d9488' : '#A9DFD8' }}>
+                        Qtime
+                      </span>
                     </span>
                   </div>
-                  <p className="text-xs sm:text-sm font-semibold text-[#A9DFD8] mt-0.5">
+                  <p
+                    className="text-xs sm:text-sm font-bold mt-0.5"
+                    style={{ color: isLight ? '#0f766e' : '#A9DFD8' }}
+                  >
                     Módulo de Recursos Humanos
                   </p>
-                  <p className="text-xs text-[#87888C] mt-0.5">
+                  <p
+                    className="text-xs mt-0.5 font-medium"
+                    style={{ color: isLight ? '#475569' : '#87888C' }}
+                  >
                     Cemenquin® · Gestión de Asistencia, Turnos e Incidencias
                   </p>
                 </div>
@@ -324,10 +359,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
             <div className="mt-7 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                  <h2
+                    className="text-base sm:text-lg font-extrabold tracking-tight"
+                    style={{ color: isLight ? '#0f172a' : '#ffffff' }}
+                  >
                     Panel de Control y Asistencia
                   </h2>
-                  <p className="text-xs text-[#87888C] mt-0.5">
+                  <p
+                    className="text-xs mt-0.5"
+                    style={{ color: isLight ? '#475569' : '#87888C' }}
+                  >
                     Monitoreo en tiempo real de listas de asistencia, tiempo extra y validación semanal
                   </p>
                 </div>
@@ -381,7 +422,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 </div>
               </div>
 
-              {/* Widget Gráfico Dark Admin Dashboard (Curva Mint-Teal #A9DFD8 + Barras de Nivel) */}
+              {/* Widget Gráfico Admin Dashboard (Curva Mint-Teal + Barras de Nivel) */}
               <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] p-4 sm:p-5">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -407,13 +448,44 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     >
                       <defs>
                         <linearGradient id="mintAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                          <stop offset="0%" stopColor="#A9DFD8" stopOpacity="0.42" />
-                          <stop offset="100%" stopColor="#A9DFD8" stopOpacity="0.0" />
+                          <stop
+                            offset="0%"
+                            stopColor={isLight ? '#0d9488' : '#A9DFD8'}
+                            stopOpacity={isLight ? '0.28' : '0.42'}
+                          />
+                          <stop
+                            offset="100%"
+                            stopColor={isLight ? '#0d9488' : '#A9DFD8'}
+                            stopOpacity="0.0"
+                          />
                         </linearGradient>
                       </defs>
-                      <line x1="0" y1="20" x2="320" y2="20" stroke="#2B2B36" strokeDasharray="3 3" strokeWidth="1" />
-                      <line x1="0" y1="50" x2="320" y2="50" stroke="#2B2B36" strokeDasharray="3 3" strokeWidth="1" />
-                      <line x1="0" y1="80" x2="320" y2="80" stroke="#2B2B36" strokeWidth="1" />
+                      <line
+                        x1="0"
+                        y1="20"
+                        x2="320"
+                        y2="20"
+                        stroke={isLight ? '#e2e8f0' : '#2B2B36'}
+                        strokeDasharray="3 3"
+                        strokeWidth="1"
+                      />
+                      <line
+                        x1="0"
+                        y1="50"
+                        x2="320"
+                        y2="50"
+                        stroke={isLight ? '#e2e8f0' : '#2B2B36'}
+                        strokeDasharray="3 3"
+                        strokeWidth="1"
+                      />
+                      <line
+                        x1="0"
+                        y1="80"
+                        x2="320"
+                        y2="80"
+                        stroke={isLight ? '#cbd5e1' : '#2B2B36'}
+                        strokeWidth="1"
+                      />
                       <path
                         d="M0,68 C35,62 55,28 92,34 C128,40 152,64 188,42 C224,20 252,14 285,26 C302,32 312,22 320,18 L320,82 L0,82 Z"
                         fill="url(#mintAreaGrad)"
@@ -421,28 +493,52 @@ export const LoginView: React.FC<LoginViewProps> = ({
                       <path
                         d="M0,68 C35,62 55,28 92,34 C128,40 152,64 188,42 C224,20 252,14 285,26 C302,32 312,22 320,18"
                         fill="none"
-                        stroke="#A9DFD8"
+                        stroke={isLight ? '#0d9488' : '#A9DFD8'}
                         strokeWidth="2.5"
                         strokeLinecap="round"
                       />
-                      <circle cx="92" cy="34" r="3.5" fill="#171821" stroke="#A9DFD8" strokeWidth="2" />
-                      <circle cx="188" cy="42" r="3.5" fill="#171821" stroke="#A9DFD8" strokeWidth="2" />
-                      <circle cx="285" cy="26" r="4" fill="#FEB95A" stroke="#171821" strokeWidth="1.5" />
+                      <circle
+                        cx="92"
+                        cy="34"
+                        r="3.5"
+                        fill={isLight ? '#ffffff' : '#171821'}
+                        stroke={isLight ? '#0d9488' : '#A9DFD8'}
+                        strokeWidth="2"
+                      />
+                      <circle
+                        cx="188"
+                        cy="42"
+                        r="3.5"
+                        fill={isLight ? '#ffffff' : '#171821'}
+                        stroke={isLight ? '#0d9488' : '#A9DFD8'}
+                        strokeWidth="2"
+                      />
+                      <circle
+                        cx="285"
+                        cy="26"
+                        r="4"
+                        fill={isLight ? '#d97706' : '#FEB95A'}
+                        stroke={isLight ? '#ffffff' : '#171821'}
+                        strokeWidth="1.5"
+                      />
                     </svg>
                   </div>
 
                   {/* Mini barras verticales estilo Volume / Level del Figma */}
                   <div className="sm:col-span-4 flex items-end justify-around h-20 px-2 pt-2 border-t sm:border-t-0 sm:border-l border-white/[0.06]">
                     {[
-                      { h: '55%', top: '#A9DFD8', bot: '#2B2B36', day: 'L' },
-                      { h: '78%', top: '#A9DFD8', bot: '#2B2B36', day: 'M' },
-                      { h: '65%', top: '#20AEF3', bot: '#2B2B36', day: 'X' },
-                      { h: '88%', top: '#A9DFD8', bot: '#2B2B36', day: 'J' },
-                      { h: '92%', top: '#FEB95A', bot: '#2B2B36', day: 'V' },
-                      { h: '48%', top: '#F2C8ED', bot: '#2B2B36', day: 'S' },
+                      { h: '55%', top: isLight ? '#0d9488' : '#A9DFD8', day: 'L' },
+                      { h: '78%', top: isLight ? '#0d9488' : '#A9DFD8', day: 'M' },
+                      { h: '65%', top: isLight ? '#0284c7' : '#20AEF3', day: 'X' },
+                      { h: '88%', top: isLight ? '#0d9488' : '#A9DFD8', day: 'J' },
+                      { h: '92%', top: isLight ? '#d97706' : '#FEB95A', day: 'V' },
+                      { h: '48%', top: isLight ? '#9333ea' : '#F2C8ED', day: 'S' },
                     ].map((bar) => (
                       <div key={bar.day} className="flex flex-col items-center gap-1.5 h-full justify-end">
-                        <div className="w-2.5 h-14 rounded-full bg-[#171821] overflow-hidden flex flex-col justify-end p-0.5">
+                        <div
+                          className="w-2.5 h-14 rounded-full overflow-hidden flex flex-col justify-end p-0.5"
+                          style={{ backgroundColor: isLight ? '#e2e8f0' : '#171821' }}
+                        >
                           <div
                             className="w-full rounded-full transition-all"
                             style={{ height: bar.h, backgroundColor: bar.top }}
@@ -459,36 +555,74 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
           {/* Pie de columna izquierda limpio (Sin mención a CONTPAQi) */}
           <div className="relative z-10 pt-6 mt-6 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-xs text-[#87888C]">
-            <span className="font-semibold text-white/90">Cemenquin® · CemenQtime</span>
+            <span
+              className="font-bold"
+              style={{ color: isLight ? '#0a1e5e' : '#f8fafc' }}
+            >
+              Cemenquin® · Cemen
+              <span style={{ color: isLight ? '#0d9488' : '#A9DFD8' }}>Qtime</span>
+            </span>
             <span>Módulo de Recursos Humanos</span>
           </div>
         </div>
 
         {/* COLUMNA DERECHA (5 COLUMNAS): FORMULARIO DE ACCESO Y RECUPERACIÓN */}
         <div className="lg:col-span-5 bg-[#21222D] p-7 sm:p-10 lg:p-11 flex flex-col justify-center">
-          {/* Cinta superior de identidad en el formulario */}
-          <div className="flex items-center gap-3.5 mb-7">
-            <div className="w-12 h-12 rounded-2xl bg-[#0a1e5e] p-0.5 border border-white/15 shadow-lg shrink-0 overflow-hidden flex items-center justify-center">
-              {!logoError ? (
-                <img
-                  src={CEMENQUIN_LOGO_PATH}
-                  alt="Cemenquin"
-                  referrerPolicy="no-referrer"
-                  onError={() => setLogoError(true)}
-                  className="w-full h-full object-cover rounded-[14px]"
-                />
-              ) : (
-                <span className="text-xs font-black text-white">CQ</span>
-              )}
+          {/* Cinta superior de identidad en el formulario + Selector de Tema */}
+          <div className="flex items-center justify-between gap-3 mb-7">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-[#0a1e5e] p-0.5 border border-slate-300 dark:border-white/15 shadow-lg shrink-0 overflow-hidden flex items-center justify-center">
+                {!logoError ? (
+                  <img
+                    src={CEMENQUIN_LOGO_PATH}
+                    alt="Cemenquin"
+                    referrerPolicy="no-referrer"
+                    onError={() => setLogoError(true)}
+                    className="w-full h-full object-cover rounded-[14px]"
+                  />
+                ) : (
+                  <span className="text-xs font-black text-white">CQ</span>
+                )}
+              </div>
+              <div>
+                <h1
+                  className="text-lg font-black tracking-tight leading-tight"
+                  style={{ color: isLight ? '#0a1e5e' : '#ffffff' }}
+                >
+                  Cemen
+                  <span style={{ color: isLight ? '#0d9488' : '#A9DFD8' }}>
+                    Qtime
+                  </span>
+                </h1>
+                <p
+                  className="text-xs font-semibold"
+                  style={{ color: isLight ? '#475569' : '#87888C' }}
+                >
+                  Módulo de Recursos Humanos
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-extrabold text-white tracking-tight leading-tight">
-                Cemen<span className="text-[#A9DFD8]">Qtime</span>
-              </h1>
-              <p className="text-xs font-medium text-[#87888C]">
-                Módulo de Recursos Humanos
-              </p>
-            </div>
+
+            {onToggleTheme && (
+              <button
+                type="button"
+                onClick={onToggleTheme}
+                className="p-2.5 rounded-xl bg-[#171821] hover:bg-[#2B2B36] border border-white/[0.08] text-[#FEB95A] flex items-center gap-1.5 text-[11px] font-bold transition-all cursor-pointer shrink-0"
+                title={isLight ? 'Cambiar a Tema Oscuro' : 'Cambiar a Tema Blanco'}
+              >
+                {isLight ? (
+                  <>
+                    <Moon className="w-3.5 h-3.5 text-slate-700" />
+                    <span className="hidden sm:inline text-slate-700">Oscuro</span>
+                  </>
+                ) : (
+                  <>
+                    <Sun className="w-3.5 h-3.5 text-[#FEB95A]" />
+                    <span className="hidden sm:inline text-[#FEB95A]">Claro</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           {!isRecoveryMode ? (

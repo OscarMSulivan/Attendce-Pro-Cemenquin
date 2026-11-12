@@ -14,6 +14,7 @@ import {
   getUserAllowedLists,
 } from '../types/portal';
 import { getDateRangeISO, normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarUtils';
+import { PushNotificationService } from './pushNotificationService';
 
 const STORAGE_KEYS = {
   USERS: 'attendancePro_portal_users_v1',
@@ -132,14 +133,29 @@ export const DEFAULT_INCIDENTS: IncidentRequest[] = [
 export class PortalService {
   /**
    * Sincroniza datos con el servidor Express (/api/portal/sync) cuando está disponible
-   * (ej. en el servidor Hostinger KVM 2), sin bloquear la ejecución local.
+   * y transmite cambios en tiempo real entre pestañas y sesiones conectadas.
    */
   static pushToServer(payload: Record<string, unknown>): void {
     if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
+    const senderTabId = PushNotificationService.getClientTabId();
+    PushNotificationService.broadcastLocalEvent({
+      type: 'portal_sync',
+      timestamp: new Date().toISOString(),
+      state: {
+        users: payload.users as PortalUser[] | undefined,
+        incidents: payload.incidents as IncidentRequest[] | undefined,
+        releases: payload.releases as Record<string, PayrollRelease> | undefined,
+        dispersals: payload.dispersals as PayrollDispersal[] | undefined,
+        notifications: payload.notifications as PortalNotification[] | undefined,
+        reportes: payload.reportes as any[] | undefined,
+        resumen: payload.resumen,
+        selectedWeek: payload.selectedWeek as string | undefined,
+      },
+    });
     fetch('/api/portal/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, senderTabId }),
     }).catch(() => {
       // Modo offline / localStorage fallback silencioso
     });

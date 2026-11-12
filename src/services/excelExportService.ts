@@ -80,11 +80,11 @@ function limpiarIncidenciaExcel(incidencia: string, modificadoPorSupervisor?: bo
  * a la lista de empleados actualmente filtrada, con diseño corporativo a color
  * desde la columna A hasta la L (incluyendo ID, Colaborador y Supervisor estilizados).
  */
-export async function exportPayrollExcelBySupervisor(
+export async function buildPayrollExcelFile(
   reportes: EmployeeReport[],
   numeroSemana: number | string,
   selectedSupervisor?: string
-): Promise<string> {
+): Promise<{ fileName: string; buffer: ExcelJS.Buffer }> {
   if (!reportes || reportes.length === 0) {
     throw new Error('No hay registros para exportar.');
   }
@@ -681,7 +681,88 @@ export async function exportPayrollExcelBySupervisor(
 
   const nombreArchivo = `area(${nombreLimpio || 'General'})_nomina(${numeroSemana}).xlsx`;
   const buffer = await workbook.xlsx.writeBuffer();
-  saveAs(new Blob([buffer]), nombreArchivo);
 
-  return nombreArchivo;
+  return { fileName: nombreArchivo, buffer };
 }
+
+/**
+ * Genera y descarga UN SOLO archivo Excel de nómina correspondiente
+ * a la lista de empleados actualmente filtrada.
+ */
+export async function exportPayrollExcelBySupervisor(
+  reportes: EmployeeReport[],
+  numeroSemana: number | string,
+  selectedSupervisor?: string
+): Promise<string> {
+  const { fileName, buffer } = await buildPayrollExcelFile(
+    reportes,
+    numeroSemana,
+    selectedSupervisor
+  );
+  saveAs(new Blob([buffer]), fileName);
+  return fileName;
+}
+
+/**
+ * Descarga TODAS las listas de asistencia de golpe (un archivo Excel individual por cada supervisor
+ * presente en el reporte generado).
+ */
+export async function exportAllSupervisorPayrollsExcel(
+  allReportes: EmployeeReport[],
+  numeroSemana: number | string,
+  supervisorsList?: string[]
+): Promise<string[]> {
+  if (!allReportes || allReportes.length === 0) {
+    throw new Error('Primero debes generar el reporte de asistencia para descargar todas las listas.');
+  }
+
+  const detectedSupervisors =
+    supervisorsList && supervisorsList.length > 0
+      ? supervisorsList
+      : [...new Set(allReportes.map(r => r.empleado.jefe).filter(Boolean))].sort();
+
+  const downloadedFiles: string[] = [];
+
+  for (let i = 0; i < detectedSupervisors.length; i++) {
+    const sup = detectedSupervisors[i];
+    const supReports = allReportes.filter(
+      r => (r.empleado.jefe || '').trim().toUpperCase() === sup.trim().toUpperCase()
+    );
+    if (supReports.length === 0) continue;
+
+    const { fileName, buffer } = await buildPayrollExcelFile(supReports, numeroSemana, sup);
+    saveAs(new Blob([buffer]), fileName);
+    downloadedFiles.push(fileName);
+
+    // Pausa breve entre descargas para evitar que el navegador bloquee descargas múltiples simultáneas
+    if (i < detectedSupervisors.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 240));
+    }
+  }
+
+  return downloadedFiles;
+}
+
+/**
+ * Genera el archivo Excel en formato Base64 para adjuntarlo directamente por correo electrónico.
+ */
+export async function generatePayrollExcelBase64(
+  reportes: EmployeeReport[],
+  numeroSemana: number | string,
+  selectedSupervisor?: string
+): Promise<{ fileName: string; base64: string }> {
+  const { fileName, buffer } = await buildPayrollExcelFile(
+    reportes,
+    numeroSemana,
+    selectedSupervisor
+  );
+  const uint8 = new Uint8Array(buffer as ArrayBuffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, Array.from(uint8.subarray(i, i + chunkSize)));
+  }
+  const base64 = btoa(binary);
+  return { fileName, base64 };
+}
+

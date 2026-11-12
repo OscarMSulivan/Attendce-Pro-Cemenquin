@@ -438,6 +438,25 @@ async function checkAndSendExpiringReminders(options?: {
   };
 }
 
+// Clientes conectados en tiempo real mediante Server-Sent Events (SSE) para Web Push sin recargar la página
+const sseClients = new Set<{ id: string; res: express.Response }>();
+
+function broadcastRealtimeEvent(payload: Record<string, unknown>) {
+  if (sseClients.size === 0) return;
+  const serialized = `data: ${JSON.stringify({
+    ...payload,
+    timestamp: payload.timestamp || new Date().toISOString(),
+  })}\n\n`;
+
+  for (const client of sseClients) {
+    try {
+      client.res.write(serialized);
+    } catch {
+      sseClients.delete(client);
+    }
+  }
+}
+
 async function startServer() {
   const app = express();
 
@@ -452,6 +471,42 @@ async function startServer() {
       hostname: os.hostname(),
       uptime: Math.round(process.uptime()),
       storagePath: DB_FILE,
+      connectedRealtimeClients: sseClients.size,
+    });
+  });
+
+  // Stream de eventos en tiempo real (Server-Sent Events) para notificaciones Push sin refrescar la página
+  app.get('/api/notifications/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const clientId = String(req.query.clientId || `sse_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+    const clientEntry = { id: clientId, res };
+    sseClients.add(clientEntry);
+
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'connected',
+        clientId,
+        timestamp: new Date().toISOString(),
+      })}\n\n`
+    );
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch {
+        clearInterval(heartbeat);
+        sseClients.delete(clientEntry);
+      }
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(clientEntry);
     });
   });
 
@@ -497,6 +552,32 @@ async function startServer() {
           ? { emailConfig: emailServerFromConfig }
           : {}),
       });
+
+      const hasRealtimeRelevantChanges =
+        Array.isArray(body.incidents) ||
+        Array.isArray(body.dispersals) ||
+        Array.isArray(body.notifications) ||
+        (body.releases && typeof body.releases === 'object') ||
+        Array.isArray(body.reportes) ||
+        Array.isArray(body.users);
+
+      if (hasRealtimeRelevantChanges) {
+        broadcastRealtimeEvent({
+          type: 'portal_sync',
+          senderTabId: body.senderTabId,
+          state: {
+            users: updated.users,
+            incidents: updated.incidents,
+            releases: updated.releases,
+            dispersals: updated.dispersals,
+            notifications: updated.notifications,
+            reportes: updated.reportes,
+            resumen: updated.resumen,
+            selectedWeek: updated.selectedWeek,
+          },
+        });
+      }
+
       res.json({ ok: true, updatedAt: updated.updatedAt });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -659,15 +740,29 @@ async function startServer() {
                 );
 
               const renderedBodyText = renderServerEmailTemplate(
-                resolvedEmailConfig.mensajeDispersion ||
+                d.customBody ||
+                  resolvedEmailConfig.mensajeDispersion ||
                   `Hola {nombre},\n\nEl área de Nóminas ({dispersado_por}) ha dispersado tu lista de asistencia para la Semana {semana} ({periodo}).\n\nTIEMPO LÍMITE DE LIBERACIÓN: {fecha_limite}\n\nPor favor ingresa al portal CemenQtime para revisar tu equipo y liberar tu nómina dentro del plazo establecido.`,
                 templateVars
               );
+
+              const attachments =
+                d.attachmentBase64 && d.attachmentFilename
+                  ? [
+                      {
+                        filename: String(d.attachmentFilename),
+                        content: Buffer.from(String(d.attachmentBase64), 'base64'),
+                        contentType:
+                          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                      },
+                    ]
+                  : undefined;
 
               await transporter.sendMail({
                 from: `"${resolvedEmailConfig.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
                 to: d.recipientEmail,
                 subject: renderedSubject,
+                attachments,
                 text:
                   renderedBodyText +
                   (mensaje ? `\n\nNota adicional: ${mensaje}` : '') +
@@ -677,7 +772,7 @@ async function startServer() {
                   <div style="font-family: Arial, sans-serif; max-width: 580px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
                     <div style="background: #171821; padding: 18px 24px; color: #ffffff;">
                       <div style="color: #a9dfd8; font-size: 11px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">CemenQtime · Notificación de Nómina</div>
-                      <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">Nómina Semana ${semanaNumero} Dispersada</h2>
+                      <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">Nómina Semana ${semanaNumero} Lista para Revisión</h2>
                       <div style="color: #94a3b8; font-size: 12px; margin-top: 4px;">Período: ${templateVars.periodo} · Lista: ${d.supervisorName}</div>
                     </div>
                     <div style="padding: 24px;">
@@ -687,6 +782,13 @@ async function startServer() {
                         <div style="color: #0f172a; font-size: 14px; font-weight: bold;">${limiteText}</div>
                         ${horasLimite ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px;">(Plazo configurado de ${horasLimite} horas)</div>` : ''}
                       </div>
+                      ${
+                        d.attachmentFilename
+                          ? `<div style="background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; color: #0f766e;">
+                              📎 <strong>Archivo Excel Adjunto:</strong> ${d.attachmentFilename}
+                            </div>`
+                          : ''
+                      }
                       ${
                         mensaje
                           ? `<div style="background: #fffbeb; border: 1px solid #fef3c7; border-radius: 8px; padding: 12px 14px; margin-bottom: 18px; font-size: 12px; color: #92400e;">
@@ -723,24 +825,40 @@ async function startServer() {
 
       const current = readDatabase();
       const prevLogs = Array.isArray(current.emailLogs) ? current.emailLogs : [];
+      const sanitizedDispatches = Array.isArray(dispatches)
+        ? dispatches.map(({ attachmentBase64: _b64, ...rest }: any) => rest)
+        : [];
       const newEntry = {
         id: `mail_${Date.now()}`,
         semanaNumero,
         semanaPeriodo,
         dispersadoPor,
-        dispatches: Array.isArray(dispatches) ? dispatches : [],
+        dispatches: sanitizedDispatches,
         smtpSuccessCount,
         deliveryResults,
         sentAt: new Date().toISOString(),
       };
-      writeDatabase({
+      const updatedDb = writeDatabase({
         emailLogs: [newEntry, ...prevLogs].slice(0, 200),
+      });
+
+      broadcastRealtimeEvent({
+        type: 'notification_dispatched',
+        actorName: dispersadoPor,
+        summary: `Nueva nómina enviada por correo (Semana ${semanaNumero})`,
+        state: {
+          dispersals: updatedDb.dispersals,
+          notifications: updatedDb.notifications,
+          releases: updatedDb.releases,
+        },
       });
 
       res.json({
         ok: true,
-        sentCount: Array.isArray(dispatches) ? dispatches.length : 0,
+        sentCount: sanitizedDispatches.length,
         smtpSentCount: smtpSuccessCount,
+        smtpConfigured: Boolean(resolvedEmailConfig.smtpUser && resolvedEmailConfig.smtpPass),
+        deliveryResults,
         timestamp: newEntry.sentAt,
       });
     } catch (err: any) {
@@ -757,6 +875,16 @@ async function startServer() {
         overrideEmailConfig: emailConfig,
       });
       const db = readDatabase();
+      if (result.remindersSent > 0) {
+        broadcastRealtimeEvent({
+          type: 'expiring_reminder',
+          summary: `Se enviaron ${result.remindersSent} alerta(s) por vencimiento próximo de nómina`,
+          state: {
+            dispersals: db.dispersals,
+            notifications: db.notifications,
+          },
+        });
+      }
       res.json({
         ok: true,
         ...result,
@@ -773,9 +901,23 @@ async function startServer() {
 
   // Revisión automática en segundo plano cada 60 segundos para detectar listas cuyo plazo está por vencer
   setInterval(() => {
-    checkAndSendExpiringReminders().catch(() => {
-      // ignore background timer errors
-    });
+    checkAndSendExpiringReminders()
+      .then((result) => {
+        if (result.remindersSent > 0) {
+          const db = readDatabase();
+          broadcastRealtimeEvent({
+            type: 'expiring_reminder',
+            summary: `Se enviaron ${result.remindersSent} alerta(s) automáticas por vencimiento próximo`,
+            state: {
+              dispersals: db.dispersals,
+              notifications: db.notifications,
+            },
+          });
+        }
+      })
+      .catch(() => {
+        // ignore background timer errors
+      });
   }, 60000);
 
   // Endpoint para registrar cancelación de nómina dispersada
@@ -793,9 +935,21 @@ async function startServer() {
         motivo,
         cancelledAt: new Date().toISOString(),
       };
-      writeDatabase({
+      const updatedDb = writeDatabase({
         emailLogs: [cancelEntry, ...prevLogs].slice(0, 200),
       });
+
+      broadcastRealtimeEvent({
+        type: 'dispersal_cancelled',
+        actorName: canceladoPor,
+        summary: `Dispersión de Semana ${semanaNumero} cancelada`,
+        state: {
+          dispersals: updatedDb.dispersals,
+          notifications: updatedDb.notifications,
+          releases: updatedDb.releases,
+        },
+      });
+
       res.json({ ok: true, timestamp: cancelEntry.cancelledAt });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });

@@ -19,15 +19,20 @@ import {
   Paperclip,
   Menu as MenuIcon,
   Moon,
-  Sun
+  Sun,
+  BellRing,
+  BellOff,
+  Radio,
 } from 'lucide-react';
 import {
   PayrollModificationLog,
   PortalNotification,
   PortalUser,
   UserRole,
-  getUserAllowedLists
+  getUserAllowedLists,
+  userHasModuleAccess,
 } from '../../types/portal';
+import { PushNotificationService, PushPermissionState } from '../../services/pushNotificationService';
 
 interface UserSessionBarProps {
   currentUser: PortalUser;
@@ -69,8 +74,71 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
   const [notifTab, setNotifTab] = useState<'avisos' | 'logs'>('avisos');
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [pushPerm, setPushPerm] = useState<PushPermissionState>(() =>
+    PushNotificationService.getPermissionState()
+  );
+  const [pushEnabled, setPushEnabled] = useState<boolean>(() =>
+    PushNotificationService.isUserPushEnabled()
+  );
   const notifRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setPushPerm(PushNotificationService.getPermissionState());
+    setPushEnabled(PushNotificationService.isUserPushEnabled());
+  }, [isNotifOpen]);
+
+  const handleEnableOrTogglePush = async () => {
+    const currentPerm = PushNotificationService.getPermissionState();
+    if (currentPerm === 'unsupported') return;
+    if (currentPerm !== 'granted') {
+      const nextPerm = await PushNotificationService.requestPermission();
+      setPushPerm(nextPerm);
+      const isNowEnabled = nextPerm === 'granted';
+      setPushEnabled(isNowEnabled);
+      if (isNowEnabled) {
+        await PushNotificationService.showNativeNotification({
+          title: '🔔 Notificaciones Push Activadas — CemenQtime',
+          body: `Hola ${currentUser.name}, recibirás alertas en tiempo real de nuevas incidencias y cambios en tu nómina sin recargar la página.`,
+          tag: 'cemenqtime-push-welcome',
+          targetTab: currentUser.role === 'supervisor' ? 'trabajar_listas' : 'semaforo',
+          soundKind: 'success',
+        });
+      }
+      return;
+    }
+
+    const nextEnabled = !pushEnabled;
+    PushNotificationService.setUserPushPreference(nextEnabled);
+    setPushEnabled(nextEnabled);
+    if (nextEnabled) {
+      await PushNotificationService.showNativeNotification({
+        title: '🔔 Alertas Push Reactivadas — CemenQtime',
+        body: 'Las alertas en tiempo real para tu sesión están activas.',
+        tag: 'cemenqtime-push-toggle',
+        soundKind: 'info',
+      });
+    }
+  };
+
+  const handleTestPushNotification = async () => {
+    if (PushNotificationService.getPermissionState() !== 'granted') {
+      await handleEnableOrTogglePush();
+      return;
+    }
+    PushNotificationService.setUserPushPreference(true);
+    setPushEnabled(true);
+    await PushNotificationService.showNativeNotification({
+      title: '⚡ Alerta en Tiempo Real · CemenQtime',
+      body:
+        currentUser.role === 'supervisor'
+          ? `Lista(s) activa(s): ${assignedLists.join(', ') || 'General'}. Recibirás avisos inmediatos de dispersión, vencimientos e incidencias.`
+          : 'Monitoreo Push activo: recibirás alertas inmediatas de nuevas incidencias y nóminas liberadas por supervisores.',
+      tag: `cemenqtime-test-${Date.now()}`,
+      targetTab: currentUser.role === 'supervisor' ? 'trabajar_listas' : 'incidencias',
+      soundKind: 'success',
+    });
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -98,7 +166,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
 
   const assignedLists = getUserAllowedLists(currentUser);
 
-  // Filtrar notificaciones relevantes para el usuario actual
+  // Filtrar notificaciones relevantes para el usuario actual (incluyendo alertas globales ALL para RH/Admin)
   const userNotifications = notifications.filter(n => {
     if (currentUser.role === 'admin' || currentUser.role === 'rh') return true;
     const targetSup = (n.targetSupervisor || '').toUpperCase();
@@ -287,10 +355,73 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                   )}
                 </div>
 
+                {/* Barra de Estado y Activación de Notificaciones Web Push en Tiempo Real */}
+                <div className="mb-2.5 p-2.5 rounded-xl bg-slate-100 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.06] flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                        pushEnabled && pushPerm === 'granted'
+                          ? 'bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/30'
+                          : 'bg-[#FEB95A]/15 text-[#FEB95A] border border-[#FEB95A]/30'
+                      }`}
+                    >
+                      {pushEnabled && pushPerm === 'granted' ? (
+                        <Radio className="w-3.5 h-3.5 animate-pulse" />
+                      ) : (
+                        <BellOff className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Notificaciones Push (Tiempo Real)</span>
+                        {pushEnabled && pushPerm === 'granted' && (
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-[#87888C] truncate">
+                        {pushPerm === 'unsupported'
+                          ? 'Sincronización en vivo activa en pantalla'
+                          : pushPerm === 'denied'
+                          ? 'Permiso bloqueado en el navegador · Alertas en pantalla activas'
+                          : pushEnabled && pushPerm === 'granted'
+                          ? 'Alertas instantáneas de nómina e incidencias sin refrescar'
+                          : 'Activa alertas Push de escritorio para avisos inmediatos'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {pushPerm !== 'unsupported' && pushPerm !== 'denied' && (
+                      <button
+                        type="button"
+                        onClick={handleEnableOrTogglePush}
+                        className={`px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold transition-all cursor-pointer flex items-center gap-1 ${
+                          pushEnabled && pushPerm === 'granted'
+                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25'
+                            : 'bg-[#A9DFD8] text-[#171821] hover:bg-[#92d4cc] shadow-sm'
+                        }`}
+                      >
+                        <BellRing className="w-3 h-3" />
+                        <span>{pushEnabled && pushPerm === 'granted' ? 'Push Activo' : 'Activar Push'}</span>
+                      </button>
+                    )}
+                    {pushPerm === 'granted' && (
+                      <button
+                        type="button"
+                        onClick={handleTestPushNotification}
+                        className="px-2 py-1.5 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] border border-white/[0.08] text-[10px] font-bold text-[#A9DFD8] transition-colors cursor-pointer"
+                        title="Enviar notificación Push de prueba"
+                      >
+                        Probar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 {notifTab === 'avisos' ? (
                   userNotifications.length === 0 ? (
                     <div className="p-6 text-center text-xs text-slate-500 dark:text-[#87888C]">
-                      No tienes notificaciones de dispersión pendientes.
+                      No tienes notificaciones de dispersión o incidencias pendientes.
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
@@ -299,7 +430,21 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                           key={n.id}
                           onClick={() => {
                             if (onMarkNotificationRead) onMarkNotificationRead(n.id);
-                            onTabChange('nomina');
+                            const isIncidentOrSchedule =
+                              n.titulo.toLowerCase().includes('horario') ||
+                              n.titulo.toLowerCase().includes('incidencia');
+                            if (isIncidentOrSchedule && userHasModuleAccess(currentUser, 'incidencias')) {
+                              onTabChange('incidencias');
+                            } else if (
+                              currentUser.role === 'supervisor' &&
+                              userHasModuleAccess(currentUser, 'trabajar_listas')
+                            ) {
+                              onTabChange('trabajar_listas');
+                            } else if (userHasModuleAccess(currentUser, 'nomina')) {
+                              onTabChange('nomina');
+                            } else {
+                              onTabChange('trabajar_listas');
+                            }
                             setIsNotifOpen(false);
                           }}
                           className={`p-3 rounded-xl border text-xs transition-all cursor-pointer ${

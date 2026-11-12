@@ -16,7 +16,8 @@ import {
   Send,
   CheckCircle2,
   ListChecks,
-  Clock
+  Clock,
+  FolderDown,
 } from 'lucide-react';
 import { PayrollWeekOption } from '../utils/calendarUtils';
 import { OvertimeRulesConfig, ReadingMode } from '../types/attendance';
@@ -42,14 +43,17 @@ interface ControlsBarProps {
   isActiveListDispersed?: boolean;
   dispersedSupervisorsCount?: number;
   onExportExcel: () => void;
+  onExportAllExcel?: () => void;
   onSendEmail: () => void;
   onPrint: () => void;
   canGenerate: boolean;
   canDisperse?: boolean;
   isWeekDispersed?: boolean;
   canExport: boolean;
+  canExportAll?: boolean;
   isGenerating: boolean;
   isExporting: boolean;
+  isExportingAll?: boolean;
   isSupervisor?: boolean;
   onReleasePayroll?: () => void;
   isPayrollReleased?: boolean;
@@ -79,14 +83,17 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   isActiveListDispersed = false,
   dispersedSupervisorsCount = 0,
   onExportExcel,
+  onExportAllExcel,
   onSendEmail,
   onPrint,
   canGenerate,
   canDisperse = false,
   isWeekDispersed = false,
   canExport,
+  canExportAll = false,
   isGenerating,
   isExporting,
+  isExportingAll = false,
   isSupervisor,
   onReleasePayroll,
   isPayrollReleased,
@@ -306,17 +313,43 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             </button>
           )}
 
-          {/* Botón Excel */}
+          {/* Botón Excel 1 (Individual / Lista Actual) */}
           <button
             type="button"
             onClick={onExportExcel}
-            disabled={!canExport || isExporting}
+            disabled={!canExport || isExporting || isExportingAll}
             className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#A9DFD8] border border-[#A9DFD8]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
-            title="Exportar archivo Excel por cada supervisor con formato ejecutivo"
+            title={
+              !canExport
+                ? 'Primero genera el reporte de asistencia para descargar la lista en Excel'
+                : 'Descargar archivo Excel de la lista actual o supervisor seleccionado'
+            }
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-[#A9DFD8]" />
-            {isExporting ? 'Exportando...' : 'Descargar Excel'}
+            <span>{isExporting ? 'Exportando...' : 'Descargar Excel'}</span>
           </button>
+
+          {/* Botón Excel 2 (Secundario: Descargar Todas las Listas de Golpe — Solo activo después de generar el reporte) */}
+          {onExportAllExcel && (
+            <button
+              type="button"
+              onClick={onExportAllExcel}
+              disabled={!canExportAll || isExporting || isExportingAll}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#20AEF3] border border-[#20AEF3]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+              title={
+                !canExportAll
+                  ? 'Disponible únicamente después de haber generado las listas con el botón "Generar Reporte"'
+                  : `Descargar de golpe todas las listas individuales en archivos Excel separados (${supervisors.length} supervisores)`
+              }
+            >
+              <FolderDown className="w-3.5 h-3.5 text-[#20AEF3]" />
+              <span>
+                {isExportingAll
+                  ? 'Descargando Listas...'
+                  : `Descargar Todas las Listas (${supervisors.length})`}
+              </span>
+            </button>
+          )}
 
           {/* Botón Liberar Nómina a RH (Para Supervisores) */}
           {isSupervisor && onReleasePayroll && (
@@ -345,16 +378,20 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             </button>
           )}
 
-          {/* Botón Correo */}
+          {/* Botón Enviar por Correo (Abre ventana pop-up configurable) */}
           <button
             type="button"
             onClick={onSendEmail}
             disabled={!canExport}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#FEB95A] border border-[#FEB95A]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
-            title="Abrir cliente de correo con formato y enlaces a formularios"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#FEB95A] border border-[#FEB95A]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            title={
+              !canExport
+                ? 'Primero genera el reporte para poder enviarlo por correo'
+                : 'Abrir ventana para configurar el mensaje y enviar la nómina al correo del supervisor o a un correo personalizado'
+            }
           >
             <Mail className="w-3.5 h-3.5 text-[#FEB95A]" />
-            Correo
+            <span>Enviar por Correo</span>
           </button>
 
           {/* Botón Imprimir */}

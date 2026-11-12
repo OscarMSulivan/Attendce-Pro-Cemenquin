@@ -45,8 +45,12 @@
   /* 1. Superficies y Contenedores Bento */
   body.light-mode .bg-\[\#171821\],
   body.light-mode .bg-\[\#171821\]\/95,
+  body.light-mode .bg-\[\#171821\]\/90,
   body.light-mode .bg-\[\#171821\]\/80,
   body.light-mode .bg-\[\#171821\]\/60,
+  body.light-mode .bg-\[\#1B1C26\],
+  body.light-mode .bg-\[\#1B1C26\]\/95,
+  body.light-mode .bg-\[\#1B1C26\]\/80,
   body.light-mode .bg-slate-950,
   body.light-mode :not(.fixed).bg-slate-950\/40,
   body.light-mode :not(.fixed).bg-slate-950\/50,
@@ -55,6 +59,7 @@
   body.light-mode :not(.fixed).bg-slate-950\/80,
   body.light-mode :not(.fixed).bg-slate-950\/90 {
     background-color: #f8fafc !important;
+    background-image: none !important;
     color: #0f172a !important;
     border-color: #e2e8f0 !important;
   }
@@ -62,6 +67,7 @@
   body.light-mode .bg-\[\#21222D\],
   body.light-mode .bg-\[\#21222D\]\/95,
   body.light-mode .bg-\[\#21222D\]\/98,
+  body.light-mode .bg-\[\#21222D\]\/90,
   body.light-mode .bg-slate-900,
   body.light-mode :not(.fixed).bg-slate-900\/98,
   body.light-mode :not(.fixed).bg-slate-900\/95,
@@ -69,6 +75,10 @@
   body.light-mode :not(.fixed).bg-slate-900\/80,
   body.light-mode :not(.fixed).bg-slate-900\/60,
   body.light-mode .from-\[\#21222D\],
+  body.light-mode .via-\[\#1B1C26\],
+  body.light-mode .to-\[\#171821\],
+  body.light-mode .to-\[\#1c2230\],
+  body.light-mode .to-\[\#21222D\],
   body.light-mode .from-slate-900,
   body.light-mode .from-indigo-950\/90,
   body.light-mode .via-blue-950\/80,
@@ -164,7 +174,10 @@
   }
 
   /* 4. Tipografía neutra de alta legibilidad */
-  body.light-mode .text-white {
+  body.light-mode .text-white,
+  body.light-mode .text-white\/90,
+  body.light-mode .text-white\/80,
+  body.light-mode .text-white\/70 {
     color: #0f172a !important;
   }
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { SidebarNav } from './components/SidebarNav';
 import { StatsPanel } from './components/StatsPanel';
 import { ExecutiveSummary } from './components/ExecutiveSummary';
@@ -44,7 +44,10 @@ import {
 import { parseEmployeesFile } from './parsers/employeeParser';
 import { parseBiometricEventsFile } from './parsers/biometricParser';
 import { parseVacationsFile } from './parsers/vacationParser';
-import { exportPayrollExcelBySupervisor } from './services/excelExportService';
+import {
+  exportPayrollExcelBySupervisor,
+  exportAllSupervisorPayrollsExcel,
+} from './services/excelExportService';
 import saveAs from 'file-saver';
 
 // Importaciones del Portal RH y Supervisores
@@ -55,6 +58,7 @@ import { IncidentsManagementView } from './components/portal/IncidentsManagement
 import { AdminUsersView } from './components/portal/AdminUsersView';
 import { NewIncidentModal } from './components/portal/NewIncidentModal';
 import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseModal';
+import { SendPayrollEmailModal } from './components/portal/SendPayrollEmailModal';
 import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
 import { DayResolutionPayload } from './components/portal/MissingPunchFormatModal';
@@ -64,6 +68,7 @@ import {
   DispersionWorkspaceMode,
 } from './components/portal/DispersionModeSelector';
 import { PortalService } from './services/portalService';
+import { PushNotificationService } from './services/pushNotificationService';
 import {
   PortalUser,
   IncidentRequest,
@@ -100,6 +105,8 @@ export default function App() {
   const [isLoadingVacations, setIsLoadingVacations] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isExportingAll, setIsExportingAll] = useState<boolean>(false);
+  const [isSendEmailModalOpen, setIsSendEmailModalOpen] = useState<boolean>(false);
 
   // Semanas de nómina
   const payrollWeeks = useMemo<PayrollWeekOption[]>(() => generatePayrollWeeks(2026), []);
@@ -397,6 +404,214 @@ export default function App() {
       return merged;
     });
   }, [incidents]);
+
+  // Referencias para detectar nuevos eventos en tiempo real sin duplicar alertas Push
+  const knownNotifIdsRef = useRef<Set<string>>(new Set(notifications.map(n => n.id)));
+  const knownIncidentStatusRef = useRef<Map<string, string>>(
+    new Map(incidents.map(inc => [inc.id, inc.status]))
+  );
+  const knownReleasesRef = useRef<Map<string, string>>(
+    new Map(Object.entries(releases).map(([k, v]) => [k, v.status]))
+  );
+
+  useEffect(() => {
+    notifications.forEach(n => knownNotifIdsRef.current.add(n.id));
+  }, [notifications]);
+
+  useEffect(() => {
+    incidents.forEach(inc => knownIncidentStatusRef.current.set(inc.id, inc.status));
+  }, [incidents]);
+
+  useEffect(() => {
+    Object.entries(releases).forEach(([k, v]) => knownReleasesRef.current.set(k, v.status));
+  }, [releases]);
+
+  // Suscripción a eventos en tiempo real (Server-Sent Events + BroadcastChannel + Web Push API) sin recargar la página
+  useEffect(() => {
+    PushNotificationService.initServiceWorker();
+
+    const unsubNav = PushNotificationService.onNotificationNavigate(data => {
+      if (data.supervisor) {
+        setSelectedSupervisor(data.supervisor);
+      }
+      if (data.targetTab) {
+        setPortalTab(data.targetTab);
+      }
+    });
+
+    const unsubStream = PushNotificationService.subscribe(payload => {
+      const incomingState = payload.state;
+      if (!incomingState) return;
+
+      // 1. Actualizar usuarios si cambiaron
+      if (Array.isArray(incomingState.users) && incomingState.users.length > 0) {
+        const normalizedUsers = incomingState.users.map(u => PortalService.normalizeUserRecord(u));
+        setPortalUsers(normalizedUsers);
+      }
+
+      // 2. Detectar nuevas notificaciones dirigidas al supervisor o RH en tiempo real
+      if (Array.isArray(incomingState.notifications)) {
+        const freshNotifs = incomingState.notifications.filter(
+          n => !knownNotifIdsRef.current.has(n.id)
+        );
+        freshNotifs.forEach(n => knownNotifIdsRef.current.add(n.id));
+        setNotifications(incomingState.notifications);
+
+        if (isAuthenticated && currentUser && freshNotifs.length > 0) {
+          const relevantNotifs = freshNotifs.filter(n =>
+            PushNotificationService.isSupervisorTargetMatch(
+              currentUser,
+              n.targetSupervisor,
+              n.targetUserId
+            )
+          );
+          relevantNotifs.forEach(n => {
+            const isCancel = n.titulo.toLowerCase().includes('cancelada');
+            const isUrgent = n.titulo.toLowerCase().includes('vencer') || n.titulo.toLowerCase().includes('urgente');
+            const isScheduleOrIncident =
+              n.titulo.toLowerCase().includes('horario') ||
+              n.titulo.toLowerCase().includes('incidencia');
+            const targetTab = isScheduleOrIncident
+              ? 'incidencias'
+              : currentUser.role === 'supervisor'
+              ? 'trabajar_listas'
+              : 'semaforo';
+
+            showToast(
+              n.mensaje,
+              isCancel || isUrgent ? 'warning' : 'info',
+              n.titulo,
+              6500
+            );
+            PushNotificationService.showNativeNotification({
+              title: n.titulo,
+              body: n.mensaje,
+              tag: n.id,
+              requireInteraction: isUrgent || isCancel,
+              targetTab,
+              supervisor: n.targetSupervisor !== 'ALL' ? n.targetSupervisor : undefined,
+              semana: n.semanaNumero,
+              soundKind: isCancel || isUrgent ? 'warning' : 'info',
+            });
+          });
+        }
+      }
+
+      // 3. Detectar nuevas incidencias o cambios de estatus en incidencias en tiempo real
+      if (Array.isArray(incomingState.incidents)) {
+        const prevMap = knownIncidentStatusRef.current;
+        const allowedSupLists = getUserAllowedLists(currentUser).map(s => s.toUpperCase());
+
+        incomingState.incidents.forEach(inc => {
+          const prevStatus = prevMap.get(inc.id);
+          const incSup = (inc.supervisorNombre || '').toUpperCase();
+          const belongsToSupervisor =
+            inc.solicitanteId === currentUser?.id || allowedSupLists.includes(incSup);
+
+          if (!prevStatus) {
+            // Nueva incidencia creada en otra sesión
+            prevMap.set(inc.id, inc.status);
+            if (isAuthenticated && currentUser) {
+              if (
+                currentUser.role === 'admin' ||
+                currentUser.role === 'rh' ||
+                belongsToSupervisor
+              ) {
+                const title = `📋 Nueva Incidencia: ${inc.tipo}`;
+                const body = `${inc.empleadoNombre} (#${inc.empleadoId}) · Lista ${inc.supervisorNombre} (${
+                  inc.autoAprobadaPorSupervisor ? 'Aprobada por Supervisor' : 'Pendiente de revisión'
+                })`;
+                showToast(body, 'info', title, 5500);
+                PushNotificationService.showNativeNotification({
+                  title,
+                  body,
+                  tag: `inc_new_${inc.id}`,
+                  targetTab: 'incidencias',
+                  supervisor: inc.supervisorNombre,
+                  soundKind: 'info',
+                });
+              }
+            }
+          } else if (prevStatus !== inc.status) {
+            // Cambio de estatus (Aprobada / Rechazada por RH)
+            prevMap.set(inc.id, inc.status);
+            if (isAuthenticated && currentUser && belongsToSupervisor) {
+              const isApproved = inc.status === 'aprobada';
+              const title = isApproved
+                ? `✅ Incidencia Aprobada: ${inc.tipo}`
+                : `⚠️ Incidencia Rechazada: ${inc.tipo}`;
+              const body = `Solicitud de ${inc.empleadoNombre} (#${inc.empleadoId}) fue ${inc.status} por ${
+                inc.revisadoPor || 'RH'
+              }.${inc.notasResolucion ? ` Nota: ${inc.notasResolucion}` : ''}`;
+              showToast(body, isApproved ? 'success' : 'warning', title, 6000);
+              PushNotificationService.showNativeNotification({
+                title,
+                body,
+                tag: `inc_status_${inc.id}_${inc.status}`,
+                targetTab: 'incidencias',
+                supervisor: inc.supervisorNombre,
+                soundKind: isApproved ? 'success' : 'warning',
+              });
+            }
+          }
+        });
+
+        setIncidents(incomingState.incidents);
+      }
+
+      // 4. Actualizar dispersiones en tiempo real sin recargar la página
+      if (Array.isArray(incomingState.dispersals)) {
+        setDispersals(incomingState.dispersals);
+      }
+
+      // 5. Detectar liberaciones de nómina en tiempo real
+      if (incomingState.releases && typeof incomingState.releases === 'object') {
+        const prevRelMap = knownReleasesRef.current;
+        Object.entries(incomingState.releases).forEach(([relKey, relObj]) => {
+          if (!relObj) return;
+          const prevRelStatus = prevRelMap.get(relKey);
+          if (prevRelStatus !== relObj.status) {
+            prevRelMap.set(relKey, relObj.status);
+            if (
+              isAuthenticated &&
+              currentUser &&
+              relObj.status === 'liberado' &&
+              (currentUser.role === 'admin' || currentUser.role === 'rh')
+            ) {
+              const title = `🟢 Nómina Liberada — ${relObj.supervisorNombre}`;
+              const body = `${relObj.liberadoPor || relObj.supervisorNombre} liberó la lista ${
+                relObj.supervisorNombre
+              } (Semana ${relObj.semanaNumero}) con ${relObj.empleadosCount} colaboradores.`;
+              showToast(body, 'success', title, 6000);
+              PushNotificationService.showNativeNotification({
+                title,
+                body,
+                tag: `rel_${relKey}`,
+                targetTab: 'semaforo',
+                supervisor: relObj.supervisorNombre,
+                semana: relObj.semanaNumero,
+                soundKind: 'success',
+              });
+            }
+          }
+        });
+        setReleases(incomingState.releases);
+      }
+
+      // 6. Actualizar reportes en vivo si el supervisor o RH está visualizando la semana activa
+      if (Array.isArray(incomingState.reportes) && incomingState.reportes.length > 0) {
+        setReportes(incomingState.reportes);
+        if (incomingState.resumen) {
+          setResumen(incomingState.resumen);
+        }
+      }
+    });
+
+    return () => {
+      unsubNav();
+      unsubStream();
+    };
+  }, [isAuthenticated, currentUser, showToast]);
 
   // Cargar estado inicial de empleados guardados
   useEffect(() => {
@@ -1347,36 +1562,46 @@ export default function App() {
     }
   };
 
-  // Enviar Correo con plantilla oficial
-  const handleSendEmail = () => {
-    const destino = emailDestino || config.emailDestino;
-    if (!destino || !destino.includes('@')) {
-      alert('Por favor ingresa un correo electrónico de nómina válido.');
+  // Descargar todas las listas de supervisores generadas de golpe
+  const handleExportAllExcel = async () => {
+    if (reportes.length === 0) {
+      showToast('Primero debes generar las listas de asistencia para poder descargar todas de golpe.', 'warning', 'Genera las Listas Primero');
       return;
     }
+    setIsExportingAll(true);
+    setStatusMessage('Generando y descargando todas las listas de Excel por supervisor...');
+    setStatusType('info');
 
-    const currentWeekObj = payrollWeeks.find(w => w.value === selectedWeek);
-    const numeroSemana = currentWeekObj?.weekNumber || 1;
+    try {
+      const currentWeekObj = payrollWeeks.find(w => w.value === selectedWeek);
+      const weekNumber = currentWeekObj?.weekNumber || 1;
 
-    const asunto = encodeURIComponent(`Asistencia de la semana ${numeroSemana}`);
-    const cuerpo = encodeURIComponent(
-`Buen día,
+      const downloadedFiles = await exportAllSupervisorPayrollsExcel(
+        reportes,
+        weekNumber,
+        allowedSupervisors.length > 0 ? allowedSupervisors : supervisorsList
+      );
 
-Se comparte el registro de asistencia correspondiente a la nómina No. ${numeroSemana}.
+      setStatusMessage(`✓ Descargadas ${downloadedFiles.length} lista(s) Excel de la Semana ${weekNumber}`);
+      setStatusType('success');
+      showToast(
+        `Se descargaron ${downloadedFiles.length} archivo(s) Excel correspondientes a todas las listas de la Semana ${weekNumber}.`,
+        'success',
+        'Descarga Masiva Completada'
+      );
+    } catch (err: any) {
+      console.error(err);
+      setStatusMessage(`✗ Error en descarga masiva de Excel: ${err.message}`);
+      setStatusType('error');
+      showToast(`Error al descargar todas las listas: ${err.message}`, 'error', 'Error de Exportación');
+    } finally {
+      setIsExportingAll(false);
+    }
+  };
 
-Les solicitamos atentamente:
-* Revisar la información y reportar cualquier incidencia en el apartado de comentarios.
-* No realizar modificaciones ni alteraciones en las horas de entrada y salida. Cualquier aclaración deberá registrarse únicamente en el apartado de comentarios.
-* Una vez validada la información, favor de subir el archivo al Drive correspondiente.
-
-Formularios:
-Prenómina: https://docs.google.com/forms/d/e/1FAIpQLSckXBk6pSA36Gdqs6jaw43h-HVrNvA-eTNKUanQoLX7LdTJ4A/viewform?pli=1
-Vacaciones, permisos y checadas sin gafete: https://docs.google.com/forms/d/e/1FAIpQLSd2BV7AIwtBR4Vyao0j6Yi3-wAsH3wZIpSXf9DaY1-sTLsvIw/viewform
-
-Saludos.`
-    );
-
-    window.location.href = `mailto:${destino}?subject=${asunto}&body=${cuerpo}`;
+  // Abrir ventana emergente para configurar y enviar correo (a correo manual o al de los supervisores)
+  const handleSendEmail = () => {
+    setIsSendEmailModalOpen(true);
   };
 
   // Imprimir
@@ -1889,6 +2114,7 @@ Saludos.`
 
   // Incidencias (Aprobar, Rechazar, Crear)
   const handleApproveIncident = (incidentId: string, notes?: string) => {
+    const targetInc = incidents.find(i => i.id === incidentId);
     setIncidents(prev => {
       const updated = prev.map(inc => {
         if (inc.id === incidentId) {
@@ -1905,12 +2131,35 @@ Saludos.`
       PortalService.saveIncidents(updated);
       return updated;
     });
+    if (targetInc) {
+      const supNotif: PortalNotification = {
+        id: `notif_inc_ok_${incidentId}_${Date.now()}`,
+        targetSupervisor: (targetInc.supervisorNombre || 'ALL').toUpperCase(),
+        targetUserId: targetInc.solicitanteId,
+        semanaNumero: currentWeekNumber,
+        semanaPeriodo: selectedWeek,
+        titulo: `✅ Incidencia Aprobada — ${targetInc.tipo} (${targetInc.empleadoNombre})`,
+        mensaje: `RH (${currentUser.name}) aprobó la solicitud de ${targetInc.tipo} para ${targetInc.empleadoNombre} (#${targetInc.empleadoId}). ${
+          notes ? `Nota: ${notes}` : 'Ya fue integrada a los cálculos de nómina.'
+        }`,
+        enviadoPor: currentUser.name,
+        fechaEnvio: new Date().toISOString(),
+        leida: false,
+        emailEnviado: false,
+      };
+      setNotifications(prev => {
+        const updatedNotifs = [supNotif, ...prev].slice(0, 100);
+        PortalService.saveNotifications(updatedNotifs);
+        return updatedNotifs;
+      });
+    }
     setStatusMessage('✓ Incidencia aprobada e integrada a los cálculos de nómina');
     setStatusType('success');
     showToast('La incidencia fue aprobada e integrada a los cálculos de nómina.', 'success', 'Incidencia Aprobada');
   };
 
   const handleRejectIncident = (incidentId: string, notes?: string) => {
+    const targetInc = incidents.find(i => i.id === incidentId);
     setIncidents(prev => {
       const updated = prev.map(inc => {
         if (inc.id === incidentId) {
@@ -1927,6 +2176,28 @@ Saludos.`
       PortalService.saveIncidents(updated);
       return updated;
     });
+    if (targetInc) {
+      const supNotif: PortalNotification = {
+        id: `notif_inc_rej_${incidentId}_${Date.now()}`,
+        targetSupervisor: (targetInc.supervisorNombre || 'ALL').toUpperCase(),
+        targetUserId: targetInc.solicitanteId,
+        semanaNumero: currentWeekNumber,
+        semanaPeriodo: selectedWeek,
+        titulo: `⚠️ Incidencia Rechazada — ${targetInc.tipo} (${targetInc.empleadoNombre})`,
+        mensaje: `RH (${currentUser.name}) rechazó la solicitud de ${targetInc.tipo} para ${targetInc.empleadoNombre} (#${targetInc.empleadoId}). ${
+          notes ? `Motivo: ${notes}` : ''
+        }`,
+        enviadoPor: currentUser.name,
+        fechaEnvio: new Date().toISOString(),
+        leida: false,
+        emailEnviado: false,
+      };
+      setNotifications(prev => {
+        const updatedNotifs = [supNotif, ...prev].slice(0, 100);
+        PortalService.saveNotifications(updatedNotifs);
+        return updatedNotifs;
+      });
+    }
     setStatusMessage('Incidencia marcada como rechazada');
     setStatusType('info');
     showToast('La solicitud de incidencia fue rechazada.', 'info', 'Incidencia Rechazada');
@@ -2545,6 +2816,8 @@ Saludos.`
         users={portalUsers}
         onLoginSuccess={handleLoginSuccess}
         onResetUserPassword={handleResetUserPassword}
+        theme={config.theme}
+        onToggleTheme={handleToggleTheme}
       />
     );
   }
@@ -2749,14 +3022,17 @@ Saludos.`
                   isActiveListDispersed={isActiveListDispersed}
                   dispersedSupervisorsCount={dispersedSupervisorsCount}
                   onExportExcel={handleExportExcel}
+                  onExportAllExcel={handleExportAllExcel}
                   onSendEmail={handleSendEmail}
                   onPrint={handlePrint}
                   canGenerate={Object.keys(empleadosDB).length > 0 && Object.keys(eventosDB).length > 0}
                   canDisperse={reportes.length > 0}
                   isWeekDispersed={isCurrentWeekDispersed}
                   canExport={filteredReports.length > 0}
+                  canExportAll={reportes.length > 0}
                   isGenerating={isGenerating}
                   isExporting={isExporting}
+                  isExportingAll={isExportingAll}
                   isSupervisor={false}
                   onReleasePayroll={() => setIsReleaseModalOpen(true)}
                   isPayrollReleased={isPayrollReleased}
@@ -2967,6 +3243,34 @@ Saludos.`
           pendingMissingPunchCount={supervisorTeamStats.pendingMissingPunchCount}
           onClose={() => setIsReleaseModalOpen(false)}
           onConfirmRelease={handleConfirmRelease}
+        />
+      )}
+
+      {isSendEmailModalOpen && (
+        <SendPayrollEmailModal
+          isOpen={isSendEmailModalOpen}
+          onClose={() => setIsSendEmailModalOpen(false)}
+          reportes={reportes}
+          supervisorsList={allowedSupervisors.length > 0 ? allowedSupervisors : supervisorsList}
+          selectedSupervisor={selectedSupervisor}
+          portalUsers={portalUsers}
+          currentUser={currentUser}
+          semanaNumero={currentWeekNumber}
+          semanaPeriodo={selectedWeek}
+          emailConfig={emailConfig}
+          defaultCustomEmail={emailDestino || config.emailDestino}
+          onSaveEmailConfig={handleSaveEmailConfig}
+          onDisperseAndNotify={(targetSupervisors, customMessage) =>
+            handleDisperseWeek(currentWeekNumber, selectedWeek, customMessage, targetSupervisors, false)
+          }
+          onAppendNotifications={(newNotifs) => {
+            setNotifications((prev) => {
+              const updated = [...newNotifs, ...prev];
+              PortalService.saveNotifications(updated);
+              return updated;
+            });
+          }}
+          onSuccessToast={(msg, title) => showToast(msg, 'success', title)}
         />
       )}
 
