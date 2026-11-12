@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AppConfig, DEFAULT_OVERTIME_RULES, Employee, ScheduleConfig } from '../types/attendance';
+import { AppConfig, DEFAULT_OVERTIME_RULES, Employee, EmployeeReport, PayrollSummary, ScheduleConfig } from '../types/attendance';
 import { normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarUtils';
 
 export const HORARIOS_POR_DEFECTO: Record<string, ScheduleConfig> = {
@@ -49,7 +49,8 @@ const STORAGE_KEYS = {
   HORARIOS: 'attendanceProHorarios_v2',
   ASIGNACIONES: 'attendanceProAsignaciones_v2',
   EMPLEADOS_DB: 'attendanceProEmpleadosDB_v2',
-  CONFIG: 'attendanceProConfig_v2'
+  CONFIG: 'attendanceProConfig_v2',
+  REPORTES_STATE: 'attendanceProReportesState_v2'
 };
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -175,6 +176,50 @@ export class StorageService {
       localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(updated));
     } catch (e) {
       console.error('Error saving config', e);
+    }
+  }
+
+  static saveReportesState(state: {
+    reportes: EmployeeReport[];
+    resumen: PayrollSummary | null;
+    selectedWeek?: string;
+  }): void {
+    try {
+      localStorage.setItem(
+        STORAGE_KEYS.REPORTES_STATE,
+        JSON.stringify({
+          reportes: state.reportes,
+          resumen: state.resumen,
+          selectedWeek: state.selectedWeek,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    } catch (e) {
+      console.warn('Error saving reportes state to localStorage', e);
+    }
+  }
+
+  static loadReportesState(): {
+    reportes: EmployeeReport[];
+    resumen: PayrollSummary | null;
+    selectedWeek?: string;
+    updatedAt?: string;
+  } | null {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.REPORTES_STATE);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.reportes)) {
+        return {
+          reportes: parsed.reportes,
+          resumen: parsed.resumen || null,
+          selectedWeek: parsed.selectedWeek,
+          updatedAt: parsed.updatedAt,
+        };
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 

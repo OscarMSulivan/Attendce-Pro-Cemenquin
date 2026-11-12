@@ -95,15 +95,27 @@ function readDatabase(): ServerPortalDatabase {
 function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalDatabase {
   ensureDataDir();
   const current = readDatabase();
-  const mergedConfig =
+  const mergedEmailConfig: ServerEmailConfig | undefined =
+    partial.emailConfig && typeof partial.emailConfig === 'object'
+      ? { ...(current.emailConfig || {}), ...partial.emailConfig }
+      : current.emailConfig;
+
+  const mergedConfig: Record<string, unknown> | undefined =
     partial.config && typeof partial.config === 'object'
-      ? { ...(current.config || {}), ...partial.config }
+      ? {
+          ...(current.config || {}),
+          ...partial.config,
+          ...(mergedEmailConfig ? { emailServer: mergedEmailConfig } : {}),
+        }
+      : mergedEmailConfig && current.config
+      ? { ...current.config, emailServer: mergedEmailConfig }
       : current.config;
 
   const updated: ServerPortalDatabase = {
     ...current,
     ...partial,
     ...(mergedConfig ? { config: mergedConfig } : {}),
+    ...(mergedEmailConfig ? { emailConfig: mergedEmailConfig } : {}),
     updatedAt: new Date().toISOString(),
   };
   fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), 'utf-8');

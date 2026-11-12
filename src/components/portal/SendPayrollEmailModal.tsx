@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Mail,
   Send,
@@ -110,7 +110,8 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
   const [extraInstruction, setExtraInstruction] = useState<string>('');
   const [attachExcelFile, setAttachExcelFile] = useState<boolean>(true);
   const [alsoDisperseInSystem, setAlsoDisperseInSystem] = useState<boolean>(true);
-  const [saveAsDefaultTemplate, setSaveAsDefaultTemplate] = useState<boolean>(false);
+  const [saveAsDefaultTemplate, setSaveAsDefaultTemplate] = useState<boolean>(true);
+  const [templateSavedBadge, setTemplateSavedBadge] = useState<boolean>(false);
 
   const [isSending, setIsSending] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{
@@ -118,10 +119,20 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
     message: string;
   } | null>(null);
 
-  // Inicializar selección cuando se abre el modal
+  const wasOpenRef = useRef<boolean>(false);
+
+  // Inicializar selección únicamente cuando el modal se abre (transición false -> true)
+  // para nunca borrar ni sobreescribir lo que el usuario está escribiendo en la plantilla
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
     setFeedback(null);
+    setTemplateSavedBadge(false);
     setSubjectTemplate(
       emailConfig.asuntoDispersion ||
         '📋 [CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}'
@@ -144,6 +155,17 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
       setCustomEmailInput(defaultCustomEmail || '');
     }
   }, [isOpen, selectedSupervisor, supervisorsList, supervisorDirectory, emailConfig, defaultCustomEmail]);
+
+  const handleSaveTemplateNow = () => {
+    if (!onSaveEmailConfig) return;
+    onSaveEmailConfig({
+      ...emailConfig,
+      asuntoDispersion: subjectTemplate,
+      mensajeDispersion: bodyTemplate,
+    });
+    setTemplateSavedBadge(true);
+    setTimeout(() => setTemplateSavedBadge(false), 3500);
+  };
 
   if (!isOpen) return null;
 
@@ -703,16 +725,31 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
                 <span>2. Personalizar Asunto y Mensaje del Correo</span>
               </label>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setSubjectTemplate(defaultSubject);
-                  setBodyTemplate(defaultBody);
-                }}
-                className="text-[11px] font-bold text-[#87888C] hover:text-white flex items-center gap-1 cursor-pointer"
-              >
-                <RotateCcw className="w-3 h-3" /> Restaurar texto base
-              </button>
+              <div className="flex items-center gap-2">
+                {onSaveEmailConfig && (
+                  <button
+                    type="button"
+                    onClick={handleSaveTemplateNow}
+                    className="px-2.5 py-1 rounded-lg bg-[#A9DFD8]/15 hover:bg-[#A9DFD8]/25 border border-[#A9DFD8]/35 text-[11px] font-bold text-[#A9DFD8] flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>{templateSavedBadge ? '¡Plantilla Guardada!' : 'Guardar Plantilla'}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const baseSub =
+                      '📋 [CemenQtime] Nómina Semana {semana} Lista para Validación — {supervisor}';
+                    const baseBod = `Hola {nombre},\n\nEl área de Nóminas ({dispersado_por}) te comparte la lista de asistencia correspondiente a la Semana {semana} ({periodo}).\n\n⏳ TIEMPO LÍMITE DE LIBERACIÓN: {fecha_limite}\n\nPor favor ingresa al sistema CemenQtime para revisar las checadas de tu equipo, autorizar tiempos extras o subir formatos de respaldo y liberar tu nómina a tiempo.`;
+                    setSubjectTemplate(baseSub);
+                    setBodyTemplate(baseBod);
+                  }}
+                  className="text-[11px] font-bold text-[#87888C] hover:text-white flex items-center gap-1 cursor-pointer"
+                >
+                  <RotateCcw className="w-3 h-3" /> Restaurar texto base
+                </button>
+              </div>
             </div>
 
             <div>
@@ -724,7 +761,6 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
                 value={subjectTemplate}
                 onChange={(e) => setSubjectTemplate(e.target.value)}
                 className="w-full rounded-xl px-3.5 py-2.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-xs font-semibold text-white outline-none"
-                required
               />
             </div>
 
@@ -755,7 +791,6 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
                 value={bodyTemplate}
                 onChange={(e) => setBodyTemplate(e.target.value)}
                 className="w-full rounded-xl p-3.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-xs text-slate-100 leading-relaxed outline-none font-sans resize-y"
-                required
               />
             </div>
 

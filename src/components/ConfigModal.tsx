@@ -69,6 +69,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
     setSmtpFeedback(null);
     try {
       const cleaned: EmailServerConfig = {
+        ...PortalService.loadEmailConfig(),
+        ...(emailConfig || {}),
+        ...smtpForm,
         smtpHost: (smtpForm.smtpHost || 'smtp.gmail.com').trim(),
         smtpPort: Number(smtpForm.smtpPort) || 587,
         smtpUser: (smtpForm.smtpUser || '').trim(),
@@ -109,6 +112,9 @@ export const ConfigModal: React.FC<ConfigModalProps> = ({
   const handleSave = () => {
     if (canConfigureSmtp) {
       const cleanedSmtp: EmailServerConfig = {
+        ...PortalService.loadEmailConfig(),
+        ...(emailConfig || {}),
+        ...smtpForm,
         smtpHost: (smtpForm.smtpHost || 'smtp.gmail.com').trim(),
         smtpPort: Number(smtpForm.smtpPort) || 587,
         smtpUser: (smtpForm.smtpUser || '').trim(),

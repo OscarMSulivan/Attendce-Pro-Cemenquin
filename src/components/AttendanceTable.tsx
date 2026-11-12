@@ -655,8 +655,13 @@ const DayRow: React.FC<DayRowProps> = ({
       {/* Incidencia, formatos, advertencias y acciones de resolución */}
       <td className="p-3 pr-4 font-sans min-w-[290px] align-top">
         <div className="flex flex-col gap-2">
-          {/* Bloqueo estricto para supervisores en días de Asistencia normal o Descanso */}
-          {isSupervisorMode && (day.incidencia === 'Asistencia' || day.incidencia === 'Descanso' || day.incidencia === 'Festivo') ? (
+          {/* Bloqueo estricto para supervisores únicamente en días de Asistencia completa original o Descanso/Festivo sin modificar */}
+          {isSupervisorMode &&
+          !day.modificadoPorSupervisor &&
+          !day.huerfana &&
+          ((day.incidencia === 'Asistencia' && tieneEntradaValida && tieneSalidaValida) ||
+            day.incidencia === 'Descanso' ||
+            day.incidencia === 'Festivo') ? (
             <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-950/80 border border-slate-800 text-slate-300">
               <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
               <span className="text-xs font-semibold text-slate-200">
@@ -668,18 +673,35 @@ const DayRow: React.FC<DayRowProps> = ({
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              <select
-                value={day.incidencia}
-                onChange={(e) => onChangeIncidence(e.target.value)}
-                className="flex-1 text-xs rounded-md px-2 py-1 bg-slate-950 border border-slate-800 text-slate-200 outline-none focus:border-amber-500/60"
-              >
-                {(isSupervisorMode ? OPCIONES_INCIDENCIA_SUPERVISOR : OPCIONES_INCIDENCIA).map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt || '(Sin incidencia)'}
-                  </option>
-                ))}
-                <option value="Falta Confirmada">Falta Confirmada (No asistió)</option>
-              </select>
+              {(() => {
+                const baseOptions = isSupervisorMode
+                  ? OPCIONES_INCIDENCIA_SUPERVISOR
+                  : OPCIONES_INCIDENCIA;
+                const currentInc = day.incidencia || '';
+                const allOptions =
+                  currentInc && !baseOptions.includes(currentInc)
+                    ? [...baseOptions, currentInc]
+                    : baseOptions;
+                return (
+                  <select
+                    value={currentInc}
+                    onChange={(e) => onChangeIncidence(e.target.value)}
+                    className={`flex-1 text-xs rounded-md px-2 py-1 bg-slate-950 border outline-none transition-colors ${
+                      day.modificadoPorSupervisor
+                        ? 'border-purple-500/60 text-purple-200 font-semibold focus:border-purple-400'
+                        : 'border-slate-800 text-slate-200 focus:border-amber-500/60'
+                    }`}
+                  >
+                    {allOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt === 'Falta Confirmada'
+                          ? 'Falta Confirmada (No asistió)'
+                          : opt || '(Sin incidencia)'}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
             </div>
           )}
 

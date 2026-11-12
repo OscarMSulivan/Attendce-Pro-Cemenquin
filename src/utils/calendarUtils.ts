@@ -32,23 +32,37 @@ export const OPCIONES_INCIDENCIA = [
   "",
   "Asistencia",
   "Retardo",
+  "Retardo Excesivo",
+  "Falta",
   "Falta Injustificada",
+  "Falta Confirmada",
+  "Checada sin Gafete",
   "Checado sin Gafete",
-  "Permiso sin Goce",
-  "Pase Medico",
+  "Permiso sin goce",
+  "Permiso con goce",
+  "Pase Médico",
+  "Vacaciones",
+  "Incapacidad",
   "Descanso",
   "Festivo"
 ];
 
 // Opciones disponibles para selección manual por parte del Supervisor
-// Festivos, Vacaciones, Permisos con goce, Incapacidades y Primas Dominicales son automáticos o por solicitud formal
 export const OPCIONES_INCIDENCIA_SUPERVISOR = [
   "",
+  "Asistencia",
   "Retardo",
+  "Retardo Excesivo",
+  "Falta",
   "Falta Injustificada",
+  "Falta Confirmada",
+  "Checada sin Gafete",
   "Checado sin Gafete",
-  "Permiso sin Goce",
-  "Pase Medico"
+  "Permiso sin goce",
+  "Permiso con goce",
+  "Pase Médico",
+  "Vacaciones",
+  "Incapacidad"
 ];
 
 /**

@@ -110,7 +110,9 @@ export default function App() {
 
   // Semanas de nómina
   const payrollWeeks = useMemo<PayrollWeekOption[]>(() => generatePayrollWeeks(2026), []);
-  const [selectedWeek, setSelectedWeek] = useState<string>(() => payrollWeeks[0]?.value || '');
+  const [selectedWeek, setSelectedWeek] = useState<string>(
+    () => StorageService.loadReportesState()?.selectedWeek || payrollWeeks[0]?.value || ''
+  );
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [emailDestino, setEmailDestino] = useState<string>(config.emailDestino || '');
@@ -132,9 +134,13 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Reporte calculado
-  const [reportes, setReportes] = useState<EmployeeReport[]>([]);
-  const [resumen, setResumen] = useState<PayrollSummary | null>(null);
+  // Reporte calculado (hidratado inicialmente desde localStorage para nunca perder ediciones locales)
+  const [reportes, setReportes] = useState<EmployeeReport[]>(
+    () => StorageService.loadReportesState()?.reportes || []
+  );
+  const [resumen, setResumen] = useState<PayrollSummary | null>(
+    () => StorageService.loadReportesState()?.resumen || null
+  );
 
   // Modales
   const [isSchedulesOpen, setIsSchedulesOpen] = useState<boolean>(false);
@@ -192,13 +198,29 @@ export default function App() {
             setAsignaciones(serverData.asignaciones);
             StorageService.saveAsignaciones(serverData.asignaciones);
           }
-          if (serverData.config && Object.keys(serverData.config).length > 0) {
-            setConfig(prev => ({ ...prev, ...serverData.config }));
-            if (serverData.config.emailServer) {
-              setEmailConfig(serverData.config.emailServer);
-              PortalService.saveEmailConfig(serverData.config.emailServer);
-            }
+          const serverEmailCfg =
+            (serverData as any).emailConfig ||
+            (serverData.config && typeof serverData.config === 'object'
+              ? serverData.config.emailServer
+              : undefined);
+
+          if (serverEmailCfg && typeof serverEmailCfg === 'object') {
+            const mergedEmail = {
+              ...PortalService.loadEmailConfig(),
+              ...serverEmailCfg,
+            };
+            setEmailConfig(mergedEmail);
+            PortalService.saveEmailConfig(mergedEmail);
           }
+
+          if (serverData.config && Object.keys(serverData.config).length > 0) {
+            setConfig(prev => ({
+              ...prev,
+              ...serverData.config,
+              ...(serverEmailCfg ? { emailServer: { ...PortalService.loadEmailConfig(), ...serverEmailCfg } } : {}),
+            }));
+          }
+
           if (serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0) {
             setEmpleadosDB(serverData.empleadosDB);
             StorageService.saveEmployees(serverData.empleadosDB);
@@ -237,6 +259,27 @@ export default function App() {
             setSelectedWeek(serverData.selectedWeek);
           }
 
+          // Combinar reportes guardados en servidor y en localStorage para preservar cualquier modificación de incidencias
+          const localRepState = StorageService.loadReportesState();
+          const localReports =
+            localRepState &&
+            (!localRepState.selectedWeek || localRepState.selectedWeek === hydratedWeek)
+              ? localRepState.reportes
+              : [];
+          const serverReports: EmployeeReport[] = Array.isArray(serverData.reportes)
+            ? serverData.reportes
+            : [];
+
+          const findSavedDay = (empId: string, isoDate: string) => {
+            const localEmp = localReports.find(r => r.empleado.id === empId);
+            const localDay = localEmp?.dias.find(d => d.isoDate === isoDate);
+            const srvEmp = serverReports.find(r => r.empleado.id === empId);
+            const srvDay = srvEmp?.dias.find((d: any) => d.isoDate === isoDate);
+            if (localDay && localDay.modificadoPorSupervisor) return localDay;
+            if (srvDay && srvDay.modificadoPorSupervisor) return srvDay;
+            return localDay || srvDay;
+          };
+
           if (serverData.eventosDB && Object.keys(serverData.eventosDB).length > 0) {
             const reconsolidado = consolidarEventosConHorarios(
               serverData.eventosDB,
@@ -250,8 +293,7 @@ export default function App() {
             setEventosDB(reconsolidado);
 
             if (
-              Array.isArray(serverData.reportes) &&
-              serverData.reportes.length > 0 &&
+              (serverReports.length > 0 || localReports.length > 0) &&
               hydratedWeek &&
               Object.keys(hydratedEmpleados).length > 0
             ) {
@@ -272,37 +314,67 @@ export default function App() {
               );
 
               const merged = recalculados.map(newRep => {
-                const prevRep = serverData.reportes!.find((r: EmployeeReport) => r.empleado.id === newRep.empleado.id);
-                if (!prevRep) return newRep;
                 let sumN = 0;
                 let sumE = 0;
+                let empAsist = 0;
+                let empFaltas = 0;
+                let empRet = 0;
+
                 const diasMerged = newRep.dias.map(nd => {
-                  const pd = prevRep.dias.find((d: any) => d.isoDate === nd.isoDate);
-                  if (pd && pd.modificadoPorSupervisor) {
-                    sumN += pd.hNormal;
-                    if (pd.horasExtrasAutorizadas === true) sumE += pd.hExtra;
-                    return { ...pd, horarioProgramado: nd.horarioProgramado };
-                  }
-                  sumN += nd.hNormal;
-                  if (nd.horasExtrasAutorizadas === true) sumE += nd.hExtra;
-                  return nd;
+                  const pd = findSavedDay(newRep.empleado.id, nd.isoDate);
+                  const wasEdited =
+                    pd &&
+                    (pd.modificadoPorSupervisor ||
+                      Boolean(pd.notaSupervisorDia) ||
+                      pd.horasExtrasAutorizadas !== undefined ||
+                      Boolean(pd.formatoSubidoNombre) ||
+                      (pd.incidencia !== undefined && pd.incidencia !== nd.incidencia));
+
+                  const chosen = wasEdited
+                    ? {
+                        ...pd,
+                        modificadoPorSupervisor: Boolean(
+                          pd.modificadoPorSupervisor || pd.incidencia !== nd.incidencia
+                        ),
+                        horarioProgramado: nd.horarioProgramado,
+                      }
+                    : nd;
+
+                  sumN += chosen.hNormal;
+                  if (chosen.horasExtrasAutorizadas === true) sumE += chosen.hExtra;
+                  const incUp = (chosen.incidencia || '').toUpperCase();
+                  if (chosen.incidencia === 'Asistencia') empAsist++;
+                  else if (incUp.includes('FALTA')) empFaltas++;
+                  else if (incUp.includes('RETARDO')) empRet++;
+                  return chosen;
                 });
-                return { ...newRep, dias: diasMerged, totalNormal: sumN, totalExtra: sumE };
+
+                const esPerfecta = empFaltas === 0 && empRet === 0 && empAsist > 0;
+                return {
+                  ...newRep,
+                  dias: diasMerged,
+                  totalNormal: sumN,
+                  totalExtra: sumE,
+                  asistencias: empAsist,
+                  faltas: empFaltas,
+                  retardos: empRet,
+                  asistenciaPerfecta: esPerfecta,
+                };
               });
 
               setReportes(merged);
               if (serverData.resumen) {
                 setResumen(serverData.resumen);
               }
-            } else if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
-              setReportes(serverData.reportes);
+            } else if (serverReports.length > 0) {
+              setReportes(serverReports);
               if (serverData.resumen) {
                 setResumen(serverData.resumen);
               }
             }
           } else {
-            if (Array.isArray(serverData.reportes) && serverData.reportes.length > 0) {
-              setReportes(serverData.reportes);
+            if (serverReports.length > 0) {
+              setReportes(serverReports);
             }
             if (serverData.resumen) {
               setResumen(serverData.resumen);
@@ -314,6 +386,17 @@ export default function App() {
         setIsServerHydrated(true);
       });
   }, []);
+
+  // Guardar inmediatamente en localStorage cada vez que cambian reportes, resumen o semana seleccionada
+  useEffect(() => {
+    if (reportes.length > 0) {
+      StorageService.saveReportesState({
+        reportes,
+        resumen,
+        selectedWeek,
+      });
+    }
+  }, [reportes, resumen, selectedWeek]);
 
   // Guardar automáticamente en el servidor Hostinger KVM 2 cualquier cambio en empleados, checadas, reportes trabajados o configuración
   useEffect(() => {
@@ -328,10 +411,13 @@ export default function App() {
         selectedWeek,
         horarios,
         asignaciones,
-        config,
+        config: {
+          ...config,
+          emailServer: emailConfig,
+        },
         emailConfig,
       });
-    }, 350);
+    }, 250);
     return () => clearTimeout(timer);
   }, [
     isServerHydrated,
@@ -1004,18 +1090,49 @@ export default function App() {
     }, 150);
   };
 
-  // Actualización en tiempo real de una incidencia editada por el usuario
+  // Sincronizar snapshot de la dispersión activa cada vez que se modifica algún día del reporte
+  const syncActiveDispersalSnapshot = useCallback(
+    (updatedReportes: EmployeeReport[], weekStr: string) => {
+      if (updatedReportes.length === 0) return;
+      const weekObj = payrollWeeks.find(w => w.value === weekStr);
+      const weekNum = weekObj?.weekNumber;
+      if (!weekNum) return;
+
+      setDispersals(prev => {
+        const idx = prev.findIndex(d => d.semanaNumero === weekNum);
+        if (idx < 0) return prev;
+        const totalNorm = updatedReportes.reduce((s, r) => s + r.totalNormal, 0);
+        const totalExt = updatedReportes.reduce((s, r) => s + r.totalExtra, 0);
+        const next = [...prev];
+        next[idx] = {
+          ...next[idx],
+          totalHorasNormales: totalNorm,
+          totalHorasExtras: totalExt,
+          reportesSnapshot: updatedReportes,
+        };
+        PortalService.saveDispersals(next);
+        return next;
+      });
+    },
+    [payrollWeeks]
+  );
+
+  // Actualización en tiempo real y almacenamiento permanente de una incidencia editada por el usuario
   const handleUpdateDayIncidence = (employeeId: string, isoDate: string, newIncidence: string) => {
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
         if (rep.empleado.id !== employeeId) return rep;
 
+        let sumN = 0;
+        let sumE = 0;
         let empAsist = 0;
         let empFaltas = 0;
         let empRet = 0;
 
         const updatedDias = rep.dias.map(d => {
           if (d.isoDate !== isoDate) {
+            sumN += d.hNormal;
+            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
             if (d.incidencia === 'Asistencia') empAsist++;
             else if (d.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
             else if (d.incidencia.toUpperCase().includes('RETARDO')) empRet++;
@@ -1023,19 +1140,68 @@ export default function App() {
           }
 
           const incUpper = newIncidence.toUpperCase();
-          if (newIncidence === 'Asistencia') empAsist++;
-          else if (incUpper.includes('FALTA')) empFaltas++;
-          else if (incUpper.includes('RETARDO')) empRet++;
+          const isFalta = incUpper.includes('FALTA');
+          const isSinGoce = incUpper.includes('SIN GOCE');
+          const isPaidOrJustified =
+            newIncidence === 'Asistencia' ||
+            incUpper.includes('VACACIONES') ||
+            incUpper.includes('CON GOCE') ||
+            incUpper.includes('PASE') ||
+            incUpper.includes('INCAPACIDAD') ||
+            incUpper.includes('CHECAD') ||
+            incUpper.includes('RETARDO') ||
+            incUpper.includes('FESTIVO');
+
+          let nextHNormal = d.hNormal;
+          let nextHExtra = d.hExtra;
+          let nextHorasExtrasAut = d.horasExtrasAutorizadas;
+
+          if (isFalta || isSinGoce || newIncidence === 'Descanso') {
+            nextHNormal = 0;
+            nextHExtra = 0;
+            nextHorasExtrasAut = false;
+          } else if (isPaidOrJustified && d.hNormal === 0 && d.horarioProgramado) {
+            nextHNormal = config.jornadaBase || 8;
+          }
+
+          sumN += nextHNormal;
+          if (nextHorasExtrasAut === true) sumE += nextHExtra;
+
+          if (newIncidence === 'Asistencia' || (isPaidOrJustified && !incUpper.includes('RETARDO'))) {
+            empAsist++;
+          } else if (isFalta) {
+            empFaltas++;
+          } else if (incUpper.includes('RETARDO')) {
+            empRet++;
+          }
 
           let rowClass = d.rowClass;
-          if (incUpper.includes('FALTA')) rowClass = 'row-danger';
-          else if (d.huerfana) rowClass = 'row-warning';
-          else if (d.hNormal > 0) rowClass = 'row-success';
+          if (isFalta) rowClass = 'row-danger';
+          else if (isSinGoce) rowClass = 'row-warning';
+          else if (nextHNormal > 0 || isPaidOrJustified) rowClass = 'row-success';
+          else rowClass = 'row-default';
+
+          const tipoMod = isFalta
+            ? ('falta_confirmada' as const)
+            : incUpper.includes('CHECAD')
+            ? ('formato_checada_sin_gafete' as const)
+            : ('formato_permiso' as const);
 
           return {
             ...d,
+            entradaOriginal: d.entradaOriginal ?? d.entrada,
+            salidaOriginal: d.salidaOriginal ?? d.salida,
             incidencia: newIncidence,
-            rowClass
+            hNormal: nextHNormal,
+            hExtra: nextHExtra,
+            horasExtrasAutorizadas: nextHorasExtrasAut,
+            huerfana: false,
+            rowClass,
+            modificadoPorSupervisor: true,
+            tipoModificacionSupervisor: tipoMod,
+            advertencia: newIncidence
+              ? `🟣 INCIDENCIA REGISTRADA: ${newIncidence.toUpperCase()}`
+              : '',
           };
         });
 
@@ -1044,6 +1210,8 @@ export default function App() {
         return {
           ...rep,
           dias: updatedDias,
+          totalNormal: sumN,
+          totalExtra: sumE,
           asistencias: empAsist,
           faltas: empFaltas,
           retardos: empRet,
@@ -1051,9 +1219,21 @@ export default function App() {
         };
       });
 
-      setResumen(recomputeSummaryFromReports(updated));
+      const nextResumen = recomputeSummaryFromReports(updated);
+      setResumen(nextResumen);
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen: nextResumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
       return updated;
     });
+
+    setStatusMessage(
+      `✓ Incidencia "${newIncidence || 'Sin incidencia'}" guardada y almacenada para colaborador #${employeeId} (${isoDate})`
+    );
+    setStatusType('success');
   };
 
   // Actualización en tiempo real cuando el usuario corrige o intercambia Entrada / Salida manualmente en la tabla
@@ -1141,7 +1321,14 @@ export default function App() {
         };
       });
 
-      setResumen(recomputeSummaryFromReports(updated));
+      const nextResumen = recomputeSummaryFromReports(updated);
+      setResumen(nextResumen);
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen: nextResumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
       return updated;
     });
 
@@ -1149,17 +1336,32 @@ export default function App() {
     setStatusType('info');
   };
 
-  // Actualizar nota o comentario del supervisor en un día específico
+  // Actualizar nota o comentario del supervisor en un día específico y preservarlo
   const handleUpdateDayNote = (employeeId: string, isoDate: string, note: string) => {
-    setReportes(prevReportes =>
-      prevReportes.map(rep => {
+    setReportes(prevReportes => {
+      const updated = prevReportes.map(rep => {
         if (rep.empleado.id !== employeeId) return rep;
         return {
           ...rep,
-          dias: rep.dias.map(d => (d.isoDate === isoDate ? { ...d, notaSupervisorDia: note } : d))
+          dias: rep.dias.map(d =>
+            d.isoDate === isoDate
+              ? {
+                  ...d,
+                  notaSupervisorDia: note,
+                  modificadoPorSupervisor: Boolean(d.modificadoPorSupervisor || note.trim()),
+                }
+              : d
+          ),
         };
-      })
-    );
+      });
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
+      return updated;
+    });
   };
 
   // Autorizar o desautorizar tiempo extra detectado por el supervisor y recalcular el total de horas extras en tiempo real
@@ -1186,7 +1388,14 @@ export default function App() {
           totalExtra: newTotalExtra
         };
       });
-      setResumen(recomputeSummaryFromReports(updated));
+      const nextResumen = recomputeSummaryFromReports(updated);
+      setResumen(nextResumen);
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen: nextResumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
       return updated;
     });
     setStatusMessage(
@@ -1253,7 +1462,14 @@ export default function App() {
         };
       });
 
-      setResumen(recomputeSummaryFromReports(updated));
+      const nextResumen = recomputeSummaryFromReports(updated);
+      setResumen(nextResumen);
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen: nextResumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
       return updated;
     });
 
@@ -1429,7 +1645,14 @@ export default function App() {
         };
       });
 
-      setResumen(recomputeSummaryFromReports(updated));
+      const nextResumen = recomputeSummaryFromReports(updated);
+      setResumen(nextResumen);
+      StorageService.saveReportesState({
+        reportes: updated,
+        resumen: nextResumen,
+        selectedWeek,
+      });
+      syncActiveDispersalSnapshot(updated, selectedWeek);
       return updated;
     });
 
@@ -2424,18 +2647,28 @@ export default function App() {
     );
   };
 
-  // Guardar credenciales del servidor SMTP de manera segura y sincronizar con el backend
+  // Guardar credenciales y plantillas del servidor de correo de manera segura y sincronizar con el backend
   const handleSaveEmailConfig = (newEmailCfg: EmailServerConfig) => {
-    setEmailConfig(newEmailCfg);
-    PortalService.saveEmailConfig(newEmailCfg);
+    const mergedCfg: EmailServerConfig = {
+      ...PortalService.loadEmailConfig(),
+      ...emailConfig,
+      ...newEmailCfg,
+    };
+    setEmailConfig(mergedCfg);
+    setConfig(prev => {
+      const next = { ...prev, emailServer: mergedCfg };
+      StorageService.saveConfig(next);
+      return next;
+    });
+    PortalService.saveEmailConfig(mergedCfg);
     setStatusMessage(
-      `✓ Credenciales SMTP actualizadas (${newEmailCfg.smtpHost}:${newEmailCfg.smtpPort} — ${newEmailCfg.smtpUser || 'sin usuario'})`
+      `✓ Configuración y plantillas de correo guardadas (${mergedCfg.smtpHost}:${mergedCfg.smtpPort})`
     );
     setStatusType('success');
     showToast(
-      `Credenciales SMTP (${newEmailCfg.smtpHost}:${newEmailCfg.smtpPort}) guardadas de manera segura para el envío automático de correos de dispersión.`,
+      `La plantilla y configuración de correo (${mergedCfg.smtpHost}:${mergedCfg.smtpPort}) se guardaron de manera permanente.`,
       'success',
-      'Credenciales SMTP Guardadas'
+      'Plantilla y Correo Guardados'
     );
   };
 
@@ -2757,8 +2990,52 @@ export default function App() {
       setSelectedSupervisor('');
 
       if (Array.isArray(disp.reportesSnapshot) && disp.reportesSnapshot.length > 0) {
-        setReportes(disp.reportesSnapshot);
-        setResumen(recomputeSummaryFromReports(disp.reportesSnapshot));
+        // Si ya tenemos reportes en memoria de esta misma semana con días modificados, preservar las ediciones
+        const mergedSnap = (disp.reportesSnapshot as EmployeeReport[]).map(snapRep => {
+          const currentRep =
+            selectedWeek === disp.semanaPeriodo
+              ? reportes.find(r => r.empleado.id === snapRep.empleado.id)
+              : undefined;
+          if (!currentRep) return snapRep;
+
+          let sumN = 0;
+          let sumE = 0;
+          let empAsist = 0;
+          let empFaltas = 0;
+          let empRet = 0;
+
+          const diasMerged = snapRep.dias.map(sd => {
+            const cd = currentRep.dias.find(d => d.isoDate === sd.isoDate);
+            const useCurrent =
+              cd &&
+              (cd.modificadoPorSupervisor ||
+                Boolean(cd.notaSupervisorDia) ||
+                cd.horasExtrasAutorizadas !== undefined ||
+                cd.incidencia !== sd.incidencia);
+            const chosen = useCurrent ? cd : sd;
+            sumN += chosen.hNormal;
+            if (chosen.horasExtrasAutorizadas === true) sumE += chosen.hExtra;
+            const incUp = (chosen.incidencia || '').toUpperCase();
+            if (chosen.incidencia === 'Asistencia') empAsist++;
+            else if (incUp.includes('FALTA')) empFaltas++;
+            else if (incUp.includes('RETARDO')) empRet++;
+            return chosen;
+          });
+
+          return {
+            ...snapRep,
+            dias: diasMerged,
+            totalNormal: sumN,
+            totalExtra: sumE,
+            asistencias: empAsist,
+            faltas: empFaltas,
+            retardos: empRet,
+            asistenciaPerfecta: empFaltas === 0 && empRet === 0 && empAsist > 0,
+          };
+        });
+
+        setReportes(mergedSnap);
+        setResumen(recomputeSummaryFromReports(mergedSnap));
       } else if (
         Object.keys(empleadosDB).length > 0 &&
         Object.keys(eventosDB).length > 0 &&

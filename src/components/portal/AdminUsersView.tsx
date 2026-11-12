@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ALL_PORTAL_MODULES,
   DEFAULT_EMAIL_TEMPLATES,
@@ -198,43 +198,51 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   }>({ type: null, message: '' });
   const [isTestingExpiringAlert, setIsTestingExpiringAlert] = useState<boolean>(false);
 
+  const isEditingEmailRef = useRef<boolean>(false);
+  const lastSyncedEmailJsonRef = useRef<string>('');
+
   useEffect(() => {
     setDeadlineHoursInput(horasLimiteLiberacion ?? 24);
   }, [horasLimiteLiberacion]);
 
   useEffect(() => {
-    if (emailConfig) {
-      setSmtpHost(emailConfig.smtpHost || 'smtp.gmail.com');
-      setSmtpPort(emailConfig.smtpPort || 587);
-      setSmtpUser(emailConfig.smtpUser || '');
-      setSmtpPass(emailConfig.smtpPass || '');
-      setSmtpSecure(Boolean(emailConfig.smtpSecure));
-      setSmtpFromName(emailConfig.smtpFromName || 'CemenQtime Nóminas');
-      if (emailConfig.portalUrl) {
-        setPortalUrl(emailConfig.portalUrl);
-      }
-      setTextoBotonCorreo(
-        emailConfig.textoBotonCorreo || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo
-      );
-      setAsuntoDispersion(
-        emailConfig.asuntoDispersion || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion
-      );
-      setMensajeDispersion(
-        emailConfig.mensajeDispersion || DEFAULT_EMAIL_TEMPLATES.mensajeDispersion
-      );
-      setActivarAlertaPorVencer(
-        emailConfig.activarAlertaPorVencer ?? DEFAULT_EMAIL_TEMPLATES.activarAlertaPorVencer
-      );
-      setHorasAntesVencimiento(
-        emailConfig.horasAntesVencimiento ?? DEFAULT_EMAIL_TEMPLATES.horasAntesVencimiento
-      );
-      setAsuntoPorVencer(
-        emailConfig.asuntoPorVencer || DEFAULT_EMAIL_TEMPLATES.asuntoPorVencer
-      );
-      setMensajePorVencer(
-        emailConfig.mensajePorVencer || DEFAULT_EMAIL_TEMPLATES.mensajePorVencer
-      );
+    if (!emailConfig) return;
+    const serialized = JSON.stringify(emailConfig);
+    if (serialized === lastSyncedEmailJsonRef.current) return;
+    // Si el usuario está escribiendo activamente en la sección de plantillas o SMTP, no sobreescribir su borrador
+    if (isEditingEmailRef.current && lastSyncedEmailJsonRef.current !== '') return;
+
+    lastSyncedEmailJsonRef.current = serialized;
+    setSmtpHost(emailConfig.smtpHost || 'smtp.gmail.com');
+    setSmtpPort(emailConfig.smtpPort || 587);
+    setSmtpUser(emailConfig.smtpUser || '');
+    setSmtpPass(emailConfig.smtpPass || '');
+    setSmtpSecure(Boolean(emailConfig.smtpSecure));
+    setSmtpFromName(emailConfig.smtpFromName || 'CemenQtime Nóminas');
+    if (emailConfig.portalUrl) {
+      setPortalUrl(emailConfig.portalUrl);
     }
+    setTextoBotonCorreo(
+      emailConfig.textoBotonCorreo ?? DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo
+    );
+    setAsuntoDispersion(
+      emailConfig.asuntoDispersion ?? DEFAULT_EMAIL_TEMPLATES.asuntoDispersion
+    );
+    setMensajeDispersion(
+      emailConfig.mensajeDispersion ?? DEFAULT_EMAIL_TEMPLATES.mensajeDispersion
+    );
+    setActivarAlertaPorVencer(
+      emailConfig.activarAlertaPorVencer ?? DEFAULT_EMAIL_TEMPLATES.activarAlertaPorVencer
+    );
+    setHorasAntesVencimiento(
+      emailConfig.horasAntesVencimiento ?? DEFAULT_EMAIL_TEMPLATES.horasAntesVencimiento
+    );
+    setAsuntoPorVencer(
+      emailConfig.asuntoPorVencer ?? DEFAULT_EMAIL_TEMPLATES.asuntoPorVencer
+    );
+    setMensajePorVencer(
+      emailConfig.mensajePorVencer ?? DEFAULT_EMAIL_TEMPLATES.mensajePorVencer
+    );
   }, [emailConfig]);
 
   const buildCombinedEmailConfig = (): EmailServerConfig => ({
@@ -261,6 +269,8 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const handleSaveSmtpCredentials = () => {
     if (!onSaveEmailConfig) return;
     const updatedCfg = buildCombinedEmailConfig();
+    isEditingEmailRef.current = false;
+    lastSyncedEmailJsonRef.current = JSON.stringify(updatedCfg);
     onSaveEmailConfig(updatedCfg);
     setSmtpFeedback({
       type: 'success',
@@ -275,6 +285,8 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const handleSaveEmailTemplates = () => {
     if (!onSaveEmailConfig) return;
     const updatedCfg = buildCombinedEmailConfig();
+    isEditingEmailRef.current = false;
+    lastSyncedEmailJsonRef.current = JSON.stringify(updatedCfg);
     onSaveEmailConfig(updatedCfg);
     setTemplatesFeedback({
       type: 'success',
@@ -1529,7 +1541,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <input
                       type="text"
                       value={textoBotonCorreo}
-                      onChange={e => setTextoBotonCorreo(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setTextoBotonCorreo(e.target.value);
+                      }}
                       placeholder="Ir al Sistema a Revisar y Liberar Nómina"
                       className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-semibold text-white focus:border-[#A9DFD8] outline-none"
                     />
@@ -1541,7 +1556,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <input
                       type="url"
                       value={portalUrl}
-                      onChange={e => setPortalUrl(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setPortalUrl(e.target.value);
+                      }}
                       placeholder={
                         typeof window !== 'undefined'
                           ? window.location.origin
@@ -1575,7 +1593,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <input
                       type="text"
                       value={asuntoDispersion}
-                      onChange={e => setAsuntoDispersion(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setAsuntoDispersion(e.target.value);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-semibold text-white focus:border-[#A9DFD8] outline-none"
                     />
                   </div>
@@ -1586,7 +1607,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <textarea
                       rows={5}
                       value={mensajeDispersion}
-                      onChange={e => setMensajeDispersion(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setMensajeDispersion(e.target.value);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-medium text-slate-200 focus:border-[#A9DFD8] outline-none leading-relaxed"
                     />
                   </div>
@@ -1610,7 +1634,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                       <input
                         type="checkbox"
                         checked={activarAlertaPorVencer}
-                        onChange={e => setActivarAlertaPorVencer(e.target.checked)}
+                        onChange={e => {
+                          isEditingEmailRef.current = true;
+                          setActivarAlertaPorVencer(e.target.checked);
+                        }}
                         className="w-4 h-4 rounded accent-[#A9DFD8]"
                       />
                       <span className="text-xs font-bold text-slate-200">Alerta activa</span>
@@ -1623,11 +1650,12 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                         min={1}
                         max={72}
                         value={horasAntesVencimiento}
-                        onChange={e =>
+                        onChange={e => {
+                          isEditingEmailRef.current = true;
                           setHorasAntesVencimiento(
                             Math.max(1, Math.min(72, Number(e.target.value) || 2))
-                          )
-                        }
+                          );
+                        }}
                         className="w-16 px-2.5 py-1.5 bg-[#171821] border border-white/[0.1] rounded-lg text-xs font-mono font-bold text-white text-center tabular-nums"
                       />
                       <span className="text-xs text-[#87888C]">horas antes</span>
@@ -1643,7 +1671,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <input
                       type="text"
                       value={asuntoPorVencer}
-                      onChange={e => setAsuntoPorVencer(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setAsuntoPorVencer(e.target.value);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-semibold text-white focus:border-[#A9DFD8] outline-none"
                     />
                   </div>
@@ -1654,7 +1685,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <textarea
                       rows={5}
                       value={mensajePorVencer}
-                      onChange={e => setMensajePorVencer(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setMensajePorVencer(e.target.value);
+                      }}
                       className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-medium text-slate-200 focus:border-[#A9DFD8] outline-none leading-relaxed"
                     />
                   </div>
