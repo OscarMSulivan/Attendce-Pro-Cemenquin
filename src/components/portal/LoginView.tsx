@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
   Lock,
@@ -12,13 +12,16 @@ import {
   Eye,
   EyeOff,
   AlertCircle,
-  Server,
   CheckCircle2,
   KeyRound,
   Sparkles,
   Mail,
   ArrowLeft,
   Send,
+  Clock,
+  Users,
+  BarChart3,
+  FileCheck2,
 } from 'lucide-react';
 import { PortalUser, getUserAllowedLists } from '../../types/portal';
 import { PortalService } from '../../services/portalService';
@@ -29,6 +32,10 @@ interface LoginViewProps {
   onResetUserPassword?: (userId: string, newPassword: string) => void;
 }
 
+const REMEMBER_USER_KEY = 'cemenqtime_remembered_user_v1';
+const CEMENQUIN_LOGO_PATH =
+  '/assets/aistudio/623410255_1517285780403715_965041871524205859_n_cf013194.jpg';
+
 export const LoginView: React.FC<LoginViewProps> = ({
   users,
   onLoginSuccess,
@@ -36,9 +43,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
 }) => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [authenticatingUser, setAuthenticatingUser] = useState<PortalUser | null>(null);
+  const [logoError, setLogoError] = useState(false);
 
   // Estado para Recuperación de Contraseña por Correo
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
@@ -58,12 +67,33 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
 
+  useEffect(() => {
+    try {
+      const savedUser = localStorage.getItem(REMEMBER_USER_KEY);
+      if (savedUser) {
+        setIdentifier(savedUser);
+        setRememberMe(true);
+      }
+    } catch {
+      // ignore localStorage errors
+    }
+  }, []);
+
   const triggerAnimatedLogin = (user: PortalUser) => {
     setErrorMsg(null);
+    try {
+      if (rememberMe && identifier.trim()) {
+        localStorage.setItem(REMEMBER_USER_KEY, identifier.trim());
+      } else {
+        localStorage.removeItem(REMEMBER_USER_KEY);
+      }
+    } catch {
+      // ignore
+    }
     setAuthenticatingUser(user);
     setTimeout(() => {
       onLoginSuccess(user);
-    }, 1050);
+    }, 950);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -133,7 +163,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
           const empRaw = (u.employeeId || '').trim().toLowerCase();
           const empMatch =
             Boolean(empRaw) &&
-            (empRaw === cleanId || (Boolean(cleanNumeric) && empRaw.replace(/^0+/, '') === cleanNumeric));
+            (empRaw === cleanId ||
+              (Boolean(cleanNumeric) && empRaw.replace(/^0+/, '') === cleanNumeric));
           return emailMatch || userMatch || empMatch;
         });
 
@@ -203,109 +234,349 @@ export const LoginView: React.FC<LoginViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-center items-center p-4 sm:p-6 relative overflow-hidden">
-      {/* Efectos sutiles de iluminación de fondo con animación flotante */}
-      <div className="pointer-events-none absolute -top-40 -left-40 w-96 h-96 rounded-full bg-blue-600/15 blur-3xl animate-float-slow" />
-      <div className="pointer-events-none absolute -bottom-40 -right-40 w-96 h-96 rounded-full bg-indigo-600/15 blur-3xl animate-float-slow" />
+    <div className="min-h-screen w-full bg-[#171821] text-white flex items-center justify-center p-4 sm:p-6 lg:p-10 relative overflow-hidden font-sans">
+      {/* Iluminación ambiental estilo Free Dark Admin Dashboard */}
+      <div className="pointer-events-none absolute -top-36 -left-36 w-[480px] h-[480px] rounded-full bg-[#A9DFD8]/[0.06] blur-[110px]" />
+      <div className="pointer-events-none absolute -bottom-40 -right-32 w-[520px] h-[520px] rounded-full bg-[#20AEF3]/[0.07] blur-[120px]" />
+      <div className="pointer-events-none absolute top-1/3 left-1/2 -translate-x-1/2 w-[380px] h-[380px] rounded-full bg-[#0c2368]/25 blur-[130px]" />
 
-      {/* Overlay de Animación de Inicio de Sesión */}
+      {/* OVERLAY DE BIENVENIDA AL AUTENTICAR */}
       {authenticatingUser && (
-        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-scale-in">
-          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-indigo-500/40 shadow-2xl p-8 text-center space-y-5 relative overflow-hidden">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white mx-auto shadow-xl shadow-indigo-600/30 animate-bounce">
+        <div className="fixed inset-0 z-50 bg-[#171821]/90 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-scale-in">
+          <div className="w-full max-w-md rounded-3xl bg-[#21222D] border border-white/10 shadow-2xl p-8 text-center space-y-5 relative overflow-hidden">
+            <div className="w-16 h-16 rounded-2xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/40 flex items-center justify-center text-[#A9DFD8] mx-auto shadow-lg shadow-[#A9DFD8]/10 animate-bounce">
               <ShieldCheck className="w-8 h-8" />
             </div>
 
             <div className="space-y-1.5">
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                <Sparkles className="w-3 h-3 text-emerald-400" /> Acceso Verificado Correctamente
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-[#A9DFD8]">
+                <Sparkles className="w-3.5 h-3.5" /> Acceso Verificado
               </span>
               <h2 className="text-xl font-black text-white">
                 ¡Bienvenido, {authenticatingUser.name}!
               </h2>
               {authenticatingUser.employeeId && (
-                <p className="text-xs font-mono text-blue-300 font-bold">
+                <p className="text-xs font-mono text-[#A9DFD8] font-bold tabular-nums">
                   No. de Empleado: #{authenticatingUser.employeeId}
                 </p>
               )}
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-[#87888C]">
                 {authenticatingUser.role === 'supervisor'
-                  ? `Cargando tu espacio de supervisión y lista(s): ${getUserAllowedLists(authenticatingUser).join(', ')}`
-                  : authenticatingUser.role === 'rh'
-                  ? 'Preparando consola de Recursos Humanos, Dispersión y CONTPAQi®...'
-                  : 'Iniciando consola de Administración General y Gestión de Usuarios...'}
+                  ? `Cargando tu espacio de trabajo y lista(s): ${getUserAllowedLists(authenticatingUser).join(', ')}`
+                  : 'Abriendo Módulo de Recursos Humanos...'}
               </p>
             </div>
 
-            {/* Barra de progreso animada */}
-            <div className="w-full h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400 rounded-full animate-progress-fill" />
+            <div className="w-full h-2 rounded-full bg-[#171821] overflow-hidden border border-white/[0.06]">
+              <div className="h-full bg-gradient-to-r from-[#A9DFD8] via-[#20AEF3] to-[#FEB95A] rounded-full animate-progress-fill" />
             </div>
-
-            <p className="text-[11px] font-mono text-slate-500">
-              Sincronizando notificaciones y horarios programados...
-            </p>
           </div>
         </div>
       )}
 
-      <div className="w-full max-w-md rounded-3xl bg-slate-900/95 border border-slate-800 shadow-2xl overflow-hidden backdrop-blur-xl animate-fade-up p-6 sm:p-9">
-        {/* Logo e Identidad */}
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-white font-black text-base shadow-lg shadow-blue-600/20">
-            CQ
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-extrabold tracking-tight text-white">
-                Cemen<span className="text-blue-400">Qtime</span>
-              </h1>
-              <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
-                Corporativo
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Portal de Recursos Humanos, Nóminas y Supervisión
-            </p>
-          </div>
-        </div>
+      {/* CONTENEDOR PRINCIPAL SPLIT-SCREEN (ESTILO FREE DARK ADMIN DASHBOARD) */}
+      <div className="relative z-10 w-full max-w-[1120px] grid grid-cols-1 lg:grid-cols-12 rounded-3xl bg-[#21222D] border border-white/[0.07] shadow-[0_30px_90px_rgba(0,0,0,0.65)] overflow-hidden">
+        {/* COLUMNA IZQUIERDA (7 COLUMNAS): IDENTIDAD CEMENQUIN + PREVIEW DARK ADMIN DASHBOARD */}
+        <div className="lg:col-span-7 bg-[#1B1C26] p-7 sm:p-10 lg:p-11 flex flex-col justify-between relative overflow-hidden border-b lg:border-b-0 lg:border-r border-white/[0.06]">
+          {/* Decoración geométrica sutil inspirada en el ángulo corporativo de Cemenquin */}
+          <div className="pointer-events-none absolute -right-24 -top-24 w-72 h-72 rounded-full bg-[#A9DFD8]/[0.04] blur-2xl" />
+          <div className="pointer-events-none absolute -left-20 -bottom-20 w-72 h-72 rounded-full bg-[#091f5c]/30 blur-2xl" />
 
-        {!isRecoveryMode ? (
-          <>
-            <div className="mb-6">
-              <h2 className="text-xl font-black text-slate-100">Iniciar Sesión</h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Ingresa tu usuario, número de empleado de 5 dígitos o correo empresarial junto con tu contraseña asignada.
-              </p>
+          {/* Encabezado Superior con Logo Oficial Cemenquin y Nombre del Sistema */}
+          <div className="relative z-10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-7 border-b border-white/[0.06]">
+              <div className="flex items-center gap-4">
+                {/* Tarjeta con el Logo Oficial de Cemenquin */}
+                <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#0a1e5e] p-1 border border-white/15 shadow-xl shadow-black/40 shrink-0 overflow-hidden flex items-center justify-center">
+                  {!logoError ? (
+                    <img
+                      src={CEMENQUIN_LOGO_PATH}
+                      alt="Logo Cemenquin"
+                      referrerPolicy="no-referrer"
+                      onError={() => setLogoError(true)}
+                      className="w-full h-full object-cover rounded-xl"
+                    />
+                  ) : (
+                    <div className="w-full h-full rounded-xl bg-[#0a1e5e] flex flex-col items-center justify-center text-white font-black text-xs">
+                      <span className="text-red-500 text-lg leading-none">CQ</span>
+                      <span className="text-[9px] tracking-tight mt-0.5">Cemenquin</span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                      Cemen<span className="text-[#A9DFD8]">Qtime</span>
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm font-semibold text-[#A9DFD8] mt-0.5">
+                    Módulo de Recursos Humanos
+                  </p>
+                  <p className="text-xs text-[#87888C] mt-0.5">
+                    Cemenquin® · Gestión de Asistencia, Turnos e Incidencias
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block mb-1.5">
-                  Usuario / No. Empleado / Correo
-                </label>
-                <div className="relative">
-                  <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={identifier}
-                    onChange={(e) => {
-                      setIdentifier(e.target.value);
-                      setErrorMsg(null);
-                    }}
-                    placeholder="Ingresa tu usuario, correo o número de empleado"
-                    className="w-full rounded-xl pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 text-slate-100 text-xs font-mono outline-none focus:border-blue-500 transition-colors"
-                    required
-                    autoFocus
-                  />
+            {/* Tarjetas estilo "Free Dark Admin Dashboards" (Métricas y Gráfica de Asistencia) */}
+            <div className="mt-7 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                    Panel de Control y Asistencia
+                  </h2>
+                  <p className="text-xs text-[#87888C] mt-0.5">
+                    Monitoreo en tiempo real de listas de asistencia, tiempo extra y validación semanal
+                  </p>
                 </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                    Contraseña de Acceso
+              {/* Fila de 3 mini-KPIs estilo Figma Dark Dashboard */}
+              <div className="grid grid-cols-3 gap-3 pt-1">
+                <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] p-3.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#FEB95A]/15 text-[#FEB95A] flex items-center justify-center mb-2.5">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div className="text-sm sm:text-base font-extrabold text-white font-mono tabular-nums">
+                    Biométrico
+                  </div>
+                  <div className="text-[11px] font-medium text-[#87888C] mt-0.5">
+                    Control de Checadas
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#FEB95A] mt-1">
+                    Cálculo de Tiempo Extra
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] p-3.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#A9DFD8]/15 text-[#A9DFD8] flex items-center justify-center mb-2.5">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div className="text-sm sm:text-base font-extrabold text-white font-mono tabular-nums">
+                    Supervisión
+                  </div>
+                  <div className="text-[11px] font-medium text-[#87888C] mt-0.5">
+                    Revisión por Listas
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#A9DFD8] mt-1">
+                    Semáforo de Liberación
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] p-3.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#F2C8ED]/15 text-[#F2C8ED] flex items-center justify-center mb-2.5">
+                    <FileCheck2 className="w-4 h-4" />
+                  </div>
+                  <div className="text-sm sm:text-base font-extrabold text-white font-mono tabular-nums">
+                    Incidencias
+                  </div>
+                  <div className="text-[11px] font-medium text-[#87888C] mt-0.5">
+                    Permisos y Horarios
+                  </div>
+                  <div className="text-[10px] font-semibold text-[#F2C8ED] mt-1">
+                    Flujo Automatizado
+                  </div>
+                </div>
+              </div>
+
+              {/* Widget Gráfico Dark Admin Dashboard (Curva Mint-Teal #A9DFD8 + Barras de Nivel) */}
+              <div className="rounded-2xl bg-[#21222D] border border-white/[0.06] p-4 sm:p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#A9DFD8]" />
+                    <span className="text-xs font-bold text-white">
+                      Actividad del Módulo de Recursos Humanos
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 text-[11px] text-[#87888C]">
+                    <span>Asistencia</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-[#A9DFD8] font-semibold">Validación Semanal</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center">
+                  {/* Área de curva suave Mint Teal inspirada en Visitor Insights del Figma */}
+                  <div className="sm:col-span-8 h-24">
+                    <svg
+                      viewBox="0 0 320 90"
+                      className="w-full h-full overflow-visible"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <defs>
+                        <linearGradient id="mintAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#A9DFD8" stopOpacity="0.42" />
+                          <stop offset="100%" stopColor="#A9DFD8" stopOpacity="0.0" />
+                        </linearGradient>
+                      </defs>
+                      <line x1="0" y1="20" x2="320" y2="20" stroke="#2B2B36" strokeDasharray="3 3" strokeWidth="1" />
+                      <line x1="0" y1="50" x2="320" y2="50" stroke="#2B2B36" strokeDasharray="3 3" strokeWidth="1" />
+                      <line x1="0" y1="80" x2="320" y2="80" stroke="#2B2B36" strokeWidth="1" />
+                      <path
+                        d="M0,68 C35,62 55,28 92,34 C128,40 152,64 188,42 C224,20 252,14 285,26 C302,32 312,22 320,18 L320,82 L0,82 Z"
+                        fill="url(#mintAreaGrad)"
+                      />
+                      <path
+                        d="M0,68 C35,62 55,28 92,34 C128,40 152,64 188,42 C224,20 252,14 285,26 C302,32 312,22 320,18"
+                        fill="none"
+                        stroke="#A9DFD8"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="92" cy="34" r="3.5" fill="#171821" stroke="#A9DFD8" strokeWidth="2" />
+                      <circle cx="188" cy="42" r="3.5" fill="#171821" stroke="#A9DFD8" strokeWidth="2" />
+                      <circle cx="285" cy="26" r="4" fill="#FEB95A" stroke="#171821" strokeWidth="1.5" />
+                    </svg>
+                  </div>
+
+                  {/* Mini barras verticales estilo Volume / Level del Figma */}
+                  <div className="sm:col-span-4 flex items-end justify-around h-20 px-2 pt-2 border-t sm:border-t-0 sm:border-l border-white/[0.06]">
+                    {[
+                      { h: '55%', top: '#A9DFD8', bot: '#2B2B36', day: 'L' },
+                      { h: '78%', top: '#A9DFD8', bot: '#2B2B36', day: 'M' },
+                      { h: '65%', top: '#20AEF3', bot: '#2B2B36', day: 'X' },
+                      { h: '88%', top: '#A9DFD8', bot: '#2B2B36', day: 'J' },
+                      { h: '92%', top: '#FEB95A', bot: '#2B2B36', day: 'V' },
+                      { h: '48%', top: '#F2C8ED', bot: '#2B2B36', day: 'S' },
+                    ].map((bar) => (
+                      <div key={bar.day} className="flex flex-col items-center gap-1.5 h-full justify-end">
+                        <div className="w-2.5 h-14 rounded-full bg-[#171821] overflow-hidden flex flex-col justify-end p-0.5">
+                          <div
+                            className="w-full rounded-full transition-all"
+                            style={{ height: bar.h, backgroundColor: bar.top }}
+                          />
+                        </div>
+                        <span className="text-[9px] font-mono text-[#87888C]">{bar.day}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Pie de columna izquierda limpio (Sin mención a CONTPAQi) */}
+          <div className="relative z-10 pt-6 mt-6 border-t border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-xs text-[#87888C]">
+            <span className="font-semibold text-white/90">Cemenquin® · CemenQtime</span>
+            <span>Módulo de Recursos Humanos</span>
+          </div>
+        </div>
+
+        {/* COLUMNA DERECHA (5 COLUMNAS): FORMULARIO DE ACCESO Y RECUPERACIÓN */}
+        <div className="lg:col-span-5 bg-[#21222D] p-7 sm:p-10 lg:p-11 flex flex-col justify-center">
+          {/* Cinta superior de identidad en el formulario */}
+          <div className="flex items-center gap-3.5 mb-7">
+            <div className="w-12 h-12 rounded-2xl bg-[#0a1e5e] p-0.5 border border-white/15 shadow-lg shrink-0 overflow-hidden flex items-center justify-center">
+              {!logoError ? (
+                <img
+                  src={CEMENQUIN_LOGO_PATH}
+                  alt="Cemenquin"
+                  referrerPolicy="no-referrer"
+                  onError={() => setLogoError(true)}
+                  className="w-full h-full object-cover rounded-[14px]"
+                />
+              ) : (
+                <span className="text-xs font-black text-white">CQ</span>
+              )}
+            </div>
+            <div>
+              <h1 className="text-lg font-extrabold text-white tracking-tight leading-tight">
+                Cemen<span className="text-[#A9DFD8]">Qtime</span>
+              </h1>
+              <p className="text-xs font-medium text-[#87888C]">
+                Módulo de Recursos Humanos
+              </p>
+            </div>
+          </div>
+
+          {!isRecoveryMode ? (
+            <>
+              <div className="mb-6">
+                <h2 className="text-2xl font-extrabold text-white tracking-tight">
+                  Iniciar Sesión
+                </h2>
+                <p className="text-xs text-[#87888C] mt-1.5 leading-relaxed">
+                  Ingresa con tu usuario, número de empleado o correo electrónico registrado.
+                </p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-2">
+                    Usuario / No. Empleado / Correo
                   </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-[#87888C] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={identifier}
+                      onChange={(e) => {
+                        setIdentifier(e.target.value);
+                        setErrorMsg(null);
+                      }}
+                      placeholder="Ej. admin, 00615 o correo@empresa.com"
+                      className="w-full rounded-xl pl-11 pr-4 py-3.5 bg-[#171821] border border-white/[0.08] hover:border-white/15 focus:border-[#A9DFD8] text-white placeholder-[#87888C] text-xs font-medium outline-none transition-colors"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-2">
+                    Contraseña
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-[#87888C] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setErrorMsg(null);
+                      }}
+                      placeholder="Ingresa tu contraseña"
+                      className="w-full rounded-xl pl-11 pr-11 py-3.5 bg-[#171821] border border-white/[0.08] hover:border-white/15 focus:border-[#A9DFD8] text-white placeholder-[#87888C] text-xs font-medium outline-none transition-colors"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[#87888C] hover:text-white transition-colors cursor-pointer"
+                      title={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Fila: Recordarme + ¿Olvidaste tu contraseña? */}
+                <div className="flex items-center justify-between pt-1 pb-1">
+                  <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={rememberMe}
+                      onClick={() => setRememberMe(!rememberMe)}
+                      className={`w-9 h-5 rounded-full transition-colors p-0.5 flex items-center cursor-pointer ${
+                        rememberMe ? 'bg-[#A9DFD8]' : 'bg-[#171821] border border-white/15'
+                      }`}
+                    >
+                      <span
+                        className={`w-3.5 h-3.5 rounded-full transition-transform ${
+                          rememberMe
+                            ? 'translate-x-4 bg-[#171821]'
+                            : 'translate-x-0 bg-[#87888C]'
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs font-medium text-[#87888C] hover:text-slate-200 transition-colors">
+                      Recordar usuario
+                    </span>
+                  </label>
+
                   <button
                     type="button"
                     onClick={() => {
@@ -314,251 +585,231 @@ export const LoginView: React.FC<LoginViewProps> = ({
                       setRecoveryStep('request');
                       setRecoveryError(null);
                     }}
-                    className="text-[11px] font-bold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                    className="text-xs font-semibold text-[#A9DFD8] hover:text-[#c5efe9] transition-colors cursor-pointer"
                   >
                     ¿Olvidaste tu contraseña?
                   </button>
                 </div>
-                <div className="relative">
-                  <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      setErrorMsg(null);
-                    }}
-                    placeholder="Ingresa tu contraseña..."
-                    className="w-full rounded-xl pl-10 pr-10 py-3 bg-slate-950 border border-slate-800 text-slate-100 text-xs font-mono outline-none focus:border-blue-500 transition-colors"
-                    required
-                  />
+
+                {errorMsg && (
+                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2.5 animate-scale-in">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                <div className="pt-2">
                   <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 cursor-pointer"
+                    type="submit"
+                    disabled={Boolean(authenticatingUser)}
+                    className="w-full py-3.5 px-5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d5cd] active:bg-[#82c9c0] text-[#171821] font-extrabold text-xs uppercase tracking-wider shadow-lg shadow-[#A9DFD8]/15 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    <LogIn className="w-4 h-4 stroke-[2.5]" />
+                    <span>
+                      {authenticatingUser ? 'Verificando Acceso...' : 'Entrar al Sistema'}
+                    </span>
                   </button>
                 </div>
-              </div>
-
-              {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2 animate-scale-in">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={Boolean(authenticatingUser)}
-                className="w-full py-3 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-600/25 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <LogIn className="w-4 h-4" />
-                <span>{authenticatingUser ? 'Verificando Acceso...' : 'Entrar al Portal'}</span>
-              </button>
-            </form>
-          </>
-        ) : (
-          <div className="space-y-4 animate-fade-in">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
-                  <KeyRound className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="text-base font-black text-slate-100">
-                    Recuperar Contraseña
-                  </h2>
-                  <p className="text-[11px] text-slate-400">
-                    Restablece tu acceso mediante tu correo registrado
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={closeRecoveryMode}
-                className="text-xs font-bold text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
-              >
-                <ArrowLeft className="w-3.5 h-3.5" />
-                Volver
-              </button>
-            </div>
-
-            {recoveryStep === 'request' && (
-              <form onSubmit={handleRequestRecoveryCode} className="space-y-4 pt-1">
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  Ingresa tu <strong>correo electrónico empresarial</strong>, nombre de usuario o número de empleado. Enviaremos un código de verificación a tu correo registrado.
-                </p>
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block mb-1.5">
-                    Correo / Usuario / No. Empleado
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={recoveryIdentifier}
-                      onChange={(e) => {
-                        setRecoveryIdentifier(e.target.value);
-                        setRecoveryError(null);
-                      }}
-                      placeholder="ejemplo@empresa.com o #00615"
-                      className="w-full rounded-xl pl-10 pr-4 py-3 bg-slate-950 border border-slate-800 text-slate-100 text-xs font-mono outline-none focus:border-blue-500"
-                      required
-                      autoFocus
-                    />
-                  </div>
-                </div>
-
-                {recoveryError && (
-                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                    <span>{recoveryError}</span>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isSendingCode}
-                  className="w-full py-3 px-5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>
-                    {isSendingCode ? 'Enviando código al correo...' : 'Enviar Código a mi Correo'}
-                  </span>
-                </button>
               </form>
-            )}
-
-            {recoveryStep === 'verify' && recoveryInfo && (
-              <form onSubmit={handleConfirmResetPassword} className="space-y-3.5 pt-1">
-                {recoveryInfo.emailSent ? (
-                  <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs space-y-1">
-                    <p className="font-bold flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      Código enviado a {recoveryInfo.userEmail}
-                    </p>
-                    <p className="text-[11px] text-emerald-300/90">
-                      Revisa tu bandeja de entrada e ingresa el código de 6 dígitos junto con tu nueva contraseña.
+            </>
+          ) : (
+            /* MODO RECUPERAR CONTRASEÑA */
+            <div className="space-y-4 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8]">
+                    <KeyRound className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-extrabold text-white">
+                      Recuperar Contraseña
+                    </h2>
+                    <p className="text-[11px] text-[#87888C]">
+                      Restablece tu acceso por correo electrónico
                     </p>
                   </div>
-                ) : (
-                  <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-200 text-xs space-y-1">
-                    <p className="font-bold">
-                      Cuenta verificada: {recoveryInfo.userName} ({recoveryInfo.userEmail})
-                    </p>
-                    <p className="text-[11px] text-amber-300/90">
-                      El servidor SMTP aún no está activo o en línea. Usa este código de verificación temporal para restablecer tu contraseña:{' '}
-                      <strong className="font-mono text-white bg-slate-950 px-2 py-0.5 rounded border border-amber-400/40">
-                        {recoveryInfo.expectedCode}
-                      </strong>
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                    Código de Verificación (6 dígitos)
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={enteredCode}
-                    onChange={(e) => {
-                      setEnteredCode(e.target.value);
-                      setRecoveryError(null);
-                    }}
-                    placeholder="000000"
-                    className="w-full rounded-xl px-4 py-2.5 bg-slate-950 border border-slate-800 text-slate-100 text-sm font-mono font-bold tracking-widest text-center outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                    Nueva Contraseña
-                  </label>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => {
-                      setNewPassword(e.target.value);
-                      setRecoveryError(null);
-                    }}
-                    placeholder="Mínimo 4 caracteres"
-                    className="w-full rounded-xl px-3.5 py-2.5 bg-slate-950 border border-slate-800 text-slate-100 text-xs font-mono outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                    Confirmar Nueva Contraseña
-                  </label>
-                  <input
-                    type="password"
-                    value={confirmNewPassword}
-                    onChange={(e) => {
-                      setConfirmNewPassword(e.target.value);
-                      setRecoveryError(null);
-                    }}
-                    placeholder="Repite tu nueva contraseña"
-                    className="w-full rounded-xl px-3.5 py-2.5 bg-slate-950 border border-slate-800 text-slate-100 text-xs font-mono outline-none focus:border-blue-500"
-                    required
-                  />
-                </div>
-
-                {recoveryError && (
-                  <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                    <span>{recoveryError}</span>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="w-full py-3 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Guardar Nueva Contraseña</span>
-                </button>
-              </form>
-            )}
-
-            {recoveryStep === 'done' && (
-              <div className="p-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-center space-y-3">
-                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-                <div className="space-y-1">
-                  <h3 className="text-sm font-extrabold text-white">
-                    ¡Contraseña Actualizada con Éxito!
-                  </h3>
-                  <p className="text-xs text-slate-300">
-                    Tu nueva contraseña ha quedado guardada y sincronizada en el sistema.
-                  </p>
                 </div>
                 <button
                   type="button"
                   onClick={closeRecoveryMode}
-                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs uppercase tracking-wider cursor-pointer"
+                  className="text-xs font-bold text-[#87888C] hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
                 >
-                  Iniciar Sesión Ahora
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  Volver
                 </button>
               </div>
-            )}
-          </div>
-        )}
 
-        <div className="mt-7 pt-4 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-500">
-          <span className="flex items-center gap-1.5">
-            <Server className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Acceso Seguro con Rol Asignado</span>
-          </span>
-          <span>CONTPAQi® Nóminas</span>
+              {recoveryStep === 'request' && (
+                <form onSubmit={handleRequestRecoveryCode} className="space-y-4 pt-1">
+                  <p className="text-xs text-[#87888C] leading-relaxed">
+                    Ingresa tu <strong className="text-white">correo electrónico</strong>, nombre de usuario o número de empleado para enviarte un código de verificación de 6 dígitos.
+                  </p>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-2">
+                      Correo / Usuario / No. Empleado
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-[#87888C] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={recoveryIdentifier}
+                        onChange={(e) => {
+                          setRecoveryIdentifier(e.target.value);
+                          setRecoveryError(null);
+                        }}
+                        placeholder="correo@empresa.com o #00615"
+                        className="w-full rounded-xl pl-11 pr-4 py-3.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-white placeholder-[#87888C] text-xs font-medium outline-none"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  {recoveryError && (
+                    <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <span>{recoveryError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isSendingCode}
+                    className="w-full py-3.5 px-5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d5cd] text-[#171821] font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>
+                      {isSendingCode ? 'Enviando código...' : 'Enviar Código a mi Correo'}
+                    </span>
+                  </button>
+                </form>
+              )}
+
+              {recoveryStep === 'verify' && recoveryInfo && (
+                <form onSubmit={handleConfirmResetPassword} className="space-y-3.5 pt-1">
+                  {recoveryInfo.emailSent ? (
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs space-y-1">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        Código enviado a {recoveryInfo.userEmail}
+                      </p>
+                      <p className="text-[11px] text-emerald-300/80">
+                        Ingresa el código de 6 dígitos recibido en tu bandeja de entrada.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-[#FEB95A]/10 border border-[#FEB95A]/30 text-[#FEB95A] text-xs space-y-1">
+                      <p className="font-bold">
+                        Cuenta verificada: {recoveryInfo.userName}
+                      </p>
+                      <p className="text-[11px] text-amber-200/90">
+                        Código de verificación temporal:{' '}
+                        <strong className="font-mono text-white bg-[#171821] px-2 py-0.5 rounded border border-[#FEB95A]/40">
+                          {recoveryInfo.expectedCode}
+                        </strong>
+                      </p>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Código de Verificación (6 dígitos)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={enteredCode}
+                      onChange={(e) => {
+                        setEnteredCode(e.target.value);
+                        setRecoveryError(null);
+                      }}
+                      placeholder="000000"
+                      className="w-full rounded-xl px-4 py-2.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-white text-sm font-mono font-bold tracking-widest text-center outline-none tabular-nums"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Nueva Contraseña
+                    </label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => {
+                        setNewPassword(e.target.value);
+                        setRecoveryError(null);
+                      }}
+                      placeholder="Mínimo 4 caracteres"
+                      className="w-full rounded-xl px-3.5 py-2.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-white text-xs outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      Confirmar Nueva Contraseña
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmNewPassword}
+                      onChange={(e) => {
+                        setConfirmNewPassword(e.target.value);
+                        setRecoveryError(null);
+                      }}
+                      placeholder="Repite tu nueva contraseña"
+                      className="w-full rounded-xl px-3.5 py-2.5 bg-[#171821] border border-white/[0.08] focus:border-[#A9DFD8] text-white text-xs outline-none"
+                      required
+                    />
+                  </div>
+
+                  {recoveryError && (
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <span>{recoveryError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    className="w-full py-3 px-5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d5cd] text-[#171821] font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Guardar Nueva Contraseña</span>
+                  </button>
+                </form>
+              )}
+
+              {recoveryStep === 'done' && (
+                <div className="p-5 rounded-2xl bg-[#171821] border border-[#A9DFD8]/30 text-center space-y-3">
+                  <CheckCircle2 className="w-8 h-8 text-[#A9DFD8] mx-auto" />
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-extrabold text-white">
+                      ¡Contraseña Actualizada!
+                    </h3>
+                    <p className="text-xs text-[#87888C]">
+                      Tu nueva contraseña ha sido guardada en el sistema.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeRecoveryMode}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#A9DFD8] hover:bg-[#95d5cd] text-[#171821] font-extrabold text-xs uppercase tracking-wider cursor-pointer"
+                  >
+                    Iniciar Sesión Ahora
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Pie del formulario derecho (sin CONTPAQi) */}
+          <div className="mt-8 pt-5 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-[#87888C]">
+            <span>Acceso Seguro por Rol</span>
+            <span>Módulo de Recursos Humanos</span>
+          </div>
         </div>
       </div>
     </div>
   );
 };
-
-

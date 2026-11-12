@@ -214,8 +214,13 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {/* Brand Header */}
         <div className="h-16 px-4 flex items-center justify-between border-b border-white/[0.06] shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-[#A9DFD8] text-[#171821] flex items-center justify-center font-black shadow-md shadow-[#A9DFD8]/20 shrink-0">
-              <ShieldCheck className="w-5 h-5 stroke-[2.4]" />
+            <div className="w-9 h-9 rounded-xl bg-[#0a1e5e] p-0.5 border border-white/15 flex items-center justify-center shadow-md shrink-0 overflow-hidden">
+              <img
+                src="/assets/aistudio/623410255_1517285780403715_965041871524205859_n_cf013194.jpg"
+                alt="Cemenquin"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover rounded-[9px]"
+              />
             </div>
             {!isCompact && (
               <div className="min-w-0">
@@ -225,7 +230,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   </span>
                 </div>
                 <span className="text-[10px] font-medium text-[#87888C] block mt-1 truncate">
-                  Cemenquin · Nómina
+                  Módulo de Recursos Humanos
                 </span>
               </div>
             )}
