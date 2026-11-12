@@ -184,47 +184,57 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
   return (
     <div className="space-y-6 animate-fade-up">
       {/* Encabezado de Bienvenida al Módulo de Dispersión */}
-      <div className="rounded-2xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.06] p-6 shadow-sm">
-        <div className="max-w-3xl">
-          <p className="text-xs font-bold text-teal-600 dark:text-[#A9DFD8] uppercase tracking-wider">
-            Módulo de Dispersión y Cálculo de Nómina
-          </p>
-          <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight mt-1">
-            ¿Qué deseas realizar en este momento?
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-[#87888C] mt-1">
-            Elige si deseas preparar y dispersar una nueva nómina semanal, o bien abrir y trabajar una nómina que ya fue dispersada previamente. En cualquier momento podrás regresar a esta pantalla.
-          </p>
+      <div className="rounded-2xl bg-gradient-to-br from-[#21222D] via-[#1B1C26] to-[#171821] border border-white/[0.08] p-6 shadow-xl relative overflow-hidden">
+        <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-[#A9DFD8]/10 blur-3xl pointer-events-none" />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 max-w-3xl relative z-10">
+          <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/15 shadow-lg bg-[#0B193D] shrink-0">
+            <img
+              src="/assets/aistudio/623410255_1517285780403715_965041871524205859_n_cf013194.jpg"
+              alt="Cemenquin"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div>
+            <p className="text-xs font-bold text-[#A9DFD8] uppercase tracking-wider">
+              CemenQtime · Módulo de Dispersión y Cálculo de Nómina
+            </p>
+            <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight mt-0.5">
+              ¿Qué deseas realizar en este momento?
+            </h2>
+            <p className="text-xs sm:text-sm text-[#87888C] mt-1">
+              Elige si deseas preparar y dispersar una nueva nómina semanal, o bien abrir y trabajar una nómina que ya fue dispersada previamente. En cualquier momento podrás regresar a esta pantalla.
+            </p>
+          </div>
         </div>
 
         {/* Dos Tarjetas de Decisión Principal */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6 relative z-10">
           {/* Opción 1: Dispersar una Nueva Nómina */}
-          <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-slate-50/70 dark:bg-[#171821] p-5 flex flex-col justify-between gap-5">
+          <div className="rounded-2xl border border-white/[0.08] bg-[#171821] p-5 flex flex-col justify-between gap-5 hover:border-[#A9DFD8]/40 transition-colors">
             <div className="space-y-3">
-              <div className="w-11 h-11 rounded-xl bg-teal-500/15 dark:bg-[#A9DFD8]/15 border border-teal-500/30 dark:border-[#A9DFD8]/30 flex items-center justify-center text-teal-700 dark:text-[#A9DFD8]">
+              <div className="w-11 h-11 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8]">
                 <PlusCircle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                <h3 className="text-base font-extrabold text-white">
                   1. Dispersar una Nueva Nómina
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-[#87888C] mt-1 leading-relaxed">
+                <p className="text-xs text-[#87888C] mt-1 leading-relaxed">
                   Carga o actualiza el archivo de eventos del reloj checador, selecciona el periodo semanal, genera el cálculo de asistencia y dispersa las listas a los supervisores.
                 </p>
               </div>
 
-              <div className="pt-1 flex items-center gap-3 text-xs text-slate-600 dark:text-slate-300 font-mono tabular-nums">
+              <div className="pt-1 flex items-center gap-3 text-xs text-slate-300 font-mono tabular-nums">
                 <span>
                   Catálogo:{' '}
-                  <strong className="text-slate-900 dark:text-white">
+                  <strong className="text-white">
                     {hasEmployees ? 'Cargado ✓' : 'Pendiente'}
                   </strong>
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>
                   Checadas:{' '}
-                  <strong className="text-slate-900 dark:text-white">
+                  <strong className="text-white">
                     {hasEvents ? 'Cargadas ✓' : 'Pendientes'}
                   </strong>
                 </span>
