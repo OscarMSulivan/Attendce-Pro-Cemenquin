@@ -29,6 +29,7 @@ interface ServerEmailConfig {
   horasAntesVencimiento?: number;
   asuntoPorVencer?: string;
   mensajePorVencer?: string;
+  updatedAt?: string;
 }
 
 function renderServerEmailTemplate(template: string, vars: Record<string, string>): string {
@@ -95,9 +96,22 @@ function readDatabase(): ServerPortalDatabase {
 function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalDatabase {
   ensureDataDir();
   const current = readDatabase();
+  const currentEmailTime = current.emailConfig?.updatedAt
+    ? new Date(current.emailConfig.updatedAt).getTime()
+    : 0;
+  const incomingEmailTime = partial.emailConfig?.updatedAt
+    ? new Date(partial.emailConfig.updatedAt).getTime()
+    : 0;
+
+  // Si llega un sync rezagado con un timestamp más antiguo que el emailConfig actual en disco, preservar el más reciente
+  const isIncomingEmailOlder =
+    currentEmailTime > 0 && incomingEmailTime > 0 && incomingEmailTime < currentEmailTime;
+
   const mergedEmailConfig: ServerEmailConfig | undefined =
     partial.emailConfig && typeof partial.emailConfig === 'object'
-      ? { ...(current.emailConfig || {}), ...partial.emailConfig }
+      ? isIncomingEmailOlder
+        ? { ...partial.emailConfig, ...(current.emailConfig || {}) }
+        : { ...(current.emailConfig || {}), ...partial.emailConfig }
       : current.emailConfig;
 
   const mergedConfig: Record<string, unknown> | undefined =

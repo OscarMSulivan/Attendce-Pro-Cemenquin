@@ -149,6 +149,7 @@ export interface AppConfig {
   horasLimiteLiberacion: number; // horas permitidas para que supervisores liberen nómina tras dispersión (default: 24)
   overtimeRules: OvertimeRulesConfig; // configuración de reglas de tiempo extra
   theme: 'dark' | 'light';
+  emailServer?: Record<string, any>;
 }
 
 export interface EmpleadoProcesado {

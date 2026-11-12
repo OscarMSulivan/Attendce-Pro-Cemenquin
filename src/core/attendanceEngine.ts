@@ -22,7 +22,8 @@ import {
   FESTIVOS_OFICIALES,
   getDateRangeISO,
   getDayOfWeekFromISO,
-  NOMBRES_DIAS_CORTO
+  NOMBRES_DIAS_CORTO,
+  normalizeEmployeeId
 } from '../utils/calendarUtils';
 import {
   circularTimeDiffMinutes,
@@ -37,6 +38,23 @@ import {
 } from './eventsHierarchy';
 
 /**
+ * Busca el código de horario válido dentro del catálogo (soportando diferencias de mayúsculas/espacios).
+ */
+export function resolveScheduleCodeInCatalog(
+  horariosDB: Record<string, ScheduleConfig>,
+  rawCode: string | undefined | null
+): string {
+  if (!rawCode || !horariosDB) return '';
+  const clean = rawCode.trim();
+  if (!clean) return '';
+  if (horariosDB[clean]) return clean;
+  const upper = clean.toUpperCase();
+  if (horariosDB[upper]) return upper;
+  const matchKey = Object.keys(horariosDB).find(k => k.trim().toUpperCase() === upper);
+  return matchKey || '';
+}
+
+/**
  * Obtiene la configuración de horario normalizada para un día específico de la semana (0..6).
  * Si el empleado aún no tiene un código de horario personalizado en el catálogo,
  * enlaza con el horario base programado ('ADMO' o el primero activo) para detectar días laborales y checadas faltantes.
@@ -46,13 +64,16 @@ export function getScheduleForDay(
   scheduleCode: string | undefined,
   dayOfWeek: number
 ): DaySchedule | null {
-  const effectiveCode = (scheduleCode && horariosDB[scheduleCode])
-    ? scheduleCode
-    : (horariosDB['ADMO'] ? 'ADMO' : Object.keys(horariosDB)[0]);
+  const matchedCode = resolveScheduleCodeInCatalog(horariosDB, scheduleCode);
+  const effectiveCode = matchedCode || (horariosDB['ADMO'] ? 'ADMO' : Object.keys(horariosDB)[0]);
   if (!effectiveCode || !horariosDB[effectiveCode]) return null;
-  const config = horariosDB[effectiveCode];
-  if (!config.dias) return null;
-  return normalizarHorarioDia(config.dias[dayOfWeek] || null);
+  const config = horariosDB[effectiveCode] as ScheduleConfig & {
+    turnos?: Record<number, DaySchedule | null>;
+  };
+  const dayMap = config.dias || config.turnos;
+  if (!dayMap) return null;
+  const rawDay = dayMap[dayOfWeek] ?? (dayMap as Record<string, DaySchedule | null>)[String(dayOfWeek)] ?? null;
+  return normalizarHorarioDia(rawDay);
 }
 
 /**
@@ -63,16 +84,20 @@ export function getReferenceScheduleForEmployee(
   horariosDB: Record<string, ScheduleConfig>,
   scheduleCode: string | undefined
 ): DaySchedule | null {
-  const effectiveCode = (scheduleCode && horariosDB[scheduleCode])
-    ? scheduleCode
-    : (horariosDB['ADMO'] ? 'ADMO' : Object.keys(horariosDB)[0]);
+  const matchedCode = resolveScheduleCodeInCatalog(horariosDB, scheduleCode);
+  const effectiveCode = matchedCode || (horariosDB['ADMO'] ? 'ADMO' : Object.keys(horariosDB)[0]);
   if (!effectiveCode || !horariosDB[effectiveCode]) return null;
-  const config = horariosDB[effectiveCode];
-  if (!config.dias) return null;
+  const config = horariosDB[effectiveCode] as ScheduleConfig & {
+    turnos?: Record<number, DaySchedule | null>;
+  };
+  const dayMap = config.dias || config.turnos;
+  if (!dayMap) return null;
   for (let i = 1; i <= 6; i++) {
-    if (config.dias[i]) return normalizarHorarioDia(config.dias[i]);
+    const rawDay = dayMap[i] ?? (dayMap as Record<string, DaySchedule | null>)[String(i)];
+    if (rawDay) return normalizarHorarioDia(rawDay);
   }
-  if (config.dias[0]) return normalizarHorarioDia(config.dias[0]);
+  const sunDay = dayMap[0] ?? (dayMap as Record<string, DaySchedule | null>)['0'];
+  if (sunDay) return normalizarHorarioDia(sunDay);
   return null;
 }
 
@@ -859,3 +884,196 @@ export function generarReporteAsistencia(
 
   return { reportes, resumen };
 }
+
+/**
+ * Determina el código de horario vigente de un empleado consultando `asignaciones`, `empleadosDB` y el propio registro.
+ */
+export function resolveEmployeeScheduleCode(
+  emp: Employee,
+  horariosDB: Record<string, ScheduleConfig>,
+  asignaciones?: Record<string, string>,
+  empleadosDB?: Record<string, Employee>
+): string {
+  const normId = normalizeEmployeeId(emp.id);
+  const rawId = (emp.id || '').trim();
+  const parsedNum = parseInt(rawId, 10);
+  const shortId = !isNaN(parsedNum) ? String(parsedNum) : '';
+
+  const candidates = [
+    asignaciones?.[normId],
+    asignaciones?.[rawId],
+    shortId ? asignaciones?.[shortId] : undefined,
+    empleadosDB?.[normId]?.horario,
+    empleadosDB?.[rawId]?.horario,
+    shortId ? empleadosDB?.[shortId]?.horario : undefined,
+    emp.horario,
+  ];
+
+  for (const c of candidates) {
+    const resolved = resolveScheduleCodeInCatalog(horariosDB, c);
+    if (resolved) return resolved;
+  }
+  return '';
+}
+
+function areDaySchedulesEqual(a: DaySchedule | null | undefined, b: DaySchedule | null | undefined): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    a.entrada === b.entrada &&
+    a.salida === b.salida &&
+    (a.comida ?? 60) === (b.comida ?? 60) &&
+    Boolean(a.cruzaMedianoche) === Boolean(b.cruzaMedianoche)
+  );
+}
+
+/**
+ * Sincroniza una lista existente de `EmployeeReport[]` (proveniente de memoria, servidor, localStorage o snapshot de dispersión)
+ * contra el catálogo vigente de `horariosDB` y `asignaciones`, garantizando que `horarioProgramado`, `hNormal`, `hExtra`,
+ * `totalNormal` y `totalExtra` correspondan exactamente al horario asignado al colaborador, sin necesitar recargar `eventosDB`.
+ */
+export function sincronizarReportesConHorarios(
+  reportes: EmployeeReport[],
+  horariosDB: Record<string, ScheduleConfig>,
+  asignaciones: Record<string, string> = {},
+  empleadosDB: Record<string, Employee> = {},
+  vacacionesDB: Record<string, Record<string, string>> = {},
+  options: EngineRunOptions = {}
+): EmployeeReport[] {
+  if (!Array.isArray(reportes) || reportes.length === 0) return reportes;
+  const jornadaBase = options.jornadaBase ?? 8.0;
+
+  return reportes.map(rep => {
+    const normId = normalizeEmployeeId(rep.empleado.id);
+    const dbEmp = empleadosDB[normId] || empleadosDB[rep.empleado.id];
+    const effectiveCode = resolveEmployeeScheduleCode(rep.empleado, horariosDB, asignaciones, empleadosDB);
+
+    const updatedEmpleado: Employee = {
+      ...rep.empleado,
+      ...(dbEmp ? { nombre: dbEmp.nombre || rep.empleado.nombre, jefe: dbEmp.jefe || rep.empleado.jefe } : {}),
+      id: normId || rep.empleado.id,
+      horario: effectiveCode,
+    };
+
+    let sumNormal = 0;
+    let sumExtra = 0;
+    let countAsist = 0;
+    let countFaltas = 0;
+    let countRetardos = 0;
+
+    const updatedDias: ProcessedDay[] = (rep.dias || []).map(d => {
+      const dayOfWeek = typeof d.dayOfWeek === 'number' ? d.dayOfWeek : getDayOfWeekFromISO(d.isoDate);
+      const expectedHorario = getScheduleForDay(horariosDB, effectiveCode, dayOfWeek);
+      const scheduleChanged = !areDaySchedulesEqual(d.horarioProgramado, expectedHorario);
+      const vca = vacacionesDB[updatedEmpleado.id]?.[d.isoDate] || vacacionesDB[rep.empleado.id]?.[d.isoDate];
+      const hasRST = Array.isArray(d.registrosCrudosDia) && d.registrosCrudosDia.some(r => r.codigo === 'RST');
+
+      const metricas = calcularMetricasDia(
+        d.entrada || '--:--',
+        d.salida || '--:--',
+        expectedHorario,
+        jornadaBase,
+        hasRST,
+        vca,
+        d.isoDate,
+        Boolean(effectiveCode),
+        options.overtimeRules
+      );
+
+      const incUpper = (d.incidencia || '').toUpperCase();
+      const isExplicitSupervisorAbsence =
+        Boolean(d.modificadoPorSupervisor) &&
+        (d.tipoModificacionSupervisor === 'falta_confirmada' ||
+          incUpper.includes('FALTA') ||
+          incUpper.includes('SIN GOCE') ||
+          d.incidencia === 'Descanso');
+
+      const isExplicitSupervisorPaidLeaveWithoutPunches =
+        Boolean(d.modificadoPorSupervisor) &&
+        (d.entrada === '--:--' || !d.entrada || d.salida === '--:--' || !d.salida) &&
+        (d.tipoModificacionSupervisor === 'formato_permiso' ||
+          incUpper.includes('VACACIONES') ||
+          incUpper.includes('CON GOCE') ||
+          incUpper.includes('INCAPACIDAD') ||
+          incUpper.includes('PASE'));
+
+      let nextHNormal = metricas.hNormal;
+      let nextHExtra = metricas.hExtra;
+      let nextIncidencia = metricas.incidencia;
+      let nextAdvertencia = metricas.advertencia;
+      let nextHuerfana = metricas.huerfana;
+      let nextRowClass = metricas.rowClass;
+
+      if (isExplicitSupervisorAbsence) {
+        nextHNormal = 0;
+        nextHExtra = 0;
+        nextIncidencia = d.incidencia;
+        nextAdvertencia = d.advertencia;
+        nextHuerfana = false;
+        nextRowClass = d.rowClass;
+      } else if (isExplicitSupervisorPaidLeaveWithoutPunches) {
+        nextHNormal = d.hNormal > 0 ? d.hNormal : jornadaBase;
+        nextHExtra = 0;
+        nextIncidencia = d.incidencia;
+        nextAdvertencia = d.advertencia;
+        nextHuerfana = false;
+        nextRowClass = d.rowClass;
+      } else if (d.modificadoPorSupervisor && !scheduleChanged) {
+        // Si el supervisor agregó checada o modificó incidencia en este día,
+        // siempre usamos las horas normales y extras calculadas con el horario programado vigente (`expectedHorario`),
+        // pero respetamos la etiqueta de incidencia elegida por el supervisor.
+        nextIncidencia = d.incidencia || metricas.incidencia;
+        nextAdvertencia = d.advertencia;
+        nextHuerfana = d.huerfana;
+        nextRowClass = d.rowClass;
+      } else if (d.modificadoPorSupervisor && scheduleChanged) {
+        // Si cambió el horario programado del empleado, recalculamos horas con el nuevo horario
+        // y conservamos la incidencia manual solo si hubo un tipoModificacionSupervisor explícito
+        if (d.tipoModificacionSupervisor) {
+          nextIncidencia = d.incidencia || metricas.incidencia;
+        }
+      }
+
+      sumNormal += nextHNormal;
+      if (d.horasExtrasAutorizadas === true) {
+        sumExtra += nextHExtra;
+      }
+
+      const finalIncUp = (nextIncidencia || '').toUpperCase();
+      if (nextIncidencia === 'Asistencia') {
+        countAsist++;
+      } else if (finalIncUp.includes('FALTA')) {
+        countFaltas++;
+      } else if (finalIncUp.includes('RETARDO')) {
+        countRetardos++;
+      }
+
+      return {
+        ...d,
+        dayOfWeek,
+        horarioProgramado: expectedHorario,
+        hNormal: nextHNormal,
+        hExtra: nextHExtra,
+        incidencia: nextIncidencia,
+        advertencia: nextAdvertencia,
+        huerfana: nextHuerfana,
+        rowClass: nextRowClass,
+      };
+    });
+
+    const esPerfecta = countFaltas === 0 && countRetardos === 0 && countAsist > 0;
+
+    return {
+      ...rep,
+      empleado: updatedEmpleado,
+      dias: updatedDias,
+      totalNormal: sumNormal,
+      totalExtra: sumExtra,
+      asistencias: countAsist,
+      faltas: countFaltas,
+      retardos: countRetardos,
+      asistenciaPerfecta: esPerfecta,
+    };
+  });
+}
+

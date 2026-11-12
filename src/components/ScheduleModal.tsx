@@ -207,8 +207,20 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     setFeedbackMsg(null);
 
     const initialDias: Record<number, DaySchedule | null> = {};
+    let refDay: DaySchedule | null = null;
     for (let i = 0; i <= 6; i++) {
       initialDias[i] = item.dias[i] ? { ...item.dias[i]! } : null;
+      if (!refDay && i >= 1 && i <= 5 && initialDias[i]) {
+        refDay = initialDias[i];
+      }
+    }
+    if (!refDay) {
+      refDay = initialDias[6] || initialDias[0] || null;
+    }
+    if (refDay) {
+      setPlantillaEntrada(refDay.entrada);
+      setPlantillaSalida(refDay.salida);
+      setPlantillaComida(refDay.comida ?? 60);
     }
     setDiasState(initialDias);
   };
@@ -220,8 +232,17 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
     setCode(`${horarioCode}_2`.slice(0, 12));
     setNombre(`${item.nombre} (Copia)`);
     const clonedDias: Record<number, DaySchedule | null> = {};
+    let refDay: DaySchedule | null = null;
     for (let i = 0; i <= 6; i++) {
       clonedDias[i] = item.dias[i] ? { ...item.dias[i]! } : null;
+      if (!refDay && i >= 1 && i <= 5 && clonedDias[i]) {
+        refDay = clonedDias[i];
+      }
+    }
+    if (refDay) {
+      setPlantillaEntrada(refDay.entrada);
+      setPlantillaSalida(refDay.salida);
+      setPlantillaComida(refDay.comida ?? 60);
     }
     setDiasState(clonedDias);
     setFeedbackMsg({
@@ -739,7 +760,27 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <input
                     type="time"
                     value={plantillaEntrada}
-                    onChange={(e) => setPlantillaEntrada(e.target.value)}
+                    onChange={(e) => {
+                      const nextEnt = e.target.value;
+                      const prevEnt = plantillaEntrada;
+                      setPlantillaEntrada(nextEnt);
+                      if (nextEnt) {
+                        setDiasState(prev => {
+                          const updated = { ...prev };
+                          Object.keys(updated).forEach(k => {
+                            const idx = Number(k);
+                            const d = updated[idx];
+                            if (d && (d.entrada === prevEnt || (idx >= 1 && idx <= 5 && d.salida === plantillaSalida))) {
+                              updated[idx] = normalizarHorarioDia({
+                                ...d,
+                                entrada: nextEnt,
+                              });
+                            }
+                          });
+                          return updated;
+                        });
+                      }
+                    }}
                     className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"
                   />
                 </div>
@@ -748,7 +789,27 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <input
                     type="time"
                     value={plantillaSalida}
-                    onChange={(e) => setPlantillaSalida(e.target.value)}
+                    onChange={(e) => {
+                      const nextSal = e.target.value;
+                      const prevSal = plantillaSalida;
+                      setPlantillaSalida(nextSal);
+                      if (nextSal) {
+                        setDiasState(prev => {
+                          const updated = { ...prev };
+                          Object.keys(updated).forEach(k => {
+                            const idx = Number(k);
+                            const d = updated[idx];
+                            if (d && (d.salida === prevSal || (idx >= 1 && idx <= 5 && d.entrada === plantillaEntrada))) {
+                              updated[idx] = normalizarHorarioDia({
+                                ...d,
+                                salida: nextSal,
+                              });
+                            }
+                          });
+                          return updated;
+                        });
+                      }
+                    }}
                     className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"
                   />
                 </div>
@@ -757,7 +818,22 @@ export const ScheduleModal: React.FC<ScheduleModalProps> = ({
                   <input
                     type="number"
                     value={plantillaComida}
-                    onChange={(e) => setPlantillaComida(parseInt(e.target.value, 10) || 0)}
+                    onChange={(e) => {
+                      const nextCom = parseInt(e.target.value, 10) || 0;
+                      const prevCom = plantillaComida;
+                      setPlantillaComida(nextCom);
+                      setDiasState(prev => {
+                        const updated = { ...prev };
+                        Object.keys(updated).forEach(k => {
+                          const idx = Number(k);
+                          const d = updated[idx];
+                          if (d && d.comida === prevCom && idx >= 1 && idx <= 5) {
+                            updated[idx] = { ...d, comida: nextCom };
+                          }
+                        });
+                        return updated;
+                      });
+                    }}
                     min={0}
                     step={5}
                     className="w-full text-xs rounded-lg px-2 py-1.5 bg-slate-50 dark:bg-[#171821] border border-slate-300 dark:border-white/10 text-slate-900 dark:text-slate-100 font-mono"

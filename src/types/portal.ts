@@ -339,6 +339,7 @@ export interface EmailServerConfig {
   horasAntesVencimiento?: number; // ej. 2 (enviar alerta cuando falten 2 horas o menos)
   asuntoPorVencer?: string;
   mensajePorVencer?: string;
+  updatedAt?: string;
 }
 
 export const DEFAULT_EMAIL_TEMPLATES = {

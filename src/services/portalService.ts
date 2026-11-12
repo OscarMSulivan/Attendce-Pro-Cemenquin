@@ -203,7 +203,13 @@ export class PortalService {
       }
       const serverEmailCfg = data.emailConfig || data.config?.emailServer;
       if (serverEmailCfg && typeof serverEmailCfg === 'object') {
-        localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(serverEmailCfg));
+        const localCurrent = this.loadEmailConfig();
+        const localTime = localCurrent.updatedAt ? new Date(localCurrent.updatedAt).getTime() : 0;
+        const serverTime = serverEmailCfg.updatedAt ? new Date(serverEmailCfg.updatedAt).getTime() : 0;
+        if (!localTime || (serverTime && serverTime >= localTime)) {
+          const merged = { ...localCurrent, ...serverEmailCfg };
+          localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(merged));
+        }
       }
       return data;
     } catch {
@@ -513,8 +519,17 @@ export class PortalService {
   }
 
   static saveEmailConfig(cfg: EmailServerConfig): void {
-    localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(cfg));
-    this.pushToServer({ emailConfig: cfg, config: { emailServer: cfg } });
+    const payloadWithTimestamp: EmailServerConfig = {
+      ...this.loadEmailConfig(),
+      ...cfg,
+      updatedAt: cfg.updatedAt || new Date().toISOString(),
+    };
+    console.log('[PortalService.saveEmailConfig] Persisting emailConfig payload before server sync:', payloadWithTimestamp);
+    localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(payloadWithTimestamp));
+    this.pushToServer({
+      emailConfig: payloadWithTimestamp,
+      config: { emailServer: payloadWithTimestamp },
+    });
   }
 
   /**

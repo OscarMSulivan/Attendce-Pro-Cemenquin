@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Employee, EmployeeReport, ProcessedDay, ScheduleConfig } from '../types/attendance';
 import { FESTIVOS_OFICIALES, OPCIONES_INCIDENCIA, OPCIONES_INCIDENCIA_SUPERVISOR, formatScheduleHoursSummary } from '../utils/calendarUtils';
+import { getScheduleForDay, resolveScheduleCodeInCatalog } from '../core/attendanceEngine';
 import { ResolutionMode } from './portal/MissingPunchFormatModal';
 import saveAs from 'file-saver';
 
@@ -219,7 +220,8 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
   });
   const sinIncidencias = faltas === 0 && retardos === 0 && !hasUnresolvedMissingPunches;
 
-  const activeScheduleCode = empleado.horario && horarios?.[empleado.horario] ? empleado.horario : 'ADMO';
+  const matchedCatalogCode = horarios ? resolveScheduleCodeInCatalog(horarios, empleado.horario) : '';
+  const activeScheduleCode = matchedCatalogCode || (horarios?.['ADMO'] ? 'ADMO' : (horarios ? Object.keys(horarios)[0] || 'ADMO' : 'ADMO'));
   const activeScheduleConfig = horarios?.[activeScheduleCode];
   const hoursSummaryText = formatScheduleHoursSummary(activeScheduleConfig);
 
@@ -325,20 +327,29 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
-            {dias.map((d) => (
-              <DayRow
-                key={d.isoDate}
-                employee={empleado}
-                day={d}
-                onChangeIncidence={(val) => onUpdateDayIncidence(empleado.id, d.isoDate, val)}
-                onChangeTimes={(newEnt, newSal) => onUpdateDayTimes(empleado.id, d.isoDate, newEnt, newSal)}
-                onChangeNote={onUpdateDayNote ? (note) => onUpdateDayNote(empleado.id, d.isoDate, note) : undefined}
-                onOpenFormatAssistant={onOpenFormatAssistant}
-                onQuickConfirmFalta={onQuickConfirmFalta ? () => onQuickConfirmFalta(empleado.id, d.isoDate) : undefined}
-                isSupervisorMode={isSupervisorMode}
-                onToggleOvertimeApproval={onToggleOvertimeApproval ? (aut) => onToggleOvertimeApproval(empleado.id, d.isoDate, aut) : undefined}
-              />
-            ))}
+            {dias.map((d) => {
+              const resolvedDayHorario = horarios
+                ? getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek)
+                : d.horarioProgramado;
+              const effectiveDay =
+                resolvedDayHorario !== d.horarioProgramado
+                  ? { ...d, horarioProgramado: resolvedDayHorario }
+                  : d;
+              return (
+                <DayRow
+                  key={d.isoDate}
+                  employee={empleado}
+                  day={effectiveDay}
+                  onChangeIncidence={(val) => onUpdateDayIncidence(empleado.id, d.isoDate, val)}
+                  onChangeTimes={(newEnt, newSal) => onUpdateDayTimes(empleado.id, d.isoDate, newEnt, newSal)}
+                  onChangeNote={onUpdateDayNote ? (note) => onUpdateDayNote(empleado.id, d.isoDate, note) : undefined}
+                  onOpenFormatAssistant={onOpenFormatAssistant}
+                  onQuickConfirmFalta={onQuickConfirmFalta ? () => onQuickConfirmFalta(empleado.id, d.isoDate) : undefined}
+                  isSupervisorMode={isSupervisorMode}
+                  onToggleOvertimeApproval={onToggleOvertimeApproval ? (aut) => onToggleOvertimeApproval(empleado.id, d.isoDate, aut) : undefined}
+                />
+              );
+            })}
           </tbody>
         </table>
       </div>

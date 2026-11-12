@@ -353,7 +353,9 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
           ok: true,
           message: data.message || '✓ Conexión SMTP verificada y lista para envíos.',
         });
-        PortalService.saveEmailConfig(smtpConfig);
+        const merged = { ...PortalService.loadEmailConfig(), ...smtpConfig };
+        setSmtpConfig(merged);
+        PortalService.saveEmailConfig(merged);
       } else {
         setSmtpTestResult({
           ok: false,
@@ -371,7 +373,9 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
   };
 
   const handleSaveSmtpConfig = () => {
-    PortalService.saveEmailConfig(smtpConfig);
+    const merged = { ...PortalService.loadEmailConfig(), ...smtpConfig };
+    setSmtpConfig(merged);
+    PortalService.saveEmailConfig(merged);
     setShowSmtpModal(false);
   };
 
@@ -445,7 +449,10 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
           {canEditSmtp && (
             <button
               type="button"
-              onClick={() => setShowSmtpModal(true)}
+              onClick={() => {
+                setSmtpConfig(PortalService.loadEmailConfig());
+                setShowSmtpModal(true);
+              }}
               className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-slate-700 dark:text-[#E8E8EA] border border-slate-300 dark:border-white/[0.08] text-xs font-bold transition-all cursor-pointer"
               title="Configurar servidor SMTP / credenciales para envío automático de correo"
             >

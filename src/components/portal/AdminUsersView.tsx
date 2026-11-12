@@ -70,7 +70,7 @@ interface AdminUsersViewProps {
   currentWeekNumber?: number;
   currentUser: PortalUser;
   emailConfig?: EmailServerConfig;
-  onSaveEmailConfig?: (cfg: EmailServerConfig) => void;
+  onSaveEmailConfig?: (cfg: EmailServerConfig, options?: { silent?: boolean }) => void;
   overtimeRules?: OvertimeRulesConfig;
   jornadaBase?: number;
   onSaveOvertimeRules?: (rules: OvertimeRulesConfig) => void;
@@ -246,6 +246,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   }, [emailConfig]);
 
   const buildCombinedEmailConfig = (): EmailServerConfig => ({
+    ...(emailConfig || {}),
     smtpHost: smtpHost.trim() || 'smtp.gmail.com',
     smtpPort: Number(smtpPort) || 587,
     smtpUser: smtpUser.trim(),
@@ -257,21 +258,49 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
       (typeof window !== 'undefined' && window.location.protocol !== 'file:'
         ? window.location.origin
         : ''),
-    textoBotonCorreo: textoBotonCorreo.trim() || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo,
-    asuntoDispersion: asuntoDispersion.trim() || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion,
-    mensajeDispersion: mensajeDispersion.trim() || DEFAULT_EMAIL_TEMPLATES.mensajeDispersion,
+    textoBotonCorreo: textoBotonCorreo || DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo,
+    asuntoDispersion: asuntoDispersion || DEFAULT_EMAIL_TEMPLATES.asuntoDispersion,
+    mensajeDispersion: mensajeDispersion || DEFAULT_EMAIL_TEMPLATES.mensajeDispersion,
     activarAlertaPorVencer,
     horasAntesVencimiento: Math.max(1, Number(horasAntesVencimiento) || 2),
-    asuntoPorVencer: asuntoPorVencer.trim() || DEFAULT_EMAIL_TEMPLATES.asuntoPorVencer,
-    mensajePorVencer: mensajePorVencer.trim() || DEFAULT_EMAIL_TEMPLATES.mensajePorVencer,
+    asuntoPorVencer: asuntoPorVencer || DEFAULT_EMAIL_TEMPLATES.asuntoPorVencer,
+    mensajePorVencer: mensajePorVencer || DEFAULT_EMAIL_TEMPLATES.mensajePorVencer,
+    updatedAt: new Date().toISOString(),
   });
+
+  // Auto-persistir cambios de plantillas o SMTP con debounce sin reiniciar el formulario
+  useEffect(() => {
+    if (!isEditingEmailRef.current || !onSaveEmailConfig) return;
+    const timer = setTimeout(() => {
+      const updatedCfg = buildCombinedEmailConfig();
+      lastSyncedEmailJsonRef.current = JSON.stringify(updatedCfg);
+      onSaveEmailConfig(updatedCfg, { silent: true });
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    smtpHost,
+    smtpPort,
+    smtpUser,
+    smtpPass,
+    smtpSecure,
+    smtpFromName,
+    portalUrl,
+    textoBotonCorreo,
+    asuntoDispersion,
+    mensajeDispersion,
+    activarAlertaPorVencer,
+    horasAntesVencimiento,
+    asuntoPorVencer,
+    mensajePorVencer,
+  ]);
 
   const handleSaveSmtpCredentials = () => {
     if (!onSaveEmailConfig) return;
     const updatedCfg = buildCombinedEmailConfig();
     isEditingEmailRef.current = false;
     lastSyncedEmailJsonRef.current = JSON.stringify(updatedCfg);
-    onSaveEmailConfig(updatedCfg);
+    onSaveEmailConfig(updatedCfg, { silent: false });
     setSmtpFeedback({
       type: 'success',
       message:
@@ -287,7 +316,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     const updatedCfg = buildCombinedEmailConfig();
     isEditingEmailRef.current = false;
     lastSyncedEmailJsonRef.current = JSON.stringify(updatedCfg);
-    onSaveEmailConfig(updatedCfg);
+    onSaveEmailConfig(updatedCfg, { silent: false });
     setTemplatesFeedback({
       type: 'success',
       message: 'Plantillas de correo y alerta automática por vencimiento guardadas.',
@@ -298,6 +327,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   };
 
   const handleRestoreDefaultTemplates = () => {
+    isEditingEmailRef.current = true;
     setTextoBotonCorreo(DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo);
     setAsuntoDispersion(DEFAULT_EMAIL_TEMPLATES.asuntoDispersion);
     setMensajeDispersion(DEFAULT_EMAIL_TEMPLATES.mensajeDispersion);
@@ -1817,7 +1847,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                   <input
                     type="text"
                     value={smtpHost}
-                    onChange={e => setSmtpHost(e.target.value)}
+                    onChange={e => {
+                      isEditingEmailRef.current = true;
+                      setSmtpHost(e.target.value);
+                    }}
                     placeholder="smtp.gmail.com"
                     className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-mono font-bold text-white focus:border-[#A9DFD8] outline-none"
                   />
@@ -1832,6 +1865,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                       type="number"
                       value={smtpPort}
                       onChange={e => {
+                        isEditingEmailRef.current = true;
                         const port = Number(e.target.value) || 587;
                         setSmtpPort(port);
                         setSmtpSecure(port === 465);
@@ -1841,6 +1875,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        isEditingEmailRef.current = true;
                         setSmtpPort(587);
                         setSmtpSecure(false);
                       }}
@@ -1855,6 +1890,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        isEditingEmailRef.current = true;
                         setSmtpPort(465);
                         setSmtpSecure(true);
                       }}
@@ -1876,7 +1912,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                   <input
                     type="text"
                     value={smtpFromName}
-                    onChange={e => setSmtpFromName(e.target.value)}
+                    onChange={e => {
+                      isEditingEmailRef.current = true;
+                      setSmtpFromName(e.target.value);
+                    }}
                     placeholder="CemenQtime Nóminas"
                     className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-semibold text-white focus:border-[#A9DFD8] outline-none"
                   />
@@ -1889,7 +1928,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                   <input
                     type="email"
                     value={smtpUser}
-                    onChange={e => setSmtpUser(e.target.value)}
+                    onChange={e => {
+                      isEditingEmailRef.current = true;
+                      setSmtpUser(e.target.value);
+                    }}
                     placeholder="nominas@empresa.com"
                     className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-mono font-bold text-white focus:border-[#A9DFD8] outline-none"
                   />
@@ -1903,7 +1945,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                     <input
                       type={showSmtpPass ? 'text' : 'password'}
                       value={smtpPass}
-                      onChange={e => setSmtpPass(e.target.value)}
+                      onChange={e => {
+                        isEditingEmailRef.current = true;
+                        setSmtpPass(e.target.value);
+                      }}
                       placeholder="Contraseña de 16 caracteres o clave SMTP"
                       className="w-full pl-3.5 pr-9 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-mono font-bold text-white focus:border-[#A9DFD8] outline-none"
                     />

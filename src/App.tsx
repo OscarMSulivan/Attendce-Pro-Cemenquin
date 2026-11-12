@@ -30,16 +30,19 @@ import {
 import { 
   generatePayrollWeeks, 
   PayrollWeekOption,
-  detectPayrollWeekFromDates
+  detectPayrollWeekFromDates,
+  normalizeEmployeeId
 } from './utils/calendarUtils';
 
 import { 
+  HORARIOS_POR_DEFECTO,
   StorageService 
 } from './services/storageService';
 import { 
   calcularMetricasDia,
   consolidarEventosConHorarios, 
-  generarReporteAsistencia 
+  generarReporteAsistencia,
+  sincronizarReportesConHorarios
 } from './core/attendanceEngine';
 import { parseEmployeesFile } from './parsers/employeeParser';
 import { parseBiometricEventsFile } from './parsers/biometricParser';
@@ -134,10 +137,21 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Reporte calculado (hidratado inicialmente desde localStorage para nunca perder ediciones locales)
-  const [reportes, setReportes] = useState<EmployeeReport[]>(
-    () => StorageService.loadReportesState()?.reportes || []
-  );
+  // Reporte calculado (hidratado inicialmente desde localStorage y sincronizado con los horarios vigentes)
+  const [reportes, setReportes] = useState<EmployeeReport[]>(() => {
+    const savedRep = StorageService.loadReportesState()?.reportes || [];
+    if (savedRep.length === 0) return [];
+    const initHorarios = StorageService.loadHorarios();
+    const initAsignaciones = StorageService.loadAsignaciones();
+    const initEmpleados = StorageService.loadSavedEmployees()?.empleados || {};
+    const initConfig = StorageService.loadConfig();
+    return sincronizarReportesConHorarios(savedRep, initHorarios, initAsignaciones, initEmpleados, {}, {
+      jornadaBase: initConfig.jornadaBase,
+      modoLectura: initConfig.modoLectura,
+      minutosRebote: initConfig.minutosRebote,
+      overtimeRules: initConfig.overtimeRules,
+    });
+  });
   const [resumen, setResumen] = useState<PayrollSummary | null>(
     () => StorageService.loadReportesState()?.resumen || null
   );
@@ -169,6 +183,7 @@ export default function App() {
   const [disperseSendEmail, setDisperseSendEmail] = useState<boolean>(true);
 
   const [isServerHydrated, setIsServerHydrated] = useState<boolean>(false);
+  const hasLocalEmailEditRef = useRef<boolean>(false);
 
   // Hidratar estado completo desde el servidor Express (/api/portal/state) en Hostinger KVM 2
   useEffect(() => {
@@ -190,76 +205,92 @@ export default function App() {
           if (serverData.notifications) {
             setNotifications(serverData.notifications);
           }
-          if (serverData.horarios && Object.keys(serverData.horarios).length > 0) {
-            setHorarios(serverData.horarios);
-            StorageService.saveHorarios(serverData.horarios);
-          }
-          if (serverData.asignaciones && Object.keys(serverData.asignaciones).length > 0) {
-            setAsignaciones(serverData.asignaciones);
-            StorageService.saveAsignaciones(serverData.asignaciones);
-          }
+          const localHorarios = StorageService.loadHorarios();
+          const hydratedHorarios: Record<string, ScheduleConfig> = {
+            ...HORARIOS_POR_DEFECTO,
+            ...(serverData.horarios && typeof serverData.horarios === 'object' ? serverData.horarios : {}),
+            ...localHorarios,
+          };
+          setHorarios(hydratedHorarios);
+          StorageService.saveHorarios(hydratedHorarios);
+
+          const localAsignaciones = StorageService.loadAsignaciones();
+          const hydratedAsignaciones: Record<string, string> = {};
+          const rawMergedAsig = {
+            ...(serverData.asignaciones && typeof serverData.asignaciones === 'object' ? serverData.asignaciones : {}),
+            ...localAsignaciones,
+          };
+          Object.entries(rawMergedAsig).forEach(([k, v]) => {
+            const normK = normalizeEmployeeId(k);
+            if (normK && v) {
+              hydratedAsignaciones[normK] = v;
+            }
+          });
+
           const serverEmailCfg =
             (serverData as any).emailConfig ||
             (serverData.config && typeof serverData.config === 'object'
               ? serverData.config.emailServer
               : undefined);
 
-          if (serverEmailCfg && typeof serverEmailCfg === 'object') {
-            const mergedEmail = {
-              ...PortalService.loadEmailConfig(),
-              ...serverEmailCfg,
-            };
-            setEmailConfig(mergedEmail);
-            PortalService.saveEmailConfig(mergedEmail);
+          const localEmailCfg = PortalService.loadEmailConfig();
+          const localTime = localEmailCfg.updatedAt
+            ? new Date(localEmailCfg.updatedAt).getTime()
+            : 0;
+          const serverTime =
+            serverEmailCfg && serverEmailCfg.updatedAt
+              ? new Date(serverEmailCfg.updatedAt).getTime()
+              : 0;
+
+          const shouldUseLocalEmail =
+            hasLocalEmailEditRef.current || (localTime > 0 && localTime > serverTime);
+
+          const resolvedEmailCfg: EmailServerConfig =
+            serverEmailCfg && typeof serverEmailCfg === 'object'
+              ? shouldUseLocalEmail
+                ? { ...serverEmailCfg, ...localEmailCfg }
+                : { ...localEmailCfg, ...serverEmailCfg }
+              : localEmailCfg;
+
+          if (!hasLocalEmailEditRef.current) {
+            setEmailConfig(resolvedEmailCfg);
           }
 
           if (serverData.config && Object.keys(serverData.config).length > 0) {
             setConfig(prev => ({
               ...prev,
               ...serverData.config,
-              ...(serverEmailCfg ? { emailServer: { ...PortalService.loadEmailConfig(), ...serverEmailCfg } } : {}),
+              emailServer: hasLocalEmailEditRef.current ? prev.emailServer || localEmailCfg : resolvedEmailCfg,
             }));
           }
 
-          if (serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0) {
-            setEmpleadosDB(serverData.empleadosDB);
-            StorageService.saveEmployees(serverData.empleadosDB);
-            setSavedEmployeesInfo({
-              count: Object.keys(serverData.empleadosDB).length,
-              savedAt: new Date().toISOString(),
-            });
-          } else {
-            const localSaved = StorageService.loadSavedEmployees();
-            if (localSaved && Object.keys(localSaved.empleados).length > 0) {
-              setEmpleadosDB(localSaved.empleados);
-            }
-          }
-          const hydratedHorarios =
-            serverData.horarios && Object.keys(serverData.horarios).length > 0
-              ? serverData.horarios
-              : horarios;
-          const hydratedEmpleados =
+          const localSaved = StorageService.loadSavedEmployees();
+          const rawEmpleadosSource =
             serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0
               ? serverData.empleadosDB
-              : StorageService.loadSavedEmployees()?.empleados || empleadosDB;
-          const hydratedVacaciones =
-            serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0
-              ? serverData.vacacionesDB
-              : vacacionesDB;
+              : localSaved?.empleados || empleadosDB;
+
+          // Rescatar también cualquier horario previamente guardado en localSaved.empleados
+          if (localSaved?.empleados) {
+            Object.values(localSaved.empleados).forEach(emp => {
+              const normId = normalizeEmployeeId(emp.id);
+              if (normId && emp.horario && !hydratedAsignaciones[normId]) {
+                hydratedAsignaciones[normId] = emp.horario;
+              }
+            });
+          }
+
           const hydratedConfig =
             serverData.config && Object.keys(serverData.config).length > 0
               ? { ...config, ...serverData.config }
               : config;
           const hydratedWeek = serverData.selectedWeek || selectedWeek;
+          const hydratedVacaciones =
+            serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0
+              ? serverData.vacacionesDB
+              : vacacionesDB;
 
-          if (serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0) {
-            setVacacionesDB(serverData.vacacionesDB);
-          }
-          if (serverData.selectedWeek) {
-            setSelectedWeek(serverData.selectedWeek);
-          }
-
-          // Combinar reportes guardados en servidor y en localStorage para preservar cualquier modificación de incidencias
+          // Combinar reportes guardados en servidor y en localStorage para preservar cualquier modificación de incidencias y asignaciones de horario
           const localRepState = StorageService.loadReportesState();
           const localReports =
             localRepState &&
@@ -270,10 +301,77 @@ export default function App() {
             ? serverData.reportes
             : [];
 
+          // Si algún reporte guardado tenía horario asignado en el empleado, asegurarlo en hydratedAsignaciones
+          [...serverReports, ...localReports].forEach(r => {
+            const normId = normalizeEmployeeId(r?.empleado?.id);
+            if (normId && r?.empleado?.horario && !hydratedAsignaciones[normId]) {
+              hydratedAsignaciones[normId] = r.empleado.horario;
+            }
+          });
+
+          setAsignaciones(hydratedAsignaciones);
+          StorageService.saveAsignaciones(hydratedAsignaciones);
+
+          // Construir hydratedEmpleados aplicando siempre las asignaciones de horario normalizadas
+          const hydratedEmpleados: Record<string, Employee> = {};
+          Object.values(rawEmpleadosSource).forEach(emp => {
+            const normId = normalizeEmployeeId(emp.id) || emp.id;
+            const assignedHorario = hydratedAsignaciones[normId] ?? hydratedAsignaciones[emp.id] ?? emp.horario ?? '';
+            hydratedEmpleados[normId] = {
+              ...emp,
+              id: normId,
+              horario: assignedHorario,
+            };
+          });
+
+          if (Object.keys(hydratedEmpleados).length > 0) {
+            setEmpleadosDB(hydratedEmpleados);
+            StorageService.saveEmployees(hydratedEmpleados);
+            setSavedEmployeesInfo({
+              count: Object.keys(hydratedEmpleados).length,
+              savedAt: new Date().toISOString(),
+            });
+          }
+
+          if (serverData.vacacionesDB && Object.keys(serverData.vacacionesDB).length > 0) {
+            setVacacionesDB(serverData.vacacionesDB);
+          }
+          if (serverData.selectedWeek) {
+            setSelectedWeek(serverData.selectedWeek);
+          }
+
+          const engineOpts = {
+            jornadaBase: hydratedConfig.jornadaBase,
+            modoLectura: hydratedConfig.modoLectura,
+            minutosRebote: hydratedConfig.minutosRebote,
+            overtimeRules: hydratedConfig.overtimeRules || DEFAULT_OVERTIME_RULES,
+          };
+
+          // Si hay dispersiones con snapshot, sincronizar sus horarios con el catálogo vigente
+          if (Array.isArray(serverData.dispersals) && serverData.dispersals.length > 0) {
+            const syncedDispersals = serverData.dispersals.map(d => {
+              if (Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0) {
+                const syncedSnap = sincronizarReportesConHorarios(
+                  d.reportesSnapshot as EmployeeReport[],
+                  hydratedHorarios,
+                  hydratedAsignaciones,
+                  hydratedEmpleados,
+                  hydratedVacaciones,
+                  engineOpts
+                );
+                return { ...d, reportesSnapshot: syncedSnap };
+              }
+              return d;
+            });
+            setDispersals(syncedDispersals);
+            PortalService.saveDispersals(syncedDispersals);
+          }
+
           const findSavedDay = (empId: string, isoDate: string) => {
-            const localEmp = localReports.find(r => r.empleado.id === empId);
+            const normTarget = normalizeEmployeeId(empId);
+            const localEmp = localReports.find(r => normalizeEmployeeId(r.empleado.id) === normTarget);
             const localDay = localEmp?.dias.find(d => d.isoDate === isoDate);
-            const srvEmp = serverReports.find(r => r.empleado.id === empId);
+            const srvEmp = serverReports.find(r => normalizeEmployeeId(r.empleado.id) === normTarget);
             const srvDay = srvEmp?.dias.find((d: any) => d.isoDate === isoDate);
             if (localDay && localDay.modificadoPorSupervisor) return localDay;
             if (srvDay && srvDay.modificadoPorSupervisor) return srvDay;
@@ -292,12 +390,18 @@ export default function App() {
             );
             setEventosDB(reconsolidado);
 
+            const [startISO, endISO] = (hydratedWeek || '').split('|');
+            const eventosCoverSelectedWeek =
+              Boolean(startISO && endISO) &&
+              Object.values(reconsolidado).some(empDates =>
+                Object.keys(empDates || {}).some(iso => iso >= startISO && iso <= endISO)
+              );
+
             if (
+              eventosCoverSelectedWeek &&
               (serverReports.length > 0 || localReports.length > 0) &&
-              hydratedWeek &&
               Object.keys(hydratedEmpleados).length > 0
             ) {
-              const [startISO, endISO] = hydratedWeek.split('|');
               const { reportes: recalculados } = generarReporteAsistencia(
                 Object.values(hydratedEmpleados),
                 reconsolidado,
@@ -305,76 +409,75 @@ export default function App() {
                 hydratedHorarios,
                 startISO,
                 endISO,
-                {
-                  jornadaBase: hydratedConfig.jornadaBase,
-                  modoLectura: hydratedConfig.modoLectura,
-                  minutosRebote: hydratedConfig.minutosRebote,
-                  overtimeRules: hydratedConfig.overtimeRules || DEFAULT_OVERTIME_RULES,
-                }
+                engineOpts
               );
 
               const merged = recalculados.map(newRep => {
-                let sumN = 0;
-                let sumE = 0;
-                let empAsist = 0;
-                let empFaltas = 0;
-                let empRet = 0;
-
                 const diasMerged = newRep.dias.map(nd => {
                   const pd = findSavedDay(newRep.empleado.id, nd.isoDate);
                   const wasEdited =
                     pd &&
-                    (pd.modificadoPorSupervisor ||
+                    (Boolean(pd.modificadoPorSupervisor) ||
                       Boolean(pd.notaSupervisorDia) ||
                       pd.horasExtrasAutorizadas !== undefined ||
-                      Boolean(pd.formatoSubidoNombre) ||
-                      (pd.incidencia !== undefined && pd.incidencia !== nd.incidencia));
+                      Boolean(pd.formatoSubidoNombre));
 
-                  const chosen = wasEdited
+                  return wasEdited
                     ? {
                         ...pd,
-                        modificadoPorSupervisor: Boolean(
-                          pd.modificadoPorSupervisor || pd.incidencia !== nd.incidencia
-                        ),
                         horarioProgramado: nd.horarioProgramado,
                       }
                     : nd;
-
-                  sumN += chosen.hNormal;
-                  if (chosen.horasExtrasAutorizadas === true) sumE += chosen.hExtra;
-                  const incUp = (chosen.incidencia || '').toUpperCase();
-                  if (chosen.incidencia === 'Asistencia') empAsist++;
-                  else if (incUp.includes('FALTA')) empFaltas++;
-                  else if (incUp.includes('RETARDO')) empRet++;
-                  return chosen;
                 });
 
-                const esPerfecta = empFaltas === 0 && empRet === 0 && empAsist > 0;
                 return {
                   ...newRep,
                   dias: diasMerged,
-                  totalNormal: sumN,
-                  totalExtra: sumE,
-                  asistencias: empAsist,
-                  faltas: empFaltas,
-                  retardos: empRet,
-                  asistenciaPerfecta: esPerfecta,
                 };
               });
 
-              setReportes(merged);
+              const syncedMerged = sincronizarReportesConHorarios(
+                merged,
+                hydratedHorarios,
+                hydratedAsignaciones,
+                hydratedEmpleados,
+                hydratedVacaciones,
+                engineOpts
+              );
+
+              setReportes(syncedMerged);
               if (serverData.resumen) {
                 setResumen(serverData.resumen);
               }
-            } else if (serverReports.length > 0) {
-              setReportes(serverReports);
+            } else {
+              const baseReports = localReports.length > 0 ? localReports : serverReports;
+              if (baseReports.length > 0) {
+                const syncedBase = sincronizarReportesConHorarios(
+                  baseReports,
+                  hydratedHorarios,
+                  hydratedAsignaciones,
+                  hydratedEmpleados,
+                  hydratedVacaciones,
+                  engineOpts
+                );
+                setReportes(syncedBase);
+              }
               if (serverData.resumen) {
                 setResumen(serverData.resumen);
               }
             }
           } else {
-            if (serverReports.length > 0) {
-              setReportes(serverReports);
+            const baseReports = localReports.length > 0 ? localReports : serverReports;
+            if (baseReports.length > 0) {
+              const syncedBase = sincronizarReportesConHorarios(
+                baseReports,
+                hydratedHorarios,
+                hydratedAsignaciones,
+                hydratedEmpleados,
+                hydratedVacaciones,
+                engineOpts
+              );
+              setReportes(syncedBase);
             }
             if (serverData.resumen) {
               setResumen(serverData.resumen);
@@ -686,7 +789,16 @@ export default function App() {
 
       // 6. Actualizar reportes en vivo si el supervisor o RH está visualizando la semana activa
       if (Array.isArray(incomingState.reportes) && incomingState.reportes.length > 0) {
-        setReportes(incomingState.reportes);
+        const currentHorarios = StorageService.loadHorarios();
+        const currentAsignaciones = StorageService.loadAsignaciones();
+        const currentSavedEmps = StorageService.loadSavedEmployees()?.empleados || {};
+        const syncedIncoming = sincronizarReportesConHorarios(
+          incomingState.reportes as EmployeeReport[],
+          currentHorarios,
+          currentAsignaciones,
+          currentSavedEmps
+        );
+        setReportes(syncedIncoming);
         if (incomingState.resumen) {
           setResumen(incomingState.resumen);
         }
@@ -780,13 +892,17 @@ export default function App() {
     return counts;
   }, [asignaciones]);
 
-  // Aplicar horarios asignados a empleados
+  // Aplicar horarios asignados a empleados (normalizando IDs para coincidencia exacta ej. 64 -> 00064)
   const mergeAsignaciones = useCallback((base: Record<string, Employee>, asig: Record<string, string>) => {
-    const updated = { ...base };
-    Object.keys(updated).forEach(id => {
-      if (asig[id] !== undefined) {
-        updated[id] = { ...updated[id], horario: asig[id] };
-      }
+    const updated: Record<string, Employee> = {};
+    Object.values(base).forEach(emp => {
+      const normId = normalizeEmployeeId(emp.id) || emp.id;
+      const assignedCode = asig[normId] ?? asig[emp.id] ?? emp.horario ?? '';
+      updated[normId] = {
+        ...emp,
+        id: normId,
+        horario: assignedCode,
+      };
     });
     return updated;
   }, []);
@@ -1040,9 +1156,11 @@ export default function App() {
     setTimeout(() => {
       try {
         const [startISO, endISO] = selectedWeek.split('|');
-        const todosLosEmpleados = Object.values(empleadosDB);
+        const empleadosConHorario = mergeAsignaciones(empleadosDB, asignaciones);
+        setEmpleadosDB(empleadosConHorario);
+        const todosLosEmpleados = Object.values(empleadosConHorario);
 
-        const reconsolidado = consolidarEventosConHorarios(eventosDB, empleadosDB, horarios, {
+        const reconsolidado = consolidarEventosConHorarios(eventosDB, empleadosConHorario, horarios, {
           modoLectura: config.modoLectura,
           minutosRebote: config.minutosRebote
         });
@@ -1063,8 +1181,22 @@ export default function App() {
           }
         );
 
-        setReportes(calculados);
-        setResumen(sum);
+        const syncedCalculados = sincronizarReportesConHorarios(
+          calculados,
+          horarios,
+          asignaciones,
+          empleadosConHorario,
+          vacacionesDB,
+          {
+            jornadaBase: config.jornadaBase,
+            modoLectura: config.modoLectura,
+            minutosRebote: config.minutosRebote,
+            overtimeRules: config.overtimeRules
+          }
+        );
+
+        setReportes(syncedCalculados);
+        setResumen(recomputeSummaryFromReports(syncedCalculados) || sum);
 
         // El botón "Generar Reporte" lo genera únicamente para la persona de Nóminas/RH.
         // Limpiamos cualquier dispersión previa de esta semana hasta que Nóminas haga clic en "Dispersar".
@@ -1832,76 +1964,158 @@ export default function App() {
     window.print();
   };
 
-  // Recalcular reportes en vivo cuando cambia un horario programado (conservando modificaciones del supervisor)
+  // Recalcular reportes en vivo cuando cambia un horario programado (incluso si eventosDB está vacío o es de otra semana)
   const recalculateReportsWithUpdatedSchedules = useCallback(
     (
       updatedEmployees: Record<string, Employee>,
       updatedHorarios: Record<string, ScheduleConfig>,
-      currentEventos: EventsDB
+      currentEventos: EventsDB,
+      updatedAsignaciones: Record<string, string> = asignaciones
     ) => {
-      const reconsolidado = consolidarEventosConHorarios(currentEventos, updatedEmployees, updatedHorarios, {
+      const mergedEmployees = mergeAsignaciones(updatedEmployees, updatedAsignaciones);
+      const engineOpts = {
+        jornadaBase: config.jornadaBase,
         modoLectura: config.modoLectura,
-        minutosRebote: config.minutosRebote
-      });
-      setEventosDB(reconsolidado);
+        minutosRebote: config.minutosRebote,
+        overtimeRules: config.overtimeRules,
+      };
+
+      let reconsolidado = currentEventos;
+      if (Object.keys(currentEventos).length > 0) {
+        reconsolidado = consolidarEventosConHorarios(currentEventos, mergedEmployees, updatedHorarios, {
+          modoLectura: config.modoLectura,
+          minutosRebote: config.minutosRebote,
+        });
+        setEventosDB(reconsolidado);
+      }
 
       if (reportes.length > 0 && selectedWeek) {
         const [startISO, endISO] = selectedWeek.split('|');
-        const { reportes: nuevosReportes } = generarReporteAsistencia(
-          Object.values(updatedEmployees),
-          reconsolidado,
-          vacacionesDB,
-          updatedHorarios,
-          startISO,
-          endISO,
-          {
-            jornadaBase: config.jornadaBase,
-            modoLectura: config.modoLectura,
-            minutosRebote: config.minutosRebote,
-            overtimeRules: config.overtimeRules
-          }
-        );
+        const hasEventsInSelectedWeek =
+          Boolean(startISO && endISO) &&
+          Object.values(reconsolidado).some(empDates =>
+            Object.keys(empDates || {}).some(iso => iso >= startISO && iso <= endISO)
+          );
 
-        // Preservar las ediciones o formatos hechos por el supervisor en días específicos
-        const mergedReportes = nuevosReportes.map(newRep => {
-          const prevRep = reportes.find(r => r.empleado.id === newRep.empleado.id);
-          if (!prevRep) return newRep;
-          let sumN = 0;
-          let sumE = 0;
-          const diasMerged = newRep.dias.map(nd => {
-            const pd = prevRep.dias.find(d => d.isoDate === nd.isoDate);
-            if (pd && pd.modificadoPorSupervisor) {
-              sumN += pd.hNormal;
-              if (pd.horasExtrasAutorizadas === true) sumE += pd.hExtra;
-              return { ...pd, horarioProgramado: nd.horarioProgramado };
-            }
-            sumN += nd.hNormal;
-            if (nd.horasExtrasAutorizadas === true) sumE += nd.hExtra;
-            return nd;
+        let finalReportes: EmployeeReport[];
+
+        if (hasEventsInSelectedWeek && Object.keys(mergedEmployees).length > 0) {
+          const { reportes: nuevosReportes } = generarReporteAsistencia(
+            Object.values(mergedEmployees),
+            reconsolidado,
+            vacacionesDB,
+            updatedHorarios,
+            startISO,
+            endISO,
+            engineOpts
+          );
+
+          // Preservar las ediciones o formatos hechos por el supervisor en días específicos
+          const mergedReportes = nuevosReportes.map(newRep => {
+            const normTarget = normalizeEmployeeId(newRep.empleado.id);
+            const prevRep = reportes.find(r => normalizeEmployeeId(r.empleado.id) === normTarget);
+            if (!prevRep) return newRep;
+            const diasMerged = newRep.dias.map(nd => {
+              const pd = prevRep.dias.find(d => d.isoDate === nd.isoDate);
+              if (
+                pd &&
+                (pd.modificadoPorSupervisor ||
+                  Boolean(pd.notaSupervisorDia) ||
+                  pd.horasExtrasAutorizadas !== undefined ||
+                  Boolean(pd.formatoSubidoNombre))
+              ) {
+                return { ...pd, horarioProgramado: nd.horarioProgramado };
+              }
+              return nd;
+            });
+            return { ...newRep, dias: diasMerged };
           });
-          return { ...newRep, dias: diasMerged, totalNormal: sumN, totalExtra: sumE };
-        });
 
-        setReportes(mergedReportes);
-        setResumen(recomputeSummaryFromReports(mergedReportes));
+          finalReportes = sincronizarReportesConHorarios(
+            mergedReportes,
+            updatedHorarios,
+            updatedAsignaciones,
+            mergedEmployees,
+            vacacionesDB,
+            engineOpts
+          );
+        } else {
+          // Si no están cargados los eventos crudos de esta semana (ej. nómina dispersada o sesión recargada),
+          // recalcular directamente sobre los reportes activos con las checadas ya registradas
+          finalReportes = sincronizarReportesConHorarios(
+            reportes,
+            updatedHorarios,
+            updatedAsignaciones,
+            mergedEmployees,
+            vacacionesDB,
+            engineOpts
+          );
+        }
+
+        setReportes(finalReportes);
+        setResumen(recomputeSummaryFromReports(finalReportes));
+        syncActiveDispersalSnapshot(finalReportes, selectedWeek);
       }
+
+      // Actualizar también los snapshots de todas las dispersiones guardadas para que nunca regresen horarios viejos
+      setDispersals(prev => {
+        if (prev.length === 0) return prev;
+        const next = prev.map(d => {
+          if (Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0) {
+            const syncedSnap = sincronizarReportesConHorarios(
+              d.reportesSnapshot as EmployeeReport[],
+              updatedHorarios,
+              updatedAsignaciones,
+              mergedEmployees,
+              vacacionesDB,
+              engineOpts
+            );
+            const totalNorm = syncedSnap.reduce((s, r) => s + r.totalNormal, 0);
+            const totalExt = syncedSnap.reduce((s, r) => s + r.totalExtra, 0);
+            return {
+              ...d,
+              totalHorasNormales: totalNorm,
+              totalHorasExtras: totalExt,
+              reportesSnapshot: syncedSnap,
+            };
+          }
+          return d;
+        });
+        PortalService.saveDispersals(next);
+        return next;
+      });
     },
-    [config.jornadaBase, config.minutosRebote, config.modoLectura, config.overtimeRules, recomputeSummaryFromReports, reportes, selectedWeek, vacacionesDB]
+    [
+      asignaciones,
+      config.jornadaBase,
+      config.minutosRebote,
+      config.modoLectura,
+      config.overtimeRules,
+      mergeAsignaciones,
+      recomputeSummaryFromReports,
+      reportes,
+      selectedWeek,
+      syncActiveDispersalSnapshot,
+      vacacionesDB,
+    ]
   );
 
   // Guardar Horario
   const handleSaveHorario = (code: string, newConfig: ScheduleConfig) => {
-    const updated = { ...horarios, [code]: newConfig };
+    const cleanCode = code.trim().toUpperCase();
+    const updated = { ...horarios, [cleanCode]: newConfig };
     setHorarios(updated);
     StorageService.saveHorarios(updated);
 
-    if (Object.keys(eventosDB).length > 0) {
-      recalculateReportsWithUpdatedSchedules(empleadosDB, updated, eventosDB);
-    }
+    const mergedEmp = mergeAsignaciones(empleadosDB, asignaciones);
+    setEmpleadosDB(mergedEmp);
+    StorageService.saveEmployees(mergedEmp);
 
-    setStatusMessage(`✓ Horario "${code}" guardado y sincronizado con la lista`);
+    recalculateReportsWithUpdatedSchedules(mergedEmp, updated, eventosDB, asignaciones);
+
+    setStatusMessage(`✓ Horario "${cleanCode}" guardado y sincronizado con la lista`);
     setStatusType('success');
-    showToast(`Horario "${code}" guardado y sincronizado con el reporte.`, 'success', 'Turno Guardado');
+    showToast(`Horario "${cleanCode}" guardado y recalculado en todos los colaboradores asignados.`, 'success', 'Turno Guardado');
   };
 
   // Eliminar Horario
@@ -1918,6 +2132,12 @@ export default function App() {
     setAsignaciones(updatedAsig);
     StorageService.saveAsignaciones(updatedAsig);
 
+    const mergedEmp = mergeAsignaciones(empleadosDB, updatedAsig);
+    setEmpleadosDB(mergedEmp);
+    StorageService.saveEmployees(mergedEmp);
+
+    recalculateReportsWithUpdatedSchedules(mergedEmp, updated, eventosDB, updatedAsig);
+
     setStatusMessage(`Horario "${code}" eliminado`);
     setStatusType('info');
     showToast(`Horario "${code}" eliminado del catálogo.`, 'info', 'Turno Eliminado');
@@ -1925,48 +2145,72 @@ export default function App() {
 
   // Asignar Horario Individual
   const handleAssignIndividual = (empId: string, scheduleCode: string) => {
-    const updatedAsig = { ...asignaciones, [empId]: scheduleCode };
+    const normId = normalizeEmployeeId(empId) || empId;
+    const cleanCode = (scheduleCode || '').trim().toUpperCase();
+    const updatedAsig = { ...asignaciones, [normId]: cleanCode };
+    if (empId !== normId) {
+      updatedAsig[empId] = cleanCode;
+    }
     setAsignaciones(updatedAsig);
     StorageService.saveAsignaciones(updatedAsig);
 
-    const updatedEmp = { ...empleadosDB, [empId]: { ...empleadosDB[empId], horario: scheduleCode } };
+    const baseEmp = empleadosDB[normId] || empleadosDB[empId] || {
+      id: normId,
+      nombre: '',
+      jefe: '',
+      horario: cleanCode,
+    };
+    const updatedEmp = mergeAsignaciones(
+      {
+        ...empleadosDB,
+        [normId]: { ...baseEmp, id: normId, horario: cleanCode },
+      },
+      updatedAsig
+    );
     setEmpleadosDB(updatedEmp);
     StorageService.saveEmployees(updatedEmp);
 
-    if (Object.keys(eventosDB).length > 0) {
-      recalculateReportsWithUpdatedSchedules(updatedEmp, horarios, eventosDB);
-    }
-    setStatusMessage(`✓ Horario ${scheduleCode || 'ADMO'} asignado a colaborador #${empId}`);
+    recalculateReportsWithUpdatedSchedules(updatedEmp, horarios, eventosDB, updatedAsig);
+
+    setStatusMessage(`✓ Horario ${cleanCode || 'ADMO'} asignado y recalculado para colaborador #${normId}`);
     setStatusType('success');
-    showToast(`Horario ${scheduleCode || 'ADMO'} asignado a colaborador #${empId}`, 'success', 'Horario Asignado');
+    showToast(`Horario ${cleanCode || 'ADMO'} asignado y recalculado en la nómina del colaborador #${normId}.`, 'success', 'Horario Asignado');
   };
 
   // Asignar Horario Masivo
   const handleAssignBulk = (empIds: string[], scheduleCode: string) => {
+    const cleanCode = (scheduleCode || '').trim().toUpperCase();
     const updatedAsig = { ...asignaciones };
     const updatedEmp = { ...empleadosDB };
 
-    empIds.forEach(id => {
-      if (scheduleCode) updatedAsig[id] = scheduleCode;
-      else delete updatedAsig[id];
+    empIds.forEach(rawId => {
+      const normId = normalizeEmployeeId(rawId) || rawId;
+      if (cleanCode) {
+        updatedAsig[normId] = cleanCode;
+      } else {
+        delete updatedAsig[normId];
+        delete updatedAsig[rawId];
+      }
 
-      if (updatedEmp[id]) {
-        updatedEmp[id] = { ...updatedEmp[id], horario: scheduleCode };
+      if (updatedEmp[normId]) {
+        updatedEmp[normId] = { ...updatedEmp[normId], horario: cleanCode };
+      } else if (updatedEmp[rawId]) {
+        updatedEmp[normId] = { ...updatedEmp[rawId], id: normId, horario: cleanCode };
       }
     });
 
+    const finalEmp = mergeAsignaciones(updatedEmp, updatedAsig);
+
     setAsignaciones(updatedAsig);
     StorageService.saveAsignaciones(updatedAsig);
-    setEmpleadosDB(updatedEmp);
-    StorageService.saveEmployees(updatedEmp);
+    setEmpleadosDB(finalEmp);
+    StorageService.saveEmployees(finalEmp);
 
-    if (Object.keys(eventosDB).length > 0) {
-      recalculateReportsWithUpdatedSchedules(updatedEmp, horarios, eventosDB);
-    }
+    recalculateReportsWithUpdatedSchedules(finalEmp, horarios, eventosDB, updatedAsig);
 
-    setStatusMessage(`✓ Horario asignado a ${empIds.length} colaboradores`);
+    setStatusMessage(`✓ Horario ${cleanCode || 'ADMO'} asignado y recalculado en ${empIds.length} colaboradores`);
     setStatusType('success');
-    showToast(`Horario asignado a ${empIds.length} colaboradores en lote.`, 'success', 'Asignación Masiva');
+    showToast(`Horario ${cleanCode || 'ADMO'} asignado y recalculado en ${empIds.length} colaboradores.`, 'success', 'Asignación Masiva');
   };
 
   // Exportar respaldo JSON
@@ -2221,7 +2465,19 @@ export default function App() {
             Array.isArray(matchedDispersal.reportesSnapshot) &&
             matchedDispersal.reportesSnapshot.length > 0
           ) {
-            const snap = matchedDispersal.reportesSnapshot as EmployeeReport[];
+            const snap = sincronizarReportesConHorarios(
+              matchedDispersal.reportesSnapshot as EmployeeReport[],
+              horarios,
+              asignaciones,
+              empleadosDB,
+              vacacionesDB,
+              {
+                jornadaBase: config.jornadaBase,
+                modoLectura: config.modoLectura,
+                minutosRebote: config.minutosRebote,
+                overtimeRules: config.overtimeRules,
+              }
+            );
             setReportes(snap);
             setResumen(recomputeSummaryFromReports(snap));
           }
@@ -2648,12 +2904,25 @@ export default function App() {
   };
 
   // Guardar credenciales y plantillas del servidor de correo de manera segura y sincronizar con el backend
-  const handleSaveEmailConfig = (newEmailCfg: EmailServerConfig) => {
+  const handleSaveEmailConfig = (
+    newEmailCfg: EmailServerConfig,
+    options?: { silent?: boolean }
+  ) => {
+    const storedCfg = PortalService.loadEmailConfig();
     const mergedCfg: EmailServerConfig = {
-      ...PortalService.loadEmailConfig(),
+      ...storedCfg,
       ...emailConfig,
       ...newEmailCfg,
+      updatedAt: new Date().toISOString(),
     };
+
+    console.log('[handleSaveEmailConfig] Incoming emailConfig update:', newEmailCfg);
+    console.log(
+      '[handleSaveEmailConfig] Verified emailConfig payload before hitting server:',
+      mergedCfg
+    );
+
+    hasLocalEmailEditRef.current = true;
     setEmailConfig(mergedCfg);
     setConfig(prev => {
       const next = { ...prev, emailServer: mergedCfg };
@@ -2661,15 +2930,18 @@ export default function App() {
       return next;
     });
     PortalService.saveEmailConfig(mergedCfg);
-    setStatusMessage(
-      `✓ Configuración y plantillas de correo guardadas (${mergedCfg.smtpHost}:${mergedCfg.smtpPort})`
-    );
-    setStatusType('success');
-    showToast(
-      `La plantilla y configuración de correo (${mergedCfg.smtpHost}:${mergedCfg.smtpPort}) se guardaron de manera permanente.`,
-      'success',
-      'Plantilla y Correo Guardados'
-    );
+
+    if (!options?.silent) {
+      setStatusMessage(
+        `✓ Configuración y plantillas de correo guardadas (${mergedCfg.smtpHost}:${mergedCfg.smtpPort})`
+      );
+      setStatusType('success');
+      showToast(
+        `La plantilla y configuración de correo (${mergedCfg.smtpHost}:${mergedCfg.smtpPort}) se guardaron de manera permanente.`,
+        'success',
+        'Plantilla y Correo Guardados'
+      );
+    }
   };
 
   // Dispersar semana de nómina a los supervisores (soporta Dispersar Lista por Lista o Dispersar Todas con plazo y SMTP)
@@ -2992,17 +3264,12 @@ export default function App() {
       if (Array.isArray(disp.reportesSnapshot) && disp.reportesSnapshot.length > 0) {
         // Si ya tenemos reportes en memoria de esta misma semana con días modificados, preservar las ediciones
         const mergedSnap = (disp.reportesSnapshot as EmployeeReport[]).map(snapRep => {
+          const normTarget = normalizeEmployeeId(snapRep.empleado.id);
           const currentRep =
             selectedWeek === disp.semanaPeriodo
-              ? reportes.find(r => r.empleado.id === snapRep.empleado.id)
+              ? reportes.find(r => normalizeEmployeeId(r.empleado.id) === normTarget)
               : undefined;
           if (!currentRep) return snapRep;
-
-          let sumN = 0;
-          let sumE = 0;
-          let empAsist = 0;
-          let empFaltas = 0;
-          let empRet = 0;
 
           const diasMerged = snapRep.dias.map(sd => {
             const cd = currentRep.dias.find(d => d.isoDate === sd.isoDate);
@@ -3011,31 +3278,32 @@ export default function App() {
               (cd.modificadoPorSupervisor ||
                 Boolean(cd.notaSupervisorDia) ||
                 cd.horasExtrasAutorizadas !== undefined ||
-                cd.incidencia !== sd.incidencia);
-            const chosen = useCurrent ? cd : sd;
-            sumN += chosen.hNormal;
-            if (chosen.horasExtrasAutorizadas === true) sumE += chosen.hExtra;
-            const incUp = (chosen.incidencia || '').toUpperCase();
-            if (chosen.incidencia === 'Asistencia') empAsist++;
-            else if (incUp.includes('FALTA')) empFaltas++;
-            else if (incUp.includes('RETARDO')) empRet++;
-            return chosen;
+                Boolean(cd.formatoSubidoNombre));
+            return useCurrent ? cd : sd;
           });
 
           return {
             ...snapRep,
             dias: diasMerged,
-            totalNormal: sumN,
-            totalExtra: sumE,
-            asistencias: empAsist,
-            faltas: empFaltas,
-            retardos: empRet,
-            asistenciaPerfecta: empFaltas === 0 && empRet === 0 && empAsist > 0,
           };
         });
 
-        setReportes(mergedSnap);
-        setResumen(recomputeSummaryFromReports(mergedSnap));
+        const syncedSnap = sincronizarReportesConHorarios(
+          mergedSnap,
+          horarios,
+          asignaciones,
+          empleadosDB,
+          vacacionesDB,
+          {
+            jornadaBase: config.jornadaBase,
+            modoLectura: config.modoLectura,
+            minutosRebote: config.minutosRebote,
+            overtimeRules: config.overtimeRules,
+          }
+        );
+
+        setReportes(syncedSnap);
+        setResumen(recomputeSummaryFromReports(syncedSnap));
       } else if (
         Object.keys(empleadosDB).length > 0 &&
         Object.keys(eventosDB).length > 0 &&
