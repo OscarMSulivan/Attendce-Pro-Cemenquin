@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { motion } from 'motion/react';
 import {
   Activity,
   FileText,
@@ -102,14 +103,19 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
   );
 
   return (
-    <div className="space-y-6 animate-fade-up">
-      {/* 1. HERO BANNER DE BIENVENIDA — FREE DARK ADMIN DASHBOARD + CEMENQUIN */}
-      <div className="rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-[#21222D] via-[#1B1C26] to-[#171821] border border-white/[0.08] shadow-[0_24px_60px_rgba(0,0,0,0.45)] relative overflow-hidden">
+    <div className="space-y-6">
+      {/* 1. HERO BANNER DE BIENVENIDA — DARK STUDIO STAGE (.ground-inverse conserva el alto contraste en Modo Claro y Oscuro) */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+        className="ground-inverse rounded-3xl p-6 sm:p-8 bg-gradient-to-br from-[#0B0F17] via-[#111827] to-[#0D131F] border border-slate-800/80 shadow-[0_24px_60px_-15px_rgba(15,23,42,0.35)] relative overflow-hidden text-white"
+      >
         {/* Glows atmosféricos */}
-        <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-[#A9DFD8]/12 blur-[100px] pointer-events-none" />
-        <div className="absolute -left-20 -bottom-20 w-80 h-80 rounded-full bg-[#20AEF3]/12 blur-[100px] pointer-events-none" />
+        <div className="absolute -right-20 -top-20 w-80 h-80 rounded-full bg-[#A9DFD8]/15 blur-[100px] pointer-events-none" />
+        <div className="absolute -left-20 -bottom-20 w-80 h-80 rounded-full bg-[#20AEF3]/15 blur-[100px] pointer-events-none" />
         <div
-          className="absolute inset-0 opacity-[0.03] pointer-events-none"
+          className="absolute inset-0 opacity-[0.035] pointer-events-none"
           style={{
             backgroundImage:
               'linear-gradient(to right, #ffffff 1px, transparent 1px), linear-gradient(to bottom, #ffffff 1px, transparent 1px)',
@@ -237,10 +243,15 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
-      {/* 2. PANEL BENTO DE ACCIONES PRIORITARIAS — ESTILO DARK ADMIN DASHBOARD */}
-      <div className="p-6 rounded-2xl bg-[#21222D] border border-white/[0.07] space-y-4 shadow-xl">
+      {/* 2. PANEL BENTO DE ACCIONES PRIORITARIAS — ENTRADA ESCALONADA */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+        className="p-6 rounded-2xl bg-[#21222D] border border-white/[0.07] space-y-4 shadow-xl"
+      >
         <div className="flex items-center justify-between border-b border-white/[0.06] pb-3.5">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-[#FEB95A]/15 border border-[#FEB95A]/30 flex items-center justify-center text-[#FEB95A]">
@@ -456,10 +467,15 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
-      {/* 3. SELECCIÓN DE MÓDULOS HABILITADOS — BENTO GRID */}
-      <div className="space-y-3.5">
+      {/* 3. SELECCIÓN DE MÓDULOS HABILITADOS — BENTO GRID INTERACTIVO */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.42, delay: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        className="space-y-3.5"
+      >
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#87888C] flex items-center gap-2">
             <TrendingUp className="w-3.5 h-3.5 text-[#A9DFD8]" />
@@ -472,7 +488,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'nomina') && (
             <div
               onClick={() => onNavigateTab('nomina')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#20AEF3]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#20AEF3]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#20AEF3]/15 border border-[#20AEF3]/30 flex items-center justify-center text-[#20AEF3] mb-3.5 group-hover:scale-105 transition-transform">
@@ -496,7 +512,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'trabajar_listas') && (
             <div
               onClick={() => onNavigateTab('trabajar_listas')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8] mb-3.5 group-hover:scale-105 transition-transform">
@@ -520,7 +536,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'semaforo') && (
             <div
               onClick={() => onNavigateTab('semaforo')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8] mb-3.5 group-hover:scale-105 transition-transform">
@@ -544,7 +560,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'incidencias') && (
             <div
               onClick={() => onNavigateTab('incidencias')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#FEB95A]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#FEB95A]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#FEB95A]/15 border border-[#FEB95A]/30 flex items-center justify-center text-[#FEB95A] mb-3.5 group-hover:scale-105 transition-transform">
@@ -570,20 +586,20 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'contpaqi') && (
             <div
               onClick={() => onNavigateTab('contpaqi')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#F2C8ED]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
-                <div className="w-11 h-11 rounded-xl bg-[#F2C8ED]/15 border border-[#F2C8ED]/30 flex items-center justify-center text-[#F2C8ED] mb-3.5 group-hover:scale-105 transition-transform">
+                <div className="w-11 h-11 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8] mb-3.5 group-hover:scale-105 transition-transform">
                   <FileSpreadsheet className="w-5 h-5" />
                 </div>
-                <h4 className="text-sm font-extrabold text-white group-hover:text-[#F2C8ED] transition-colors">
+                <h4 className="text-sm font-extrabold text-white group-hover:text-[#A9DFD8] transition-colors">
                   Exportación de Nómina
                 </h4>
                 <p className="text-xs text-[#87888C] mt-1 leading-relaxed">
                   Generación de layout Excel con claves de incidencias (FINJ, RET, 1HE, 2HE) y cálculo de descuentos.
                 </p>
               </div>
-              <div className="flex items-center text-xs font-bold text-[#F2C8ED] mt-4 pt-3 border-t border-white/[0.05]">
+              <div className="flex items-center text-xs font-bold text-[#A9DFD8] mt-4 pt-3 border-t border-white/[0.05]">
                 <span>Abrir Exportación</span>
                 <ArrowRight className="w-4 h-4 ml-auto group-hover:translate-x-1 transition-transform" />
               </div>
@@ -594,7 +610,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'tiempo_limite') && (
             <div
               onClick={() => onNavigateTab('usuarios')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#FEB95A]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#FEB95A]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#FEB95A]/15 border border-[#FEB95A]/30 flex items-center justify-center text-[#FEB95A] mb-3.5 group-hover:scale-105 transition-transform">
@@ -618,7 +634,7 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'smtp_correo') && (
             <div
               onClick={() => onNavigateTab('usuarios')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#20AEF3]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#20AEF3]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
                 <div className="w-11 h-11 rounded-xl bg-[#20AEF3]/15 border border-[#20AEF3]/30 flex items-center justify-center text-[#20AEF3] mb-3.5 group-hover:scale-105 transition-transform">
@@ -642,27 +658,27 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           {userHasModuleAccess(currentUser, 'usuarios') && (
             <div
               onClick={() => onNavigateTab('usuarios')}
-              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#F2C8ED]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between"
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#20AEF3]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
             >
               <div>
-                <div className="w-11 h-11 rounded-xl bg-[#F2C8ED]/15 border border-[#F2C8ED]/30 flex items-center justify-center text-[#F2C8ED] mb-3.5 group-hover:scale-105 transition-transform">
+                <div className="w-11 h-11 rounded-xl bg-[#20AEF3]/15 border border-[#20AEF3]/30 flex items-center justify-center text-[#20AEF3] mb-3.5 group-hover:scale-105 transition-transform">
                   <Users className="w-5 h-5" />
                 </div>
-                <h4 className="text-sm font-extrabold text-white group-hover:text-[#F2C8ED] transition-colors">
+                <h4 className="text-sm font-extrabold text-white group-hover:text-[#20AEF3] transition-colors">
                   Usuarios y Permisos
                 </h4>
                 <p className="text-xs text-[#87888C] mt-1 leading-relaxed">
                   Crea usuarios, asigna contraseñas, define qué módulos pueden ver y qué listas trabajan.
                 </p>
               </div>
-              <div className="flex items-center text-xs font-bold text-[#F2C8ED] mt-4 pt-3 border-t border-white/[0.05]">
+              <div className="flex items-center text-xs font-bold text-[#20AEF3] mt-4 pt-3 border-t border-white/[0.05]">
                 <span>Gestionar Usuarios</span>
                 <ArrowRight className="w-4 h-4 ml-auto group-hover:translate-x-1 transition-transform" />
               </div>
             </div>
           )}
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 };

@@ -5,38 +5,38 @@
 @layer base {
   :root,
   body.light-mode {
-    /* Modo Claro Técnico — "Stone & Blueprint" (Predeterminado) */
-    --bg-canvas: #F4F4F0;
+    /* Modo Claro Técnico Moderno — "Studio Alabaster & Emerald" (Predeterminado) */
+    --bg-canvas: #EEF2F6;
     --bg-card: #FFFFFF;
-    --bg-card-subtle: #EAEAE4;
-    --bg-hover: #E2E2DA;
-    --border-subtle: #D8D8D0;
-    --border-medium: #C2C2B8;
-    --text-primary: #111315;
-    --text-secondary: #2D3138;
-    --text-muted: #5C626B;
-    --accent-primary: #0F6E56;
-    --accent-hover: #0B5643;
+    --bg-card-subtle: #F8FAFC;
+    --bg-hover: #F1F5F9;
+    --border-subtle: #E2E8F0;
+    --border-medium: #CBD5E1;
+    --text-primary: #0F172A;
+    --text-secondary: #1E293B;
+    --text-muted: #64748B;
+    --accent-primary: #0D9488;
+    --accent-hover: #0F766E;
     --accent-ink: #FFFFFF;
-    --status-ok: #0F6E56;
-    --status-warn: #B45309;
-    --status-danger: #B91C1C;
+    --status-ok: #10B981;
+    --status-warn: #F59E0B;
+    --status-danger: #EF4444;
   }
 
   .dark {
-    /* Modo Oscuro — "Carbon Ledger" */
-    --bg-canvas: #0D0F12;
-    --bg-card: #15181E;
-    --bg-card-subtle: #1C2028;
-    --bg-hover: #242933;
-    --border-subtle: #262B35;
-    --border-medium: #343B48;
-    --text-primary: #F3F5F7;
-    --text-secondary: #C8D0DC;
-    --text-muted: #8A93A2;
+    /* Modo Oscuro — "Obsidian Studio" */
+    --bg-canvas: #0B0D13;
+    --bg-card: #131722;
+    --bg-card-subtle: #1A202E;
+    --bg-hover: #232B3E;
+    --border-subtle: #22293A;
+    --border-medium: #313B52;
+    --text-primary: #F8FAFC;
+    --text-secondary: #CBD5E1;
+    --text-muted: #8A99AD;
     --accent-primary: #10B981;
     --accent-hover: #059669;
-    --accent-ink: #081C15;
+    --accent-ink: #061812;
     --status-ok: #10B981;
     --status-warn: #F59E0B;
     --status-danger: #EF4444;
@@ -47,7 +47,7 @@
     letter-spacing: -0.01em;
     background-color: var(--bg-canvas);
     color: var(--text-primary);
-    transition: background-color 0.18s ease, color 0.18s ease;
+    transition: background-color 0.25s ease, color 0.25s ease;
     -webkit-font-smoothing: antialiased;
   }
 
@@ -63,28 +63,23 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Geometría técnica: radios disciplinados (8px / 12px) */
-  .rounded-3xl {
-    border-radius: 0.75rem !important; /* 12px */
-  }
-  .rounded-2xl {
-    border-radius: 0.625rem !important; /* 10px */
-  }
-
-  /* Micro-interacción táctil en botones (design-taste-frontend Rule 5) */
+  /* Micro-interacción táctil en botones y tarjetas (design-taste-frontend Rule 5) */
   button:not(:disabled) {
-    transition: transform 0.14s cubic-bezier(0.16, 1, 0.3, 1),
+    transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1),
       background-color 0.15s ease,
       border-color 0.15s ease,
       color 0.15s ease,
       box-shadow 0.15s ease;
   }
+  button:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
   button:not(:disabled):active {
-    transform: translateY(1px);
+    transform: translateY(1px) scale(0.985);
   }
 
   /* ============================================================================
-   * MODO OSCURO ("CARBON LEDGER") — Armonización de superficies y cero violeta
+   * MODO OSCURO ("OBSIDIAN STUDIO") — Superficies profundas y cero violeta
    * ============================================================================ */
   .dark .bg-\[\#171821\],
   .dark .bg-\[\#171821\]\/95,
@@ -92,24 +87,24 @@
   .dark .bg-\[\#171821\]\/80,
   .dark .bg-\[\#171821\]\/60,
   .dark .bg-\[\#1B1C26\] {
-    background-color: #0D0F12 !important;
+    background-color: #0B0D13 !important;
   }
 
   .dark .bg-\[\#21222D\],
   .dark .bg-\[\#21222D\]\/95,
   .dark .bg-\[\#21222D\]\/98,
   .dark .bg-\[\#21222D\]\/90 {
-    background-color: #15181E !important;
-    border-color: #262B35 !important;
+    background-color: #131722 !important;
+    border-color: #22293A !important;
   }
 
   .dark .bg-\[\#2B2B36\],
   .dark .bg-\[\#2A2B36\] {
-    background-color: #1C2028 !important;
-    border-color: #343B48 !important;
+    background-color: #1A202E !important;
+    border-color: #313B52 !important;
   }
 
-  /* Eliminación de violeta/lavanda (#F2C8ED, purple, indigo) -> Acero / Esmeralda */
+  /* Eliminación de violeta/lavanda (#F2C8ED, purple, indigo) -> Esmeralda / Cian */
   .text-\[\#F2C8ED\],
   .text-purple-300,
   .text-purple-400,
@@ -126,196 +121,205 @@
   .bg-purple-500\/20,
   .bg-indigo-500\/10,
   .bg-indigo-500\/15 {
-    background-color: rgba(16, 185, 129, 0.1) !important;
+    background-color: rgba(16, 185, 129, 0.12) !important;
     color: var(--accent-primary) !important;
-    border-color: rgba(16, 185, 129, 0.25) !important;
+    border-color: rgba(16, 185, 129, 0.28) !important;
   }
 
   /* ============================================================================
-   * MODO CLARO TÉCNICO ("STONE & BLUEPRINT") — Predeterminado
+   * MODO CLARO TÉCNICO MODERNO ("STUDIO ALABASTER") — Predeterminado
+   * Respeta bloques con .ground-inverse (Sidebar, Hero Banner, Login Showcase)
    * ============================================================================ */
   body.light-mode {
-    background-color: #F4F4F0 !important;
-    color: #111315 !important;
+    background-color: #EEF2F6 !important;
+    background-image: radial-gradient(
+      ellipse 85% 45% at 50% -10%,
+      rgba(16, 185, 129, 0.09),
+      rgba(32, 174, 243, 0.05),
+      transparent 70%
+    ) !important;
+    background-attachment: fixed;
+    color: #0F172A !important;
   }
 
-  /* 1. Superficies y Contenedores Técnicos */
-  body.light-mode .bg-\[\#171821\],
-  body.light-mode .bg-\[\#171821\]\/95,
-  body.light-mode .bg-\[\#171821\]\/90,
-  body.light-mode .bg-\[\#171821\]\/80,
-  body.light-mode .bg-\[\#171821\]\/60,
-  body.light-mode .bg-\[\#1B1C26\],
-  body.light-mode .bg-\[\#1B1C26\]\/95,
-  body.light-mode .bg-\[\#1B1C26\]\/80,
-  body.light-mode .bg-\[\#0D0F12\],
-  body.light-mode .bg-slate-950,
-  body.light-mode :not(.fixed).bg-slate-950\/40,
-  body.light-mode :not(.fixed).bg-slate-950\/50,
-  body.light-mode :not(.fixed).bg-slate-950\/60,
-  body.light-mode :not(.fixed).bg-slate-950\/70,
-  body.light-mode :not(.fixed).bg-slate-950\/80,
-  body.light-mode :not(.fixed).bg-slate-950\/90 {
-    background-color: #F4F4F0 !important;
-    background-image: none !important;
-    color: #111315 !important;
-    border-color: #D8D8D0 !important;
+  /* 1. Superficies y Contenedores (excluyendo .ground-inverse) */
+  body.light-mode .bg-\[\#171821\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#171821\]\/95:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#171821\]\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#171821\]\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#171821\]\/60:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#171821\]\/40:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#1B1C26\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#1B1C26\]\/95:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#1B1C26\]\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#0D0F12\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-slate-950:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/40:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/50:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/60:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/70:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-950\/90:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #F8FAFC !important;
+    color: #0F172A !important;
+    border-color: #E2E8F0 !important;
   }
 
-  body.light-mode .bg-\[\#21222D\],
-  body.light-mode .bg-\[\#21222D\]\/95,
-  body.light-mode .bg-\[\#21222D\]\/98,
-  body.light-mode .bg-\[\#21222D\]\/90,
-  body.light-mode .bg-\[\#15181E\],
-  body.light-mode .bg-slate-900,
-  body.light-mode :not(.fixed).bg-slate-900\/98,
-  body.light-mode :not(.fixed).bg-slate-900\/95,
-  body.light-mode :not(.fixed).bg-slate-900\/90,
-  body.light-mode :not(.fixed).bg-slate-900\/80,
-  body.light-mode :not(.fixed).bg-slate-900\/60,
-  body.light-mode .from-\[\#21222D\],
-  body.light-mode .via-\[\#1B1C26\],
-  body.light-mode .to-\[\#171821\],
-  body.light-mode .to-\[\#1c2230\],
-  body.light-mode .to-\[\#21222D\],
-  body.light-mode .from-slate-900,
-  body.light-mode .from-indigo-950\/90,
-  body.light-mode .via-blue-950\/80,
-  body.light-mode .to-blue-950\/40,
-  body.light-mode .to-slate-900 {
+  body.light-mode .bg-\[\#21222D\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#21222D\]\/95:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#21222D\]\/98:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#21222D\]\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#15181E\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-slate-900:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-900\/98:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-900\/95:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-900\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-900\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode :not(.fixed).bg-slate-900\/60:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .from-\[\#21222D\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .via-\[\#1B1C26\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .to-\[\#171821\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .to-\[\#1c2230\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .to-\[\#21222D\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .from-slate-900:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .from-indigo-950\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .via-blue-950\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .to-blue-950\/40:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .to-slate-900:not(.ground-inverse):not(.ground-inverse *) {
     background-color: #FFFFFF !important;
     background-image: none !important;
-    color: #111315 !important;
-    border-color: #D8D8D0 !important;
-    box-shadow: 0 1px 2px 0 rgba(17, 19, 21, 0.04) !important;
+    color: #0F172A !important;
+    border-color: #E2E8F0 !important;
+    box-shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.03) !important;
   }
 
-  body.light-mode .bg-\[\#2B2B36\],
-  body.light-mode .bg-\[\#2B2B36\]\/80,
-  body.light-mode .bg-\[\#2A2B36\],
-  body.light-mode .bg-\[\#1C2028\],
-  body.light-mode .bg-slate-800,
-  body.light-mode .bg-slate-800\/80,
-  body.light-mode .bg-slate-800\/60 {
-    background-color: #EAEAE4 !important;
-    color: #111315 !important;
-    border-color: #C2C2B8 !important;
+  body.light-mode .bg-\[\#2B2B36\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#2B2B36\]\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#2A2B36\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#1C2028\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-slate-800:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-slate-800\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-slate-800\/60:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #F1F5F9 !important;
+    color: #0F172A !important;
+    border-color: #CBD5E1 !important;
   }
 
-  /* 2. Acentos técnicos (Verde Industrial #0F6E56, Ocre #B45309, Azul Plano #1D4ED8) */
-  body.light-mode .text-\[\#A9DFD8\],
-  body.light-mode .text-\[\#10B981\] {
-    color: #0F6E56 !important;
+  /* 2. Acentos técnicos (excluyendo .ground-inverse) */
+  body.light-mode .text-\[\#A9DFD8\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-\[\#10B981\]:not(.ground-inverse):not(.ground-inverse *) {
+    color: #0D9488 !important;
   }
 
-  body.light-mode .text-\[\#FEB95A\] {
+  body.light-mode .text-\[\#FEB95A\]:not(.ground-inverse):not(.ground-inverse *) {
     color: #B45309 !important;
   }
 
-  body.light-mode .text-\[\#F2C8ED\] {
-    color: #0F6E56 !important;
+  body.light-mode .text-\[\#F2C8ED\]:not(.ground-inverse):not(.ground-inverse *) {
+    color: #0D9488 !important;
   }
 
-  body.light-mode .text-\[\#20AEF3\] {
-    color: #1D4ED8 !important;
+  body.light-mode .text-\[\#20AEF3\]:not(.ground-inverse):not(.ground-inverse *) {
+    color: #0284C7 !important;
   }
 
-  body.light-mode .bg-\[\#A9DFD8\],
-  body.light-mode .bg-\[\#10B981\] {
-    background-color: #0F6E56 !important;
+  body.light-mode .bg-\[\#A9DFD8\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#10B981\]:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #0D9488 !important;
     color: #FFFFFF !important;
   }
 
-  body.light-mode .bg-\[\#A9DFD8\]:hover,
-  body.light-mode .bg-\[\#10B981\]:hover {
-    background-color: #0B5643 !important;
+  body.light-mode .bg-\[\#A9DFD8\]:not(.ground-inverse):not(.ground-inverse *):hover,
+  body.light-mode .bg-\[\#10B981\]:not(.ground-inverse):not(.ground-inverse *):hover {
+    background-color: #0F766E !important;
     color: #FFFFFF !important;
   }
 
-  body.light-mode .bg-\[\#A9DFD8\] *,
-  body.light-mode .bg-\[\#10B981\] * {
+  body.light-mode .bg-\[\#A9DFD8\]:not(.ground-inverse):not(.ground-inverse *) *,
+  body.light-mode .bg-\[\#10B981\]:not(.ground-inverse):not(.ground-inverse *) * {
     color: #FFFFFF !important;
   }
 
-  body.light-mode .bg-\[\#A9DFD8\]\/10,
-  body.light-mode .bg-\[\#A9DFD8\]\/15,
-  body.light-mode .bg-\[\#A9DFD8\]\/20,
-  body.light-mode .bg-\[\#A9DFD8\]\/25 {
-    background-color: #E6F4F0 !important;
-    color: #0F6E56 !important;
-    border-color: #A7DCD0 !important;
+  body.light-mode .bg-\[\#A9DFD8\]\/10:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#A9DFD8\]\/15:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#A9DFD8\]\/20:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#A9DFD8\]\/25:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #CCFBF1 !important;
+    color: #0F766E !important;
+    border-color: #99F6E4 !important;
   }
 
-  body.light-mode .bg-\[\#FEB95A\]\/10,
-  body.light-mode .bg-\[\#FEB95A\]\/15,
-  body.light-mode .bg-\[\#FEB95A\]\/20 {
+  body.light-mode .bg-\[\#FEB95A\]\/10:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#FEB95A\]\/15:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#FEB95A\]\/20:not(.ground-inverse):not(.ground-inverse *) {
     background-color: #FEF3C7 !important;
     color: #92400E !important;
     border-color: #FCD34D !important;
   }
 
-  body.light-mode .bg-\[\#20AEF3\]\/10,
-  body.light-mode .bg-\[\#20AEF3\]\/15,
-  body.light-mode .bg-\[\#20AEF3\]\/20 {
-    background-color: #EFF6FF !important;
-    color: #1D4ED8 !important;
-    border-color: #BFDBFE !important;
+  body.light-mode .bg-\[\#20AEF3\]\/10:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#20AEF3\]\/15:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#20AEF3\]\/20:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #E0F2FE !important;
+    color: #0369A1 !important;
+    border-color: #BAE6FD !important;
   }
 
-  body.light-mode .bg-\[\#F2C8ED\]\/10,
-  body.light-mode .bg-\[\#F2C8ED\]\/15,
-  body.light-mode .bg-\[\#F2C8ED\]\/20 {
-    background-color: #EAEAE4 !important;
-    color: #2D3138 !important;
-    border-color: #C2C2B8 !important;
+  body.light-mode .bg-\[\#F2C8ED\]\/10:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#F2C8ED\]\/15:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .bg-\[\#F2C8ED\]\/20:not(.ground-inverse):not(.ground-inverse *) {
+    background-color: #F1F5F9 !important;
+    color: #1E293B !important;
+    border-color: #CBD5E1 !important;
   }
 
-  /* 3. Bordes arquitectónicos de 1px */
-  body.light-mode .border-white\/\[0\.04\],
-  body.light-mode .border-white\/\[0\.05\],
-  body.light-mode .border-white\/\[0\.06\],
-  body.light-mode .border-white\/\[0\.07\],
-  body.light-mode .border-white\/\[0\.08\],
-  body.light-mode .border-white\/10,
-  body.light-mode .border-white\/15,
-  body.light-mode .border-\[\#2C2D3C\],
-  body.light-mode .border-\[\#262B35\],
-  body.light-mode .border-slate-800,
-  body.light-mode .border-slate-800\/90,
-  body.light-mode .border-slate-800\/80,
-  body.light-mode .border-slate-700,
-  body.light-mode .border-slate-700\/80 {
-    border-color: #D8D8D0 !important;
+  /* 3. Bordes arquitectónicos de 1px (excluyendo .ground-inverse) */
+  body.light-mode .border-white\/\[0\.04\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/\[0\.05\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/\[0\.06\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/\[0\.07\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/\[0\.08\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/10:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-white\/15:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-\[\#2C2D3C\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-\[\#262B35\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-slate-800:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-slate-800\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-slate-800\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-slate-700:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .border-slate-700\/80:not(.ground-inverse):not(.ground-inverse *) {
+    border-color: #E2E8F0 !important;
   }
 
-  body.light-mode .divide-white\/\[0\.05\] > :not([hidden]) ~ :not([hidden]),
-  body.light-mode .divide-white\/\[0\.06\] > :not([hidden]) ~ :not([hidden]),
-  body.light-mode .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
-  body.light-mode .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
-    border-color: #D8D8D0 !important;
+  body.light-mode .divide-white\/\[0\.05\]:not(.ground-inverse):not(.ground-inverse *) > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-white\/\[0\.06\]:not(.ground-inverse):not(.ground-inverse *) > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-white\/\[0\.08\]:not(.ground-inverse):not(.ground-inverse *) > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-slate-800\/60:not(.ground-inverse):not(.ground-inverse *) > :not([hidden]) ~ :not([hidden]),
+  body.light-mode .divide-slate-800:not(.ground-inverse):not(.ground-inverse *) > :not([hidden]) ~ :not([hidden]) {
+    border-color: #E2E8F0 !important;
   }
 
-  /* 4. Tipografía neutra de alta precisión */
-  body.light-mode .text-white,
-  body.light-mode .text-white\/90,
-  body.light-mode .text-white\/80,
-  body.light-mode .text-white\/70,
-  body.light-mode .text-\[\#E8E8EA\],
-  body.light-mode .text-slate-100,
-  body.light-mode .text-slate-200 {
-    color: #111315 !important;
+  /* 4. Tipografía neutra de alta precisión (excluyendo .ground-inverse) */
+  body.light-mode .text-white:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-white\/90:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-white\/80:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-white\/70:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-\[\#E8E8EA\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-slate-100:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-slate-200:not(.ground-inverse):not(.ground-inverse *) {
+    color: #0F172A !important;
   }
 
-  body.light-mode .text-slate-300 {
-    color: #2D3138 !important;
+  body.light-mode .text-slate-300:not(.ground-inverse):not(.ground-inverse *) {
+    color: #1E293B !important;
   }
 
-  body.light-mode .text-slate-400,
-  body.light-mode .text-\[\#8C8D9B\],
-  body.light-mode .text-\[\#87888C\],
-  body.light-mode .text-slate-500,
-  body.light-mode .text-slate-600 {
-    color: #5C626B !important;
+  body.light-mode .text-slate-400:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-\[\#8C8D9B\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-\[\#87888C\]:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-slate-500:not(.ground-inverse):not(.ground-inverse *),
+  body.light-mode .text-slate-600:not(.ground-inverse):not(.ground-inverse *) {
+    color: #64748B !important;
   }
 
   /* 5. Semáforo semántico (Esmeralda, Ámbar, Carmesí) */
@@ -430,46 +434,47 @@
     color: #FFFFFF !important;
   }
 
-  /* 7. Inputs, Selects y Tablas tipo Ledger */
-  body.light-mode input:not([type="checkbox"]):not([type="radio"]),
-  body.light-mode select,
-  body.light-mode textarea {
+  /* 7. Inputs, Selects y Tablas (excluyendo .ground-inverse) */
+  body.light-mode input:not([type="checkbox"]):not([type="radio"]):not(.ground-inverse *),
+  body.light-mode select:not(.ground-inverse *),
+  body.light-mode textarea:not(.ground-inverse *) {
+    background-color: #F8FAFC !important;
+    color: #0F172A !important;
+    border-color: #CBD5E1 !important;
+  }
+
+  body.light-mode input:not(.ground-inverse *):focus,
+  body.light-mode select:not(.ground-inverse *):focus,
+  body.light-mode textarea:not(.ground-inverse *):focus {
     background-color: #FFFFFF !important;
-    color: #111315 !important;
-    border-color: #C2C2B8 !important;
+    border-color: #0D9488 !important;
+    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15) !important;
   }
 
-  body.light-mode input:focus,
-  body.light-mode select:focus,
-  body.light-mode textarea:focus {
-    border-color: #0F6E56 !important;
-    box-shadow: 0 0 0 2px rgba(15, 110, 86, 0.14) !important;
-  }
-
-  body.light-mode input::placeholder,
-  body.light-mode textarea::placeholder {
-    color: #7A8089 !important;
+  body.light-mode input:not(.ground-inverse *)::placeholder,
+  body.light-mode textarea:not(.ground-inverse *)::placeholder {
+    color: #94A3B8 !important;
   }
 
   body.light-mode table thead tr {
-    background-color: #EAEAE4 !important;
-    color: #111315 !important;
-    border-bottom: 1px solid #C2C2B8 !important;
+    background-color: #F1F5F9 !important;
+    color: #0F172A !important;
+    border-bottom: 1px solid #CBD5E1 !important;
   }
 
   body.light-mode table thead th {
-    color: #2D3138 !important;
-    font-weight: 600 !important;
+    color: #334155 !important;
+    font-weight: 700 !important;
   }
 
   body.light-mode table tbody tr:hover {
-    background-color: #F4F4F0 !important;
+    background-color: #F8FAFC !important;
   }
 
-  body.light-mode .hover\:bg-slate-800\/40:hover,
-  body.light-mode .hover\:bg-slate-800\/80:hover,
-  body.light-mode .hover\:bg-slate-900\/60:hover {
-    background-color: #EAEAE4 !important;
+  body.light-mode .hover\:bg-slate-800\/40:not(.ground-inverse *):hover,
+  body.light-mode .hover\:bg-slate-800\/80:not(.ground-inverse *):hover,
+  body.light-mode .hover\:bg-slate-900\/60:not(.ground-inverse *):hover {
+    background-color: #F1F5F9 !important;
   }
 
   /* 8. Modales y Backdrops */
@@ -479,7 +484,7 @@
   body.light-mode .fixed.inset-0.bg-slate-950\/90,
   body.light-mode .fixed.inset-0.bg-slate-900\/60,
   body.light-mode .fixed.inset-0.bg-black\/75 {
-    background-color: rgba(17, 19, 21, 0.5) !important;
+    background-color: rgba(15, 23, 42, 0.55) !important;
   }
 }
 
@@ -487,7 +492,7 @@
 @keyframes fadeSlideUp {
   0% {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   100% {
     opacity: 1;
@@ -498,7 +503,7 @@
 @keyframes scaleFadeIn {
   0% {
     opacity: 0;
-    transform: scale(0.98);
+    transform: scale(0.97);
   }
   100% {
     opacity: 1;
@@ -515,23 +520,48 @@
   }
 }
 
+@keyframes pipelinePulse {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(220%);
+    opacity: 0;
+  }
+}
+
 .animate-fade-up {
-  animation: fadeSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fadeSlideUp 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .animate-scale-in {
-  animation: scaleFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: scaleFadeIn 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .animate-progress-fill {
-  animation: progressFill 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: progressFill 0.85s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-.hover-lift {
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, border-color 0.18s ease;
+.animate-pipeline-pulse {
+  animation: pipelinePulse 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
-.hover-lift:hover {
+.hover-lift,
+.card-lift {
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 0.2s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.2s ease;
+}
+
+.hover-lift:hover,
+.card-lift:hover {
   transform: translateY(-2px);
 }
 
@@ -539,7 +569,9 @@
   .animate-fade-up,
   .animate-scale-in,
   .animate-progress-fill,
-  .hover-lift {
+  .animate-pipeline-pulse,
+  .hover-lift,
+  .card-lift {
     animation: none !important;
     transition: none !important;
     transform: none !important;

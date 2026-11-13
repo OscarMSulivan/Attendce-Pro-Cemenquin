@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   Home,
   Activity,
@@ -267,37 +268,50 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             )}
             {primaryItems.map(item => {
               const Icon = item.icon;
+              const pillLayoutId = isMobileDrawer ? 'sidebar-active-pill-mobile' : 'sidebar-active-pill-desktop';
+              const barLayoutId = isMobileDrawer ? 'sidebar-active-bar-mobile' : 'sidebar-active-bar-desktop';
               return (
                 <div key={item.id} className="relative flex items-center">
-                  {/* Indicador vertical Mint Teal idéntico al diseño de referencia */}
+                  {/* Indicador vertical deslizante con layoutId */}
                   {item.isActive && (
-                    <span className="absolute -left-3 w-1 h-7 rounded-r-full bg-[#A9DFD8] shadow-[0_0_8px_#A9DFD8]" />
+                    <motion.span
+                      layoutId={barLayoutId}
+                      transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                      className="absolute -left-3 w-1 h-7 rounded-r-full bg-[#A9DFD8] shadow-[0_0_10px_#A9DFD8] z-20"
+                    />
                   )}
                   <button
                     type="button"
                     onClick={item.onClick}
                     title={isCompact ? item.label : undefined}
-                    className={`w-full flex items-center ${
+                    className={`relative w-full flex items-center ${
                       isCompact ? 'justify-center px-2' : 'justify-between px-3.5'
-                    } py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                    } py-2.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer overflow-hidden ${
                       item.isActive
-                        ? 'bg-[#A9DFD8] text-[#171821] font-bold shadow-lg shadow-[#A9DFD8]/15'
-                        : 'text-[#87888C] hover:text-white hover:bg-[#21222D]'
+                        ? 'text-[#0B0F17] font-bold'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
+                    {item.isActive && (
+                      <motion.div
+                        layoutId={pillLayoutId}
+                        transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                        className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#A9DFD8] to-[#8CD4CB] shadow-[0_6px_20px_rgba(169,223,216,0.22)] z-0"
+                      />
+                    )}
+                    <div className="relative z-10 flex items-center gap-3 min-w-0">
                       <Icon
-                        className={`w-4 h-4 shrink-0 ${
-                          item.isActive ? 'text-[#171821] stroke-[2.4]' : 'text-[#87888C]'
+                        className={`w-4 h-4 shrink-0 transition-colors ${
+                          item.isActive ? 'text-[#0B0F17] stroke-[2.4]' : 'text-slate-400'
                         }`}
                       />
                       {!isCompact && <span className="truncate">{item.label}</span>}
                     </div>
                     {!isCompact && item.badge > 0 && (
                       <span
-                        className={`px-1.5 py-0.2 rounded-md text-[10px] font-extrabold font-mono ${
+                        className={`relative z-10 px-1.5 py-0.2 rounded-md text-[10px] font-extrabold font-mono tabular-nums ${
                           item.isActive
-                            ? 'bg-[#171821] text-[#A9DFD8]'
+                            ? 'bg-[#0B0F17] text-[#A9DFD8]'
                             : 'bg-[#FEB95A]/20 text-[#FEB95A] border border-[#FEB95A]/30'
                         }`}
                       >
@@ -312,9 +326,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
           {/* Herramientas y Catálogos (Oculto para supervisores sin accesos de configuración/administración) */}
           {(toolItems.length > 0 || canAccessBackupAndPortable) && (
-            <div className="space-y-1.5 pt-3 border-t border-white/[0.06]">
+            <div className="space-y-1.5 pt-3 border-t border-white/[0.08]">
               {!isCompact && (
-                <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-[#87888C]/80 mb-2">
+                <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400/80 mb-2">
                   Herramientas
                 </p>
               )}
@@ -329,9 +343,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                     title={isCompact ? item.label : undefined}
                     className={`w-full flex items-center ${
                       isCompact ? 'justify-center px-2' : 'gap-3 px-3.5'
-                    } py-2.5 rounded-xl text-xs font-medium text-[#87888C] hover:text-white hover:bg-[#21222D] transition-all cursor-pointer disabled:opacity-35 disabled:pointer-events-none`}
+                    } py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/[0.05] transition-all cursor-pointer disabled:opacity-35 disabled:pointer-events-none`}
                   >
-                    <Icon className="w-4 h-4 shrink-0 text-[#87888C]" />
+                    <Icon className="w-4 h-4 shrink-0 text-slate-400" />
                     {!isCompact && <span className="truncate">{item.label}</span>}
                   </button>
                 );
@@ -356,7 +370,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAction(onExportBackup)}
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.06] text-slate-300 hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
                     title="Exportar respaldo JSON"
                   >
                     <Download className="w-3 h-3" />
@@ -365,7 +379,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-[#21222D] hover:bg-[#2B2B36] text-[#87888C] hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.09] border border-white/[0.06] text-slate-300 hover:text-white text-[10px] font-semibold transition-colors cursor-pointer"
                     title="Importar respaldo JSON"
                   >
                     <Upload className="w-3 h-3" />
@@ -392,14 +406,14 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         </div>
 
         {/* Footer Signout */}
-        <div className="p-3 border-t border-white/[0.06] shrink-0">
+        <div className="p-3 border-t border-white/[0.08] shrink-0">
           <button
             type="button"
             onClick={() => handleAction(onLogout)}
             title={isCompact ? 'Cerrar sesión' : undefined}
             className={`w-full flex items-center ${
               isCompact ? 'justify-center px-2' : 'gap-3 px-3.5'
-            } py-2.5 rounded-xl text-xs font-medium text-[#87888C] hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer`}
+            } py-2.5 rounded-xl text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer`}
           >
             <LogOut className="w-4 h-4 shrink-0" />
             {!isCompact && <span>Cerrar Sesión</span>}
@@ -411,9 +425,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
   return (
     <>
-      {/* Desktop Sticky Left Sidebar */}
+      {/* Desktop Sticky Left Sidebar (Acabado Dark Studio .ground-inverse en ambos modos) */}
       <aside
-        className={`no-print hidden lg:flex flex-col shrink-0 bg-[#171821] border-r border-white/[0.06] select-none transition-all duration-200 sticky top-0 h-screen z-40 ${
+        className={`ground-inverse no-print hidden lg:flex flex-col shrink-0 bg-[#0B0F17] border-r border-slate-800/80 select-none transition-all duration-200 sticky top-0 h-screen z-40 shadow-xl ${
           collapsed ? 'w-[72px]' : 'w-56 xl:w-60'
         }`}
       >
@@ -421,17 +435,29 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       </aside>
 
       {/* Mobile / Tablet Drawer Overlay */}
-      {mobileOpen && (
-        <div className="no-print fixed inset-0 z-50 lg:hidden flex">
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
-            onClick={onCloseMobile}
-          />
-          <aside className="relative w-64 max-w-[82vw] bg-[#171821] border-r border-white/[0.08] h-full flex flex-col z-10 shadow-2xl">
-            {renderSidebarContent(true)}
-          </aside>
-        </div>
-      )}
+      <AnimatePresence>
+        {mobileOpen && (
+          <div className="no-print fixed inset-0 z-50 lg:hidden flex">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+              onClick={onCloseMobile}
+            />
+            <motion.aside
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              className="ground-inverse relative w-64 max-w-[82vw] bg-[#0B0F17] border-r border-white/10 h-full flex flex-col z-10 shadow-2xl"
+            >
+              {renderSidebarContent(true)}
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 };
