@@ -30,6 +30,7 @@ import {
   clasificarChecadaUnica,
   elegirHoraMasCercana,
   ENTRADAS_PRIORIDAD,
+  evaluarHoraEntrada,
   filtrarRebotesChecadas,
   normalizarHorarioDia,
   SALIDAS_PRIORIDAD,
@@ -392,6 +393,12 @@ function aplicarRedondeoYTopeExtra(
   return Math.max(0, horasExtra);
 }
 
+export interface MetricasExtraOptions {
+  toleranciaAntes?: number;
+  toleranciaDespues?: number;
+  comidaDefault?: number;
+}
+
 /**
  * Calcula las horas normales, horas extras, incidencia y advertencias de un día
  * a partir de una hora de entrada y salida dadas.
@@ -406,7 +413,8 @@ export function calcularMetricasDia(
   vca?: string,
   isoDate?: string,
   tieneHorarioEmpleado?: boolean,
-  overtimeRules?: OvertimeRulesConfig
+  overtimeRules?: OvertimeRulesConfig,
+  extraOptions?: MetricasExtraOptions
 ): {
   hNormal: number;
   hExtra: number;
@@ -462,7 +470,8 @@ export function calcularMetricasDia(
     }
 
     let totalDelDia = d / 60;
-    const tiempoComida = normHorario ? (normHorario.comida / 60) : 1.0;
+    const comidaDefaultHrs = (extraOptions?.comidaDefault ?? 60) / 60;
+    const tiempoComida = normHorario ? (normHorario.comida / 60) : comidaDefaultHrs;
 
     if (totalDelDia > 6) {
       totalDelDia -= tiempoComida;
@@ -485,9 +494,30 @@ export function calcularMetricasDia(
       hNormal = Math.max(0, Math.min(totalDelDia, jornadaEsperada));
       const rawExtraMin = Math.max(0, Math.round((totalDelDia - jornadaEsperada) * 60));
       hExtra = aplicarRedondeoYTopeExtra(rawExtraMin, rules);
-      inc = 'Asistencia';
-      cls = 'row-success';
 
+      // Evaluar puntualidad vs tolerancias configuradas
+      const evalEnt = evaluarHoraEntrada(
+        ent,
+        normHorario.entrada,
+        extraOptions?.toleranciaAntes ?? 29,
+        extraOptions?.toleranciaDespues ?? 14
+      );
+
+      let msgRetardo = '';
+      if (evalEnt.status === 'retardo') {
+        inc = 'Retardo';
+        cls = 'row-warning';
+        msgRetardo = `⏱️ Retardo (+${evalEnt.minutosDiff} min · Entrada prog.: ${normHorario.entrada})`;
+      } else if (evalEnt.status === 'retardo_excesivo') {
+        inc = 'Retardo Excesivo';
+        cls = 'row-warning';
+        msgRetardo = `⏱️ Retardo excesivo (+${evalEnt.minutosDiff} min · Entrada prog.: ${normHorario.entrada})`;
+      } else {
+        inc = 'Asistencia';
+        cls = 'row-success';
+      }
+
+      let msgExtra = '';
       if (hExtra > 0) {
         if (isRST && normHorario) {
           const mSalEsperada = timeToMinutes(normHorario.salida);
@@ -498,13 +528,19 @@ export function calcularMetricasDia(
             const hExceso = Math.floor(diffMin / 60);
             const mExceso = diffMin % 60;
             const excesoTexto = hExceso > 0 ? `${hExceso}h ${mExceso}min` : `${mExceso}min`;
-            msg = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida}) · Computable: ${hExtra.toFixed(2)} hrs`;
+            msgExtra = `⏰ Tiempo extra: +${excesoTexto} después de su salida (${normHorario.salida}) · Computable: ${hExtra.toFixed(2)} hrs`;
           } else {
-            msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
+            msgExtra = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
           }
         } else {
-          msg = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
+          msgExtra = `⏰ Tiempo extra detectado (${hExtra.toFixed(2)} hrs)`;
         }
+      }
+
+      if (msgRetardo && msgExtra) {
+        msg = `${msgRetardo} | ${msgExtra}`;
+      } else {
+        msg = msgRetardo || msgExtra;
       }
     }
   } else if (tieneEnt !== tieneSal) {
@@ -570,6 +606,9 @@ export interface EngineRunOptions {
   modoLectura?: ReadingMode;
   minutosRebote?: number;
   overtimeRules?: OvertimeRulesConfig;
+  toleranciaAntes?: number;
+  toleranciaDespues?: number;
+  comidaDefault?: number;
 }
 
 /**
@@ -808,7 +847,12 @@ export function generarReporteAsistencia(
         vca,
         isoF,
         Boolean(emp.horario),
-        options.overtimeRules
+        options.overtimeRules,
+        {
+          toleranciaAntes: options.toleranciaAntes,
+          toleranciaDespues: options.toleranciaDespues,
+          comidaDefault: options.comidaDefault,
+        }
       );
 
       if (vca) {
@@ -977,7 +1021,12 @@ export function sincronizarReportesConHorarios(
         vca,
         d.isoDate,
         Boolean(effectiveCode),
-        options.overtimeRules
+        options.overtimeRules,
+        {
+          toleranciaAntes: options.toleranciaAntes,
+          toleranciaDespues: options.toleranciaDespues,
+          comidaDefault: options.comidaDefault,
+        }
       );
 
       const incUpper = (d.incidencia || '').toUpperCase();

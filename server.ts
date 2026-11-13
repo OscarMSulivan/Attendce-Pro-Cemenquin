@@ -7,11 +7,13 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = path.resolve(process.cwd(), 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'portal_db.json');
 
 interface ServerEmailConfig {
@@ -73,10 +75,83 @@ interface ServerPortalDatabase {
   updatedAt?: string;
 }
 
+const uploadMemoryCache = new Map<string, string>();
+const BASE64_FIELDS = new Set([
+  'formatoSubidoBase64',
+  'archivoFormatoBase64',
+  'excelTrabajadoBase64',
+]);
+
 function ensureDataDir(): void {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+  }
+}
+
+function offloadBase64String(raw: string, fieldName: string): string {
+  if (!raw || typeof raw !== 'string' || raw.length < 256 || raw.startsWith('@upload:')) {
+    return raw;
+  }
+  try {
+    ensureDataDir();
+    const hash = crypto.createHash('sha1').update(raw).digest('hex');
+    const fileName = `${fieldName}_${hash}.b64`;
+    const filePath = path.join(UPLOADS_DIR, fileName);
+    if (!fs.existsSync(filePath)) {
+      const tmpUpload = `${filePath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmpUpload, raw, 'utf-8');
+      fs.renameSync(tmpUpload, filePath);
+    }
+    uploadMemoryCache.set(fileName, raw);
+    return `@upload:${fileName}`;
+  } catch (err) {
+    console.warn('No se pudo externalizar adjunto base64 a disco:', err);
+    return raw;
+  }
+}
+
+function hydrateBase64String(ref: string): string {
+  if (!ref || typeof ref !== 'string' || !ref.startsWith('@upload:')) {
+    return ref;
+  }
+  const fileName = path.basename(ref.slice('@upload:'.length));
+  if (!fileName) return '';
+  const cached = uploadMemoryCache.get(fileName);
+  if (cached !== undefined) return cached;
+  try {
+    const filePath = path.join(UPLOADS_DIR, fileName);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      uploadMemoryCache.set(fileName, content);
+      return content;
+    }
+  } catch (err) {
+    console.warn('Error leyendo adjunto desde data/uploads:', err);
+  }
+  return '';
+}
+
+function transformBase64FieldsDeep(node: any, mode: 'offload' | 'hydrate'): any {
+  if (node === null || node === undefined || typeof node !== 'object') {
+    return node;
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => transformBase64FieldsDeep(item, mode));
+  }
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (BASE64_FIELDS.has(k) && typeof v === 'string' && v.length > 0) {
+      out[k] = mode === 'offload' ? offloadBase64String(v, k) : hydrateBase64String(v);
+    } else if (v !== null && typeof v === 'object') {
+      out[k] = transformBase64FieldsDeep(v, mode);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 function readDatabase(): ServerPortalDatabase {
@@ -86,7 +161,8 @@ function readDatabase(): ServerPortalDatabase {
       return {};
     }
     const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    return JSON.parse(raw) as ServerPortalDatabase;
+    const parsed = JSON.parse(raw) as ServerPortalDatabase;
+    return transformBase64FieldsDeep(parsed, 'hydrate') as ServerPortalDatabase;
   } catch (err) {
     console.warn('Error leyendo base de datos local:', err);
     return {};
@@ -260,7 +336,10 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     ...(mergedEmailConfig ? { emailConfig: mergedEmailConfig } : {}),
     updatedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(DB_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+  const diskSnapshot = transformBase64FieldsDeep(updated, 'offload');
+  const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+  fs.writeFileSync(tmpFile, JSON.stringify(diskSnapshot, null, 2), 'utf-8');
+  fs.renameSync(tmpFile, DB_FILE);
   return updated;
 }
 
@@ -1114,7 +1193,71 @@ async function startServer() {
     }
   });
 
-  // Endpoint para recuperación de contraseña por correo electrónico
+  // Almacén en memoria de códigos temporales de recuperación (expiración de 10 minutos)
+  const passwordResetTokens = new Map<
+    string,
+    { code: string; userId: string; userEmail: string; expiresAt: number }
+  >();
+
+  // Endpoint de autenticación validada en servidor
+  app.post('/api/auth/login', (req, res) => {
+    try {
+      const { identifier, password } = req.body || {};
+      const cleanId = String(identifier || '').trim().toLowerCase();
+      const rawPassword = String(password || '');
+      if (!cleanId || !rawPassword) {
+        return res.status(200).json({
+          ok: false,
+          error: 'Ingresa tus credenciales completas.',
+        });
+      }
+
+      const db = readDatabase();
+      const allUsers = Array.isArray(db.users) ? db.users : [];
+      const cleanIdNumeric = cleanId.replace(/^0+/, '');
+
+      const matchedUser: any = allUsers.find((u: any) => {
+        if (!u || u.active === false) return false;
+        const emailMatch = String(u.email || '').trim().toLowerCase() === cleanId;
+        const usernameMatch = String(u.username || '').trim().toLowerCase() === cleanId;
+        const idMatch = String(u.id || '').trim().toLowerCase() === cleanId;
+        const empIdRaw = String(u.employeeId || '').trim().toLowerCase();
+        const empIdMatch =
+          Boolean(empIdRaw) &&
+          (empIdRaw === cleanId ||
+            (Boolean(cleanIdNumeric) && empIdRaw.replace(/^0+/, '') === cleanIdNumeric));
+        return emailMatch || usernameMatch || idMatch || empIdMatch;
+      });
+
+      if (!matchedUser) {
+        return res.status(200).json({
+          ok: false,
+          error: 'No se encontró ningún usuario activo con ese identificador.',
+        });
+      }
+
+      const expectedPass = matchedUser.password || '1234';
+      if (rawPassword !== expectedPass) {
+        return res.status(200).json({
+          ok: false,
+          error: 'Contraseña incorrecta.',
+        });
+      }
+
+      const { password: _omitted, ...safeUser } = matchedUser;
+      return res.status(200).json({
+        ok: true,
+        user: safeUser,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        ok: false,
+        error: err?.message || 'Error al autenticar en el servidor.',
+      });
+    }
+  });
+
+  // Endpoint para recuperación de contraseña por correo electrónico (sin exponer el código cuando el correo fue enviado)
   app.post('/api/auth/recover-password', async (req, res) => {
     try {
       const { identifier, users: clientUsers } = req.body || {};
@@ -1128,10 +1271,10 @@ async function startServer() {
 
       const db = readDatabase();
       const allUsers =
-        Array.isArray(clientUsers) && clientUsers.length > 0
-          ? clientUsers
-          : Array.isArray(db.users)
+        Array.isArray(db.users) && db.users.length > 0
           ? db.users
+          : Array.isArray(clientUsers) && clientUsers.length > 0
+          ? clientUsers
           : [];
 
       const cleanIdNumeric = cleanId.replace(/^0+/, '');
@@ -1155,6 +1298,14 @@ async function startServer() {
 
       const targetEmail = String(matchedUser.email || '').trim();
       const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+      const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutos de vigencia
+      passwordResetTokens.set(String(matchedUser.id), {
+        code: verificationCode,
+        userId: String(matchedUser.id),
+        userEmail: targetEmail,
+        expiresAt,
+      });
+
       const emailCfg = resolveEmailConfig();
 
       let emailSent = false;
@@ -1167,7 +1318,7 @@ async function startServer() {
             from: `"${emailCfg.smtpFromName || 'CemenQtime Nóminas'}" <${cleanUser}>`,
             to: targetEmail,
             subject: `🔐 [CemenQtime] Código de Recuperación de Contraseña — ${matchedUser.name}`,
-            text: `Hola ${matchedUser.name},\n\nRecibimos una solicitud para recuperar tu contraseña de acceso al portal CemenQtime.\n\nCódigo de verificación: ${verificationCode}\nUsuario: ${matchedUser.username || matchedUser.email}\n${matchedUser.employeeId ? `No. de Empleado: #${matchedUser.employeeId}\n` : ''}\nIngresa este código de 6 dígitos en la pantalla de recuperación del sistema para establecer tu nueva contraseña.\n\nAtentamente,\nCemenQtime · Recursos Humanos y Nóminas`,
+            text: `Hola ${matchedUser.name},\n\nRecibimos una solicitud para recuperar tu contraseña de acceso al portal CemenQtime.\n\nCódigo de verificación: ${verificationCode}\nVigencia: 10 minutos\nUsuario: ${matchedUser.username || matchedUser.email}\n${matchedUser.employeeId ? `No. de Empleado: #${matchedUser.employeeId}\n` : ''}\nIngresa este código de 6 dígitos en la pantalla de recuperación del sistema para establecer tu nueva contraseña.\n\nAtentamente,\nCemenQtime · Recursos Humanos y Nóminas`,
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
                 <div style="background: #171821; padding: 18px 24px; color: #ffffff;">
@@ -1176,7 +1327,7 @@ async function startServer() {
                 </div>
                 <div style="padding: 24px; color: #334155; font-size: 14px; line-height: 1.6;">
                   <p style="margin-top: 0;">Hola <strong>${matchedUser.name}</strong>,</p>
-                  <p>Recibimos una solicitud para restablecer tu contraseña de acceso al sistema <strong>CemenQtime</strong>. Utiliza el siguiente código de verificación de 6 dígitos:</p>
+                  <p>Recibimos una solicitud para restablecer tu contraseña de acceso al sistema <strong>CemenQtime</strong>. Utiliza el siguiente código de verificación de 6 dígitos (válido por 10 minutos):</p>
                   <div style="background: #f8fafc; border: 2px dashed #0f172a; border-radius: 12px; padding: 16px; text-align: center; margin: 20px 0;">
                     <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Código de Verificación</div>
                     <div style="font-size: 28px; font-family: monospace; font-weight: 900; letter-spacing: 6px; color: #0f172a; margin-top: 6px;">${verificationCode}</div>
@@ -1206,13 +1357,82 @@ async function startServer() {
         userId: matchedUser.id,
         userName: matchedUser.name,
         userEmail: targetEmail,
-        verificationCode,
+        // Por seguridad, solo se envía fallbackCode cuando NO hay servidor SMTP activo (modo local/demo)
+        ...(emailSent ? {} : { fallbackCode: verificationCode }),
         smtpErrorMsg: smtpErrorMsg || undefined,
       });
     } catch (err: any) {
       return res.status(200).json({
         ok: false,
         error: err?.message || 'Error al procesar la solicitud de recuperación.',
+      });
+    }
+  });
+
+  // Endpoint para verificar el código de 6 dígitos en el servidor y actualizar la contraseña de forma segura
+  app.post('/api/auth/verify-reset-password', (req, res) => {
+    try {
+      const { userId, code, newPassword, users: clientUsers } = req.body || {};
+      const cleanUserId = String(userId || '').trim();
+      const cleanCode = String(code || '').trim();
+      const cleanPass = String(newPassword || '').trim();
+
+      if (!cleanUserId || !cleanCode || cleanPass.length < 4) {
+        return res.status(200).json({
+          ok: false,
+          error: 'Datos incompletos o contraseña menor a 4 caracteres.',
+        });
+      }
+
+      const tokenEntry = passwordResetTokens.get(cleanUserId);
+      if (!tokenEntry) {
+        return res.status(200).json({
+          ok: false,
+          error: 'No existe una solicitud activa de recuperación o ya fue utilizada. Solicita un nuevo código.',
+        });
+      }
+
+      if (Date.now() > tokenEntry.expiresAt) {
+        passwordResetTokens.delete(cleanUserId);
+        return res.status(200).json({
+          ok: false,
+          error: 'El código de verificación ha expirado (vigencia de 10 minutos). Solicita uno nuevo.',
+        });
+      }
+
+      if (tokenEntry.code !== cleanCode) {
+        return res.status(200).json({
+          ok: false,
+          error: 'El código de verificación ingresado no es válido.',
+        });
+      }
+
+      // Invalidar el código tras su uso exitoso
+      passwordResetTokens.delete(cleanUserId);
+
+      const db = readDatabase();
+      const baseUsers =
+        Array.isArray(db.users) && db.users.length > 0
+          ? db.users
+          : Array.isArray(clientUsers)
+          ? clientUsers
+          : [];
+
+      if (baseUsers.length > 0) {
+        const updatedUsers = baseUsers.map((u: any) =>
+          String(u?.id) === cleanUserId ? { ...u, password: cleanPass } : u
+        );
+        writeDatabase({ users: updatedUsers });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        userId: cleanUserId,
+      });
+    } catch (err: any) {
+      return res.status(200).json({
+        ok: false,
+        error: err?.message || 'Error al verificar el código y restablecer la contraseña.',
       });
     }
   });

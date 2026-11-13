@@ -146,7 +146,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
               userId: data.userId,
               userName: data.userName,
               userEmail: data.userEmail,
-              expectedCode: String(data.verificationCode),
+              expectedCode: data.fallbackCode ? String(data.fallbackCode) : '',
               emailSent: Boolean(data.emailSent),
               smtpErrorMsg: data.smtpErrorMsg,
             });
@@ -196,15 +196,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
     }
   };
 
-  const handleConfirmResetPassword = (e: React.FormEvent) => {
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryError(null);
     if (!recoveryInfo) return;
-
-    if (enteredCode.trim() !== recoveryInfo.expectedCode) {
-      setRecoveryError('El código de verificación de 6 dígitos no coincide.');
-      return;
-    }
 
     if (newPassword.trim().length < 4) {
       setRecoveryError('La nueva contraseña debe tener al menos 4 caracteres.');
@@ -214,6 +209,37 @@ export const LoginView: React.FC<LoginViewProps> = ({
     if (newPassword.trim() !== confirmNewPassword.trim()) {
       setRecoveryError('Las contraseñas no coinciden. Verifícalas.');
       return;
+    }
+
+    // Verificar código de 6 dígitos en el servidor
+    let verifiedOnServer = false;
+    try {
+      const res = await fetch('/api/auth/verify-reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: recoveryInfo.userId,
+          code: enteredCode.trim(),
+          newPassword: newPassword.trim(),
+          users,
+        }),
+      });
+      const data = await res.json();
+      if (data && data.ok) {
+        verifiedOnServer = true;
+      } else if (data && data.error) {
+        setRecoveryError(data.error);
+        return;
+      }
+    } catch {
+      // Si el servidor no está disponible (modo offline), validar contra código local si existe
+    }
+
+    if (!verifiedOnServer) {
+      if (!recoveryInfo.expectedCode || enteredCode.trim() !== recoveryInfo.expectedCode) {
+        setRecoveryError('El código de verificación de 6 dígitos no coincide.');
+        return;
+      }
     }
 
     if (onResetUserPassword) {

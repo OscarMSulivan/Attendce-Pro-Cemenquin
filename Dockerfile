@@ -12,11 +12,11 @@ COPY . .
 RUN npm run build
 
 # Directorio persistente para base de datos JSON / archivos subidos
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data/uploads
 
 ENV NODE_ENV=production
 ENV PORT=3000
 
 EXPOSE 3000
 
-CMD ["npx", "tsx", "server.ts"]
+CMD ["node", "server.js"]

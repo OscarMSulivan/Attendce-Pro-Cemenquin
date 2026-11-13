@@ -68,6 +68,7 @@ import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseMod
 import { SendPayrollEmailModal } from './components/portal/SendPayrollEmailModal';
 import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
+import { DisperseByListModal } from './components/portal/DisperseByListModal';
 import {
   DayResolutionPayload,
   MissingPunchFormatModal,
@@ -119,10 +120,31 @@ export default function App() {
   const [isExportingAll, setIsExportingAll] = useState<boolean>(false);
   const [isSendEmailModalOpen, setIsSendEmailModalOpen] = useState<boolean>(false);
 
-  // Semanas de nómina
-  const payrollWeeks = useMemo<PayrollWeekOption[]>(() => generatePayrollWeeks(2026), []);
+  // Semanas de nómina (soporte multi-año 2025-2028+)
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const savedWeek = StorageService.loadReportesState()?.selectedWeek || '';
+    const endPart = savedWeek.split('|')[1] || savedWeek.split('|')[0] || '';
+    const yr = parseInt(endPart.slice(0, 4), 10);
+    return !isNaN(yr) && yr >= 2020 && yr <= 2035 ? yr : 2026;
+  });
+  const payrollWeeks = useMemo<PayrollWeekOption[]>(
+    () => generatePayrollWeeks(selectedYear),
+    [selectedYear]
+  );
   const [selectedWeek, setSelectedWeek] = useState<string>(
-    () => StorageService.loadReportesState()?.selectedWeek || payrollWeeks[0]?.value || ''
+    () => StorageService.loadReportesState()?.selectedWeek || generatePayrollWeeks(2026)[0]?.value || ''
+  );
+  const handleSelectYear = useCallback(
+    (newYear: number) => {
+      setSelectedYear(newYear);
+      const newWeeks = generatePayrollWeeks(newYear);
+      if (newWeeks.length > 0 && !newWeeks.some((w) => w.value === selectedWeek)) {
+        const currentIdx = payrollWeeks.findIndex((w) => w.value === selectedWeek);
+        const nextWeek = newWeeks[currentIdx >= 0 && currentIdx < newWeeks.length ? currentIdx : 0];
+        if (nextWeek) setSelectedWeek(nextWeek.value);
+      }
+    },
+    [payrollWeeks, selectedWeek]
   );
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -158,6 +180,9 @@ export default function App() {
       modoLectura: initConfig.modoLectura,
       minutosRebote: initConfig.minutosRebote,
       overtimeRules: initConfig.overtimeRules,
+      toleranciaAntes: initConfig.toleranciaAntes,
+      toleranciaDespues: initConfig.toleranciaDespues,
+      comidaDefault: initConfig.comidaDefault,
     });
   });
   const [resumen, setResumen] = useState<PayrollSummary | null>(
@@ -1158,6 +1183,9 @@ export default function App() {
 
       const autoDetectedWeek = detectPayrollWeekFromDates(allDates, payrollWeeks);
       if (autoDetectedWeek) {
+        if (autoDetectedWeek.year && autoDetectedWeek.year !== selectedYear) {
+          setSelectedYear(autoDetectedWeek.year);
+        }
         setSelectedWeek(autoDetectedWeek.value);
         setStatusMessage(
           `✓ ${result.totalEventos} checadas procesadas. Semana detectada automáticamente: Semana ${autoDetectedWeek.weekNumber} (${autoDetectedWeek.startISO} al ${autoDetectedWeek.endISO})`
@@ -1239,7 +1267,10 @@ export default function App() {
             jornadaBase: config.jornadaBase,
             modoLectura: config.modoLectura,
             minutosRebote: config.minutosRebote,
-            overtimeRules: config.overtimeRules
+            overtimeRules: config.overtimeRules,
+            toleranciaAntes: config.toleranciaAntes,
+            toleranciaDespues: config.toleranciaDespues,
+            comidaDefault: config.comidaDefault,
           }
         );
 
@@ -1253,7 +1284,10 @@ export default function App() {
             jornadaBase: config.jornadaBase,
             modoLectura: config.modoLectura,
             minutosRebote: config.minutosRebote,
-            overtimeRules: config.overtimeRules
+            overtimeRules: config.overtimeRules,
+            toleranciaAntes: config.toleranciaAntes,
+            toleranciaDespues: config.toleranciaDespues,
+            comidaDefault: config.comidaDefault,
           }
         );
 
@@ -3920,6 +3954,8 @@ export default function App() {
                   payrollWeeks={payrollWeeks}
                   selectedWeek={selectedWeek}
                   onSelectWeek={setSelectedWeek}
+                  selectedYear={selectedYear}
+                  onSelectYear={handleSelectYear}
                   supervisors={allowedSupervisors}
                   selectedSupervisor={selectedSupervisor}
                   onSelectSupervisor={setSelectedSupervisor}
@@ -4191,138 +4227,22 @@ export default function App() {
         />
       )}
 
-      {isDisperseByListModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#21222D] rounded-3xl shadow-2xl border border-white/[0.1] max-w-2xl w-full overflow-hidden animate-scale-in">
-            <div className="bg-gradient-to-r from-[#171821] via-[#1B1C26] to-[#21222D] border-b border-white/[0.08] p-6 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8] font-black text-base">
-                  ✉
-                </div>
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#A9DFD8] bg-[#A9DFD8]/15 px-2.5 py-0.5 rounded-md border border-[#A9DFD8]/30">
-                    Semana {currentWeekNumber} · Dispersión Individual o Masiva
-                  </span>
-                  <h3 className="text-lg font-extrabold tracking-tight mt-1 text-white">
-                    Dispersar Listas de Asistencia y Notificar
-                  </h3>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsDisperseByListModalOpen(false)}
-                className="text-[#87888C] hover:text-white px-2.5 py-1 rounded-xl hover:bg-white/10 transition-colors text-sm font-bold cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
-              <div className="bg-[#171821] border border-white/[0.08] rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-extrabold text-white">
-                    Notificación Dual: Sistema + Correo Empresarial
-                  </p>
-                  <p className="text-[11px] text-[#87888C] mt-0.5">
-                    Al dispersar una lista o todas las listas, el supervisor recibe alerta inmediata en la campana del sistema y en su correo corporativo con botón de acceso directo.
-                  </p>
-                </div>
-                <label className="flex items-center gap-2 cursor-pointer bg-[#21222D] px-3 py-2 rounded-xl border border-white/[0.1] shrink-0">
-                  <input
-                    type="checkbox"
-                    checked={disperseSendEmail}
-                    onChange={e => setDisperseSendEmail(e.target.checked)}
-                    className="w-4 h-4 rounded accent-[#A9DFD8]"
-                  />
-                  <span className="text-xs font-bold text-white">Enviar Correo</span>
-                </label>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-[#87888C] uppercase tracking-wider mb-1.5">
-                  Mensaje / Instrucciones para Supervisores
-                </label>
-                <input
-                  type="text"
-                  value={disperseByListMsg}
-                  onChange={e => setDisperseByListMsg(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-[#171821] border border-white/[0.1] rounded-xl text-xs font-medium text-white focus:border-[#A9DFD8] outline-none"
-                />
-              </div>
-
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-extrabold text-[#87888C] uppercase tracking-wider">
-                    Supervisores ({supervisorsList.length} Listas)
-                  </span>
-                  <button
-                    onClick={() => {
-                      handleDisperseWeek(currentWeekNumber, selectedWeek, disperseByListMsg, undefined, disperseSendEmail);
-                      setIsDisperseByListModalOpen(false);
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl bg-[#A9DFD8] hover:bg-[#95d5cd] text-[#171821] text-xs font-extrabold shadow-xs transition-all cursor-pointer"
-                  >
-                    Dispersar Todas en un Solo Botón
-                  </button>
-                </div>
-
-                <div className="divide-y divide-white/[0.06] border border-white/[0.08] rounded-2xl overflow-hidden">
-                  {supervisorsList.map((sup: string) => {
-                    const isAlreadyDispersed = currentWeekDispersalObj?.supervisoresNotificados.some(
-                      (n: string) => n.trim().toUpperCase() === sup.trim().toUpperCase()
-                    );
-                    const supUser = portalUsers.find(u =>
-                      getUserAllowedLists(u).some(
-                        (l: string) => l.trim().toUpperCase() === sup.trim().toUpperCase()
-                      )
-                    );
-                    const empCount = Object.values(empleadosDB).filter(e => e.jefe === sup).length;
-                    return (
-                      <div key={sup} className="p-3.5 bg-[#171821] hover:bg-white/[0.02] flex items-center justify-between gap-3 transition-colors">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-extrabold text-white truncate">{sup}</span>
-                            <span className="text-[10px] font-bold text-[#87888C] bg-[#21222D] border border-white/[0.08] px-2 py-0.5 rounded-md">
-                              {empCount} colab.
-                            </span>
-                            {isAlreadyDispersed && (
-                              <span className="text-[10px] font-extrabold text-[#A9DFD8] bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 px-2 py-0.5 rounded-md">
-                                Dispersada
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-[#87888C] font-medium truncate mt-0.5">
-                            Correo corporativo: <span className="font-bold text-[#20AEF3]">{supUser?.email || 'No asignado'}</span>
-                          </p>
-                        </div>
-
-                        <button
-                          onClick={() => handleDisperseWeek(currentWeekNumber, selectedWeek, disperseByListMsg, [sup], disperseSendEmail)}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-extrabold transition-all shrink-0 cursor-pointer ${
-                            isAlreadyDispersed
-                              ? 'bg-[#21222D] hover:bg-[#2B2B36] text-slate-200 border border-white/[0.1]'
-                              : 'bg-[#A9DFD8] hover:bg-[#95d5cd] text-[#171821] shadow-xs'
-                          }`}
-                        >
-                          {isAlreadyDispersed ? 'Re-Dispersar y Notificar' : 'Dispersar esta Lista'}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-[#171821] border-t border-white/[0.08] flex justify-end">
-              <button
-                onClick={() => setIsDisperseByListModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-[#21222D] border border-white/[0.1] text-xs font-bold text-slate-200 hover:bg-[#2B2B36] transition-colors cursor-pointer"
-              >
-                Cerrar ventana
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DisperseByListModal
+        isOpen={isDisperseByListModalOpen}
+        onClose={() => setIsDisperseByListModalOpen(false)}
+        currentWeekNumber={currentWeekNumber}
+        selectedWeek={selectedWeek}
+        disperseSendEmail={disperseSendEmail}
+        onChangeDisperseSendEmail={setDisperseSendEmail}
+        disperseByListMsg={disperseByListMsg}
+        onChangeDisperseByListMsg={setDisperseByListMsg}
+        supervisorsList={supervisorsList}
+        currentWeekDispersalObj={currentWeekDispersalObj}
+        portalUsers={portalUsers}
+        getUserAllowedLists={getUserAllowedLists}
+        empleadosDB={empleadosDB}
+        onDisperseWeek={handleDisperseWeek}
+      />
 
       {/* Modal Asistente Global de Formato de Checada / Permiso / Falta para el módulo de Nómina */}
       {globalFormatModalTarget && (

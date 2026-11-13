@@ -27,6 +27,8 @@ interface ControlsBarProps {
   payrollWeeks: PayrollWeekOption[];
   selectedWeek: string;
   onSelectWeek: (val: string) => void;
+  selectedYear?: number;
+  onSelectYear?: (year: number) => void;
   supervisors: string[];
   selectedSupervisor: string;
   onSelectSupervisor: (val: string) => void;
@@ -67,6 +69,8 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   payrollWeeks,
   selectedWeek,
   onSelectWeek,
+  selectedYear = 2026,
+  onSelectYear,
   supervisors,
   selectedSupervisor,
   onSelectSupervisor,
@@ -143,15 +147,36 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
     <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg mb-6 no-print animate-fade-up">
       {/* Fila 1: Selectores de Periodo, Modo de Lectura, Supervisor y Búsqueda */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-        {/* Periodo de Nómina */}
-        <HeadlessSelect
-          label="Periodo de Nómina"
-          icon={<CalendarDays className="w-3.5 h-3.5 text-[#FEB95A]" />}
-          value={selectedWeek}
-          onChange={onSelectWeek}
-          options={weekOptions}
-          searchable={payrollWeeks.length > 6}
-        />
+        {/* Periodo de Nómina + Selector Multi-Año */}
+        <div className="relative">
+          {onSelectYear && (
+            <div className="absolute right-0 top-0 z-10 flex items-center gap-1">
+              {[2025, 2026, 2027, 2028].map((yr) => (
+                <button
+                  key={yr}
+                  type="button"
+                  onClick={() => onSelectYear(yr)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                    selectedYear === yr
+                      ? 'bg-[#FEB95A]/20 text-[#FEB95A] border border-[#FEB95A]/40'
+                      : 'text-[#87888C] hover:text-white bg-white/[0.03]'
+                  }`}
+                  title={`Cambiar calendario fiscal a ${yr}`}
+                >
+                  {yr}
+                </button>
+              ))}
+            </div>
+          )}
+          <HeadlessSelect
+            label="Periodo de Nómina"
+            icon={<CalendarDays className="w-3.5 h-3.5 text-[#FEB95A]" />}
+            value={selectedWeek}
+            onChange={onSelectWeek}
+            options={weekOptions}
+            searchable={payrollWeeks.length > 6}
+          />
+        </div>
 
         {/* Modo de Lectura (Checadas vs Eventos) */}
         <HeadlessSelect

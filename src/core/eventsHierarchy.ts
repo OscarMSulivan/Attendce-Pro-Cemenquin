@@ -238,26 +238,32 @@ export function elegirHoraMasCercana(
 }
 
 /**
- * Evalúa la hora de entrada real contra la hora programada y tolerancias
+ * Evalúa la hora de entrada real contra la hora programada y tolerancias,
+ * soportando cruces de medianoche en turnos nocturnos.
+ * - Si llega hasta `toleranciaDespues` minutos después de la entrada programada -> 'puntual' (dentro de tolerancia)
+ * - Si supera `toleranciaDespues` minutos -> 'retardo' (o 'retardo_excesivo' si supera el doble de tolerancia / >= 30 min)
  */
 export function evaluarHoraEntrada(
   horaReal: string,
   horaEsperada: string,
   toleranciaAntes = 29,
   toleranciaDespues = 14
-): { status: 'puntual' | 'retardo' | 'falta' | 'temprano'; minutosDiff: number } {
+): { status: 'puntual' | 'retardo' | 'retardo_excesivo' | 'falta' | 'temprano'; minutosDiff: number } {
   const minutosEsperados = timeToMinutes(horaEsperada);
   const minutosReales = timeToMinutes(horaReal);
-  const diferencia = minutosReales - minutosEsperados;
+  let diferencia = minutosReales - minutosEsperados;
+  if (diferencia < -720) diferencia += 1440;
+  if (diferencia > 720) diferencia -= 1440;
 
-  if (diferencia >= -toleranciaAntes && diferencia <= 0) {
-    return { status: 'puntual', minutosDiff: 0 };
-  }
-  if (diferencia > 0 && diferencia <= toleranciaDespues) {
-    return { status: 'retardo', minutosDiff: diferencia };
+  if (diferencia >= -toleranciaAntes && diferencia <= toleranciaDespues) {
+    return { status: 'puntual', minutosDiff: Math.max(0, diferencia) };
   }
   if (diferencia > toleranciaDespues) {
-    return { status: 'falta', minutosDiff: diferencia };
+    const umbralExcesivo = Math.max(30, toleranciaDespues * 2);
+    return {
+      status: diferencia >= umbralExcesivo ? 'retardo_excesivo' : 'retardo',
+      minutosDiff: diferencia,
+    };
   }
   if (diferencia < -toleranciaAntes) {
     return { status: 'temprano', minutosDiff: Math.abs(diferencia) };

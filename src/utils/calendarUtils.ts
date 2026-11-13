@@ -8,8 +8,16 @@ import { normalizarHorarioDia } from '../core/eventsHierarchy';
 export const NOMBRES_DIAS_CORTO = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 export const NOMBRES_DIAS_COMPLETO = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-// Días festivos oficiales en México (2026 y 2027)
+// Días festivos oficiales en México (2025, 2026, 2027 y 2028)
 export const FESTIVOS_OFICIALES: Record<string, string> = {
+  // 2025
+  '2025-01-01': 'Año Nuevo',
+  '2025-02-03': 'Día de la Constitución',
+  '2025-03-17': 'Natalicio de Benito Juárez',
+  '2025-05-01': 'Día del Trabajo',
+  '2025-09-16': 'Día de la Independencia',
+  '2025-11-17': 'Revolución Mexicana',
+  '2025-12-25': 'Navidad',
   // 2026
   '2026-01-01': 'Año Nuevo',
   '2026-02-02': 'Día de la Constitución',
@@ -26,6 +34,14 @@ export const FESTIVOS_OFICIALES: Record<string, string> = {
   '2027-09-16': 'Día de la Independencia',
   '2027-11-15': 'Revolución Mexicana',
   '2027-12-25': 'Navidad',
+  // 2028
+  '2028-01-01': 'Año Nuevo',
+  '2028-02-07': 'Día de la Constitución',
+  '2028-03-20': 'Natalicio de Benito Juárez',
+  '2028-05-01': 'Día del Trabajo',
+  '2028-09-16': 'Día de la Independencia',
+  '2028-11-20': 'Revolución Mexicana',
+  '2028-12-25': 'Navidad',
 };
 
 export const OPCIONES_INCIDENCIA = [
@@ -108,6 +124,7 @@ export interface PayrollWeekOption {
   value: string; // "YYYY-MM-DD|YYYY-MM-DD"
   label: string;
   weekNumber: number;
+  year: number;
   startISO: string;
   endISO: string;
 }
@@ -137,8 +154,9 @@ export function generatePayrollWeeks(year = 2026): PayrollWeekOption[] {
 
     weeks.push({
       value: `${sF}|${eF}`,
-      label: `Semana ${i}: del ${sF} al ${eF}`,
+      label: `Semana ${i} (${year}): del ${sF} al ${eF}`,
       weekNumber: i,
+      year,
       startISO: sF,
       endISO: eF
     });
@@ -177,28 +195,45 @@ export function normalizeSupervisorName(name: string | null | undefined): string
 
 /**
  * Detecta automáticamente la semana de nómina (Jueves a Miércoles) que mejor coincide
- * con un conjunto de fechas ISO de checadas biométricas.
+ * con un conjunto de fechas ISO de checadas biométricas, incluyendo soporte multi-año dinámico.
  */
 export function detectPayrollWeekFromDates(
   dates: string[],
   availableWeeks: PayrollWeekOption[]
 ): PayrollWeekOption | null {
-  if (!dates || dates.length === 0 || !availableWeeks || availableWeeks.length === 0) {
+  if (!dates || dates.length === 0) {
     return null;
   }
 
-  // Contar frecuencias de checadas por fecha
+  // Contar frecuencias de checadas por fecha y detectar años presentes
   const dateCounts: Record<string, number> = {};
+  const yearsPresent = new Set<number>();
   for (const d of dates) {
     if (d && typeof d === 'string') {
       dateCounts[d] = (dateCounts[d] || 0) + 1;
+      const yr = parseInt(d.slice(0, 4), 10);
+      if (!isNaN(yr) && yr >= 2020 && yr <= 2035) {
+        yearsPresent.add(yr);
+      }
+    }
+  }
+
+  const candidateWeeksMap = new Map<string, PayrollWeekOption>();
+  for (const w of availableWeeks || []) {
+    candidateWeeksMap.set(w.value, w);
+  }
+  for (const yr of yearsPresent) {
+    for (const w of generatePayrollWeeks(yr)) {
+      if (!candidateWeeksMap.has(w.value)) {
+        candidateWeeksMap.set(w.value, w);
+      }
     }
   }
 
   let bestWeek: PayrollWeekOption | null = null;
   let maxOverlap = 0;
 
-  for (const week of availableWeeks) {
+  for (const week of candidateWeeksMap.values()) {
     let currentScore = 0;
     for (const [isoDate, count] of Object.entries(dateCounts)) {
       if (isoDate >= week.startISO && isoDate <= week.endISO) {
