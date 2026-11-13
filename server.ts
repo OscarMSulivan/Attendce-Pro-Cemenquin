@@ -93,6 +93,98 @@ function readDatabase(): ServerPortalDatabase {
   }
 }
 
+function normalizeEmpIdServer(id: unknown): string {
+  if (id === null || id === undefined) return '';
+  const str = String(id).trim();
+  if (!str) return '';
+  const parsed = parseInt(str, 10);
+  return isNaN(parsed) ? str : parsed.toString().padStart(5, '0');
+}
+
+function mergeReportListsPreservingSupervisorEdits(
+  currentList: unknown[] | undefined,
+  incomingList: unknown[] | undefined,
+  sameWeek: boolean
+): unknown[] | undefined {
+  if (!Array.isArray(incomingList)) return currentList;
+  if (!sameWeek || !Array.isArray(currentList) || currentList.length === 0) return incomingList;
+
+  const currentByEmp = new Map<string, any>();
+  for (const rep of currentList as any[]) {
+    const id = normalizeEmpIdServer(rep?.empleado?.id);
+    if (id) currentByEmp.set(id, rep);
+  }
+
+  return (incomingList as any[]).map(incRep => {
+    const id = normalizeEmpIdServer(incRep?.empleado?.id);
+    const curRep = id ? currentByEmp.get(id) : undefined;
+    if (!curRep || !Array.isArray(curRep.dias) || !Array.isArray(incRep?.dias)) {
+      return incRep;
+    }
+
+    let anyPreserved = false;
+    const mergedDias = incRep.dias.map((incDay: any) => {
+      const curDay = curRep.dias.find((d: any) => d?.isoDate === incDay?.isoDate);
+      if (!curDay) return incDay;
+
+      const curEdited =
+        Boolean(curDay.modificadoPorSupervisor) ||
+        curDay.horasExtrasAutorizadas !== undefined ||
+        Boolean(curDay.notaSupervisorDia) ||
+        Boolean(curDay.formatoSubidoNombre);
+      const incEdited =
+        Boolean(incDay?.modificadoPorSupervisor) ||
+        incDay?.horasExtrasAutorizadas !== undefined ||
+        Boolean(incDay?.notaSupervisorDia) ||
+        Boolean(incDay?.formatoSubidoNombre);
+
+      // Si el día entrante sí viene editado por el supervisor, prevalece el cambio nuevo;
+      // si viene sin editar (por ej. de otra pestaña con estado anterior), preservamos la edición existente.
+      if (curEdited && !incEdited) {
+        anyPreserved = true;
+        return {
+          ...curDay,
+          horarioProgramado: incDay.horarioProgramado ?? curDay.horarioProgramado,
+        };
+      }
+      return incDay;
+    });
+
+    if (!anyPreserved) return incRep;
+
+    let sumNormal = 0;
+    let sumExtra = 0;
+    let asistencias = 0;
+    let faltas = 0;
+    let retardos = 0;
+    for (const d of mergedDias) {
+      sumNormal += Number(d.hNormal) || 0;
+      if (d.horasExtrasAutorizadas === true) {
+        sumExtra += Number(d.hExtra) || 0;
+      }
+      const incUp = String(d.incidencia || '').toUpperCase();
+      if (d.incidencia === 'Asistencia' || (d.modificadoPorSupervisor && !incUp.includes('FALTA') && !incUp.includes('SIN GOCE') && !incUp.includes('RETARDO') && Number(d.hNormal) > 0)) {
+        asistencias++;
+      } else if (incUp.includes('FALTA')) {
+        faltas++;
+      } else if (incUp.includes('RETARDO')) {
+        retardos++;
+      }
+    }
+
+    return {
+      ...incRep,
+      dias: mergedDias,
+      totalNormal: sumNormal,
+      totalExtra: sumExtra,
+      asistencias,
+      faltas,
+      retardos,
+      asistenciaPerfecta: faltas === 0 && retardos === 0 && asistencias > 0,
+    };
+  });
+}
+
 function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalDatabase {
   ensureDataDir();
   const current = readDatabase();
@@ -125,9 +217,45 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
       ? { ...current.config, emailServer: mergedEmailConfig }
       : current.config;
 
+  const sameWeek =
+    !partial.selectedWeek ||
+    !current.selectedWeek ||
+    partial.selectedWeek === current.selectedWeek;
+
+  const mergedReportes = Array.isArray(partial.reportes)
+    ? mergeReportListsPreservingSupervisorEdits(current.reportes, partial.reportes, sameWeek)
+    : current.reportes;
+
+  const mergedDispersals = Array.isArray(partial.dispersals)
+    ? partial.dispersals.map((incDisp: any) => {
+        const curDisp = Array.isArray(current.dispersals)
+          ? (current.dispersals as any[]).find(
+              d => d?.semanaNumero === incDisp?.semanaNumero || d?.id === incDisp?.id
+            )
+          : undefined;
+        if (
+          curDisp &&
+          Array.isArray(curDisp.reportesSnapshot) &&
+          Array.isArray(incDisp?.reportesSnapshot)
+        ) {
+          return {
+            ...incDisp,
+            reportesSnapshot: mergeReportListsPreservingSupervisorEdits(
+              curDisp.reportesSnapshot,
+              incDisp.reportesSnapshot,
+              true
+            ),
+          };
+        }
+        return incDisp;
+      })
+    : current.dispersals;
+
   const updated: ServerPortalDatabase = {
     ...current,
     ...partial,
+    ...(mergedReportes ? { reportes: mergedReportes } : {}),
+    ...(mergedDispersals ? { dispersals: mergedDispersals } : {}),
     ...(mergedConfig ? { config: mergedConfig } : {}),
     ...(mergedEmailConfig ? { emailConfig: mergedEmailConfig } : {}),
     updatedAt: new Date().toISOString(),
@@ -592,14 +720,18 @@ async function startServer() {
           type: 'portal_sync',
           senderTabId: body.senderTabId,
           state: {
-            users: updated.users,
-            incidents: updated.incidents,
-            releases: updated.releases,
-            dispersals: updated.dispersals,
-            notifications: updated.notifications,
-            reportes: updated.reportes,
-            resumen: updated.resumen,
-            selectedWeek: updated.selectedWeek,
+            ...(Array.isArray(body.users) ? { users: updated.users } : {}),
+            ...(Array.isArray(body.incidents) ? { incidents: updated.incidents } : {}),
+            ...(body.releases && typeof body.releases === 'object' ? { releases: updated.releases } : {}),
+            ...(Array.isArray(body.dispersals) ? { dispersals: updated.dispersals } : {}),
+            ...(Array.isArray(body.notifications) ? { notifications: updated.notifications } : {}),
+            ...(Array.isArray(body.reportes)
+              ? {
+                  reportes: updated.reportes,
+                  resumen: updated.resumen,
+                  selectedWeek: updated.selectedWeek,
+                }
+              : {}),
           },
         });
       }

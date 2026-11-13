@@ -132,6 +132,54 @@ export const DEFAULT_INCIDENTS: IncidentRequest[] = [
 
 export class PortalService {
   /**
+   * Guarda de forma segura en localStorage sin lanzar excepciones QuotaExceededError
+   * que interrumpan el renderizado de React o bloqueen el envío al servidor.
+   */
+  private static safeSetLocalStorage(key: string, value: unknown, compactFallback?: () => unknown): void {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      if (compactFallback) {
+        try {
+          localStorage.setItem(key, JSON.stringify(compactFallback()));
+          return;
+        } catch {
+          // ignore secondary quota error
+        }
+      }
+      console.warn(`[PortalService] Quota de localStorage alcanzada al guardar ${key}; sincronizando con el servidor.`);
+    }
+  }
+
+  private static compactDispersalsForLocalStorage(dispersals: PayrollDispersal[]): PayrollDispersal[] {
+    return dispersals.map((d, idx) => ({
+      ...d,
+      // Conservar snapshot compacto solo en la dispersión más reciente para no saturar los 5MB de localStorage
+      reportesSnapshot:
+        idx === 0 && Array.isArray(d.reportesSnapshot)
+          ? d.reportesSnapshot.map((rep: any) => ({
+              ...rep,
+              dias: Array.isArray(rep.dias)
+                ? rep.dias.map((day: any) => ({
+                    ...day,
+                    registrosCrudosDia: undefined,
+                    formatoSubidoBase64: undefined,
+                  }))
+                : rep.dias,
+            }))
+          : undefined,
+    }));
+  }
+
+  private static compactIncidentsForLocalStorage(incidents: IncidentRequest[]): IncidentRequest[] {
+    return incidents.map(inc => ({
+      ...inc,
+      archivoFormatoBase64: undefined,
+    }));
+  }
+
+  /**
    * Sincroniza datos con el servidor Express (/api/portal/sync) cuando está disponible
    * y transmite cambios en tiempo real entre pestañas y sesiones conectadas.
    */
@@ -187,19 +235,23 @@ export class PortalService {
       if (!res.ok) return null;
       const data = await res.json();
       if (data.users && Array.isArray(data.users) && data.users.length > 0) {
-        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(data.users));
+        this.safeSetLocalStorage(STORAGE_KEYS.USERS, data.users);
       }
       if (data.incidents && Array.isArray(data.incidents)) {
-        localStorage.setItem(STORAGE_KEYS.INCIDENTS, JSON.stringify(data.incidents));
+        this.safeSetLocalStorage(STORAGE_KEYS.INCIDENTS, data.incidents, () =>
+          this.compactIncidentsForLocalStorage(data.incidents)
+        );
       }
       if (data.releases && typeof data.releases === 'object') {
-        localStorage.setItem(STORAGE_KEYS.RELEASES, JSON.stringify(data.releases));
+        this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, data.releases);
       }
       if (data.dispersals && Array.isArray(data.dispersals)) {
-        localStorage.setItem(STORAGE_KEYS.DISPERSALS, JSON.stringify(data.dispersals));
+        this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, data.dispersals, () =>
+          this.compactDispersalsForLocalStorage(data.dispersals)
+        );
       }
       if (data.notifications && Array.isArray(data.notifications)) {
-        localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
+        this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, data.notifications);
       }
       const serverEmailCfg = data.emailConfig || data.config?.emailServer;
       if (serverEmailCfg && typeof serverEmailCfg === 'object') {
@@ -208,7 +260,7 @@ export class PortalService {
         const serverTime = serverEmailCfg.updatedAt ? new Date(serverEmailCfg.updatedAt).getTime() : 0;
         if (!localTime || (serverTime && serverTime >= localTime)) {
           const merged = { ...localCurrent, ...serverEmailCfg };
-          localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(merged));
+          this.safeSetLocalStorage(STORAGE_KEYS.EMAIL_CONFIG, merged);
         }
       }
       return data;
@@ -303,7 +355,7 @@ export class PortalService {
 
   static saveUsers(users: PortalUser[]): void {
     const normalized = users.map(u => this.normalizeUserRecord(u));
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(normalized));
+    this.safeSetLocalStorage(STORAGE_KEYS.USERS, normalized);
     this.pushToServer({ users: normalized });
   }
 
@@ -376,7 +428,11 @@ export class PortalService {
   }
 
   static saveActiveUserId(userId: string): void {
-    localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, userId);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, userId);
+    } catch {
+      // ignore
+    }
   }
 
   static loadIncidents(): IncidentRequest[] {
@@ -406,7 +462,9 @@ export class PortalService {
   }
 
   static saveIncidents(incidents: IncidentRequest[]): void {
-    localStorage.setItem(STORAGE_KEYS.INCIDENTS, JSON.stringify(incidents));
+    this.safeSetLocalStorage(STORAGE_KEYS.INCIDENTS, incidents, () =>
+      this.compactIncidentsForLocalStorage(incidents)
+    );
     this.pushToServer({ incidents });
   }
 
@@ -436,7 +494,7 @@ export class PortalService {
   }
 
   static saveReleases(releases: Record<string, PayrollRelease>): void {
-    localStorage.setItem(STORAGE_KEYS.RELEASES, JSON.stringify(releases));
+    this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, releases);
     this.pushToServer({ releases });
   }
 
@@ -462,9 +520,11 @@ export class PortalService {
     return [];
   }
 
-  static saveDispersals(dispersals: PayrollDispersal[]): void {
-    localStorage.setItem(STORAGE_KEYS.DISPERSALS, JSON.stringify(dispersals));
-    this.pushToServer({ dispersals });
+  static saveDispersals(dispersals: PayrollDispersal[], extraServerPayload?: Record<string, unknown>): void {
+    this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, dispersals, () =>
+      this.compactDispersalsForLocalStorage(dispersals)
+    );
+    this.pushToServer({ dispersals, ...(extraServerPayload || {}) });
   }
 
   static loadNotifications(): PortalNotification[] {
@@ -483,7 +543,7 @@ export class PortalService {
   }
 
   static saveNotifications(notifications: PortalNotification[]): void {
-    localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
+    this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, notifications);
     this.pushToServer({ notifications });
   }
 
@@ -525,7 +585,7 @@ export class PortalService {
       updatedAt: cfg.updatedAt || new Date().toISOString(),
     };
     console.log('[PortalService.saveEmailConfig] Persisting emailConfig payload before server sync:', payloadWithTimestamp);
-    localStorage.setItem(STORAGE_KEYS.EMAIL_CONFIG, JSON.stringify(payloadWithTimestamp));
+    this.safeSetLocalStorage(STORAGE_KEYS.EMAIL_CONFIG, payloadWithTimestamp);
     this.pushToServer({
       emailConfig: payloadWithTimestamp,
       config: { emailServer: payloadWithTimestamp },

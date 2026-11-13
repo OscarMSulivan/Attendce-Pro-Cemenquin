@@ -3,9 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
   AlertTriangle, 
+  AlertOctagon,
+  Flame,
+  ShieldAlert,
+  Filter,
   Moon, 
   ChevronLeft, 
   ChevronRight, 
@@ -28,6 +32,266 @@ import { FESTIVOS_OFICIALES, OPCIONES_INCIDENCIA, OPCIONES_INCIDENCIA_SUPERVISOR
 import { getScheduleForDay, resolveScheduleCodeInCatalog } from '../core/attendanceEngine';
 import { ResolutionMode } from './portal/MissingPunchFormatModal';
 import saveAs from 'file-saver';
+
+export type AnomalySeverity = 'critical' | 'warning';
+
+export type AnomalyCategory =
+  | 'extreme_workday'
+  | 'impossible_punch'
+  | 'out_of_shift'
+  | 'calculation_mismatch';
+
+export interface CellAnomaly {
+  severity: AnomalySeverity;
+  category: AnomalyCategory;
+  shortLabel: string;
+  detail: string;
+}
+
+export interface DayDataAnomalies {
+  hasAnomalies: boolean;
+  highestSeverity: AnomalySeverity | null;
+  entrada?: CellAnomaly;
+  salida?: CellAnomaly;
+  hNormal?: CellAnomaly;
+  hExtra?: CellAnomaly;
+  incidencia?: CellAnomaly;
+  all: CellAnomaly[];
+  canSwapInvertedPunches: boolean;
+}
+
+function parseTimeMinutes(hhmm: string | undefined | null): number | null {
+  if (!hhmm || hhmm === '--:--') return null;
+  const parts = hhmm.trim().split(':');
+  if (parts.length < 2) return null;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return null;
+  }
+  return h * 60 + m;
+}
+
+function formatSignedHours(minutesDiff: number): string {
+  const sign = minutesDiff >= 0 ? '+' : '-';
+  const absHrs = (Math.abs(minutesDiff) / 60).toFixed(1);
+  return `${sign}${absHrs}h`;
+}
+
+/**
+ * Analiza una fila diaria (ProcessedDay) para detectar inconsistencias en las celdas:
+ * - Jornadas extremadamente largas (> 12h advertencia, >= 14h crítico)
+ * - Checadas imposibles, invertidas (salida <= entrada en turno diurno) o duplicadas (< 45 min)
+ * - Checadas fuera del rango lógico del turno programado (desfases > 3h en entrada o > 4.5h en salida)
+ * - Inconsistencias entre la incidencia asignada y las horas calculadas (ej. Falta con horas > 0, o Asistencia con 0h)
+ */
+export function analyzeDayDataAnomalies(day: ProcessedDay): DayDataAnomalies {
+  const all: CellAnomaly[] = [];
+  let entradaAnomaly: CellAnomaly | undefined;
+  let salidaAnomaly: CellAnomaly | undefined;
+  let hNormalAnomaly: CellAnomaly | undefined;
+  let hExtraAnomaly: CellAnomaly | undefined;
+  let incidenciaAnomaly: CellAnomaly | undefined;
+  let canSwapInvertedPunches = false;
+
+  const entMin = parseTimeMinutes(day.entrada);
+  const salMin = parseTimeMinutes(day.salida);
+  const schedEntMin = parseTimeMinutes(day.horarioProgramado?.entrada);
+  const schedSalMin = parseTimeMinutes(day.horarioProgramado?.salida);
+  const cruzaMedianoche = Boolean(day.horarioProgramado?.cruzaMedianoche);
+
+  const totalWorkedHours = (day.hNormal || 0) + (day.hExtra || 0);
+  const incLower = (day.incidencia || '').toLowerCase();
+  const isAbsenceIncidence =
+    incLower.includes('falta') ||
+    incLower.includes('incapacidad') ||
+    incLower.includes('vacaciones') ||
+    incLower.includes('permiso sin goce');
+
+  // 1. Checadas imposibles o invertidas cuando existen Entrada y Salida
+  if (entMin !== null && salMin !== null) {
+    const rawDiffMin = salMin - entMin;
+    const effectiveSpanMin =
+      rawDiffMin < 0
+        ? cruzaMedianoche
+          ? rawDiffMin + 1440
+          : rawDiffMin
+        : rawDiffMin;
+
+    if (!cruzaMedianoche && rawDiffMin < 0) {
+      canSwapInvertedPunches = true;
+      const invAnomaly: CellAnomaly = {
+        severity: 'critical',
+        category: 'impossible_punch',
+        shortLabel: 'Checada invertida',
+        detail: `La salida (${day.salida}) es anterior a la entrada (${day.entrada}) en un turno que no cruza medianoche. Puede provocar horas en 0 o cálculo erróneo.`,
+      };
+      entradaAnomaly = invAnomaly;
+      salidaAnomaly = invAnomaly;
+      all.push(invAnomaly);
+    } else if (Math.abs(rawDiffMin) <= 30) {
+      const dupAnomaly: CellAnomaly = {
+        severity: 'critical',
+        category: 'impossible_punch',
+        shortLabel: `Lapso ${Math.abs(rawDiffMin)}m`,
+        detail: `Entrada (${day.entrada}) y Salida (${day.salida}) tienen solo ${Math.abs(rawDiffMin)} min de diferencia (posible checada duplicada en el mismo minuto/bloque).`,
+      };
+      entradaAnomaly = dupAnomaly;
+      salidaAnomaly = dupAnomaly;
+      all.push(dupAnomaly);
+    } else if (effectiveSpanMin > 16 * 60) {
+      const spanHrs = (effectiveSpanMin / 60).toFixed(1);
+      const impossibleSpan: CellAnomaly = {
+        severity: 'critical',
+        category: 'extreme_workday',
+        shortLabel: `Rango ${spanHrs}h`,
+        detail: `El tiempo transcurrido entre Entrada (${day.entrada}) y Salida (${day.salida}) es de ${spanHrs} horas (> 16h), lo que sugiere una checada del día siguiente o turno mal cerrado.`,
+      };
+      salidaAnomaly = impossibleSpan;
+      all.push(impossibleSpan);
+    }
+  }
+
+  // 2. Checadas fuera del rango de turno programado
+  if (day.horarioProgramado && schedEntMin !== null && schedSalMin !== null) {
+    if (entMin !== null && !entradaAnomaly) {
+      let diffEnt = entMin - schedEntMin;
+      if (cruzaMedianoche && Math.abs(diffEnt) > 720) {
+        diffEnt = diffEnt > 0 ? diffEnt - 1440 : diffEnt + 1440;
+      }
+      // Más de 2.5 horas antes o más de 3.5 horas después del inicio del turno
+      if (diffEnt < -150 || diffEnt > 210) {
+        const isCritical = Math.abs(diffEnt) >= 300; // >= 5 horas de desfase
+        entradaAnomaly = {
+          severity: isCritical ? 'critical' : 'warning',
+          category: 'out_of_shift',
+          shortLabel: `Fuera turno (${formatSignedHours(diffEnt)})`,
+          detail: `Entrada registrada a las ${day.entrada} vs. turno programado ${day.horarioProgramado.entrada} (${formatSignedHours(diffEnt)} de desfase). Verifica si tiene asignado otro turno.`,
+        };
+        all.push(entradaAnomaly);
+      }
+    }
+
+    if (salMin !== null && !salidaAnomaly) {
+      let diffSal = salMin - schedSalMin;
+      if (cruzaMedianoche && Math.abs(diffSal) > 720) {
+        diffSal = diffSal > 0 ? diffSal - 1440 : diffSal + 1440;
+      }
+      // Salida más de 3 horas antes (sin permiso/pase) o más de 4.5 horas después del cierre de turno
+      const hasEarlyExitJustification =
+        incLower.includes('permiso') || incLower.includes('pase');
+      if ((!hasEarlyExitJustification && diffSal < -180) || diffSal > 270) {
+        const isCritical = Math.abs(diffSal) >= 360; // >= 6 horas de desfase
+        salidaAnomaly = {
+          severity: isCritical ? 'critical' : 'warning',
+          category: 'out_of_shift',
+          shortLabel: `Fuera turno (${formatSignedHours(diffSal)})`,
+          detail: `Salida registrada a las ${day.salida} vs. fin de turno ${day.horarioProgramado.salida} (${formatSignedHours(diffSal)} de desfase).`,
+        };
+        all.push(salidaAnomaly);
+      }
+    }
+  } else if (!day.horarioProgramado && (entMin !== null || salMin !== null)) {
+    // Checada en día de Descanso programado
+    if (entMin !== null && salMin === null && !entradaAnomaly) {
+      entradaAnomaly = {
+        severity: 'warning',
+        category: 'out_of_shift',
+        shortLabel: 'Incompleta en descanso',
+        detail: `Se registró entrada (${day.entrada}) en día de Descanso programado pero no hay checada de salida.`,
+      };
+      all.push(entradaAnomaly);
+    } else if (salMin !== null && entMin === null && !salidaAnomaly) {
+      salidaAnomaly = {
+        severity: 'warning',
+        category: 'out_of_shift',
+        shortLabel: 'Incompleta en descanso',
+        detail: `Se registró salida (${day.salida}) en día de Descanso programado pero no hay checada de entrada.`,
+      };
+      all.push(salidaAnomaly);
+    }
+  }
+
+  // 3. Jornadas extremadamente largas (H. Normal / H. Extra)
+  if (totalWorkedHours >= 14) {
+    const extremeAnomaly: CellAnomaly = {
+      severity: 'critical',
+      category: 'extreme_workday',
+      shortLabel: `Jornada extrema (${totalWorkedHours.toFixed(1)}h)`,
+      detail: `La jornada total calculada (${totalWorkedHours.toFixed(2)}h = ${day.hNormal.toFixed(2)}h norm + ${day.hExtra.toFixed(2)}h extra) supera las 14 horas diarias. Revisa antes de exportar a nómina.`,
+    };
+    hNormalAnomaly = extremeAnomaly;
+    if (day.hExtra > 0) hExtraAnomaly = extremeAnomaly;
+    all.push(extremeAnomaly);
+  } else if (totalWorkedHours > 12) {
+    const longAnomaly: CellAnomaly = {
+      severity: 'warning',
+      category: 'extreme_workday',
+      shortLabel: `Jornada >12h (${totalWorkedHours.toFixed(1)}h)`,
+      detail: `La jornada total (${totalWorkedHours.toFixed(2)}h) excede las 12 horas en un solo día. Confirma que el tiempo extra sea correcto.`,
+    };
+    hNormalAnomaly = longAnomaly;
+    if (day.hExtra > 0) hExtraAnomaly = longAnomaly;
+    all.push(longAnomaly);
+  }
+
+  if (day.hExtra >= 5 && !hExtraAnomaly) {
+    hExtraAnomaly = {
+      severity: day.hExtra >= 7 ? 'critical' : 'warning',
+      category: 'extreme_workday',
+      shortLabel: `Extra alto (${day.hExtra.toFixed(1)}h)`,
+      detail: `Se calcularon ${day.hExtra.toFixed(2)} horas extras en un solo día. Verifica que no se deba a un horario programado incorrecto o checada desfasada.`,
+    };
+    all.push(hExtraAnomaly);
+  }
+
+  // 4. Inconsistencias entre Incidencia y Horas Calculadas
+  if (isAbsenceIncidence && totalWorkedHours > 0) {
+    const mismatch: CellAnomaly = {
+      severity: 'critical',
+      category: 'calculation_mismatch',
+      shortLabel: 'Falta/Ausencia con horas',
+      detail: `El día está marcado como "${day.incidencia}" pero tiene ${totalWorkedHours.toFixed(2)}h calculadas. Esto puede duplicar pago e incidencia al exportar.`,
+    };
+    hNormalAnomaly = hNormalAnomaly || mismatch;
+    incidenciaAnomaly = mismatch;
+    all.push(mismatch);
+  } else if (
+    day.horarioProgramado &&
+    entMin !== null &&
+    salMin !== null &&
+    totalWorkedHours === 0 &&
+    !isAbsenceIncidence
+  ) {
+    const zeroHoursMismatch: CellAnomaly = {
+      severity: 'critical',
+      category: 'calculation_mismatch',
+      shortLabel: '0.00h con 2 checadas',
+      detail: `Existen checadas de entrada (${day.entrada}) y salida (${day.salida}), pero el cálculo arrojó 0.00 horas trabajadas.`,
+    };
+    hNormalAnomaly = hNormalAnomaly || zeroHoursMismatch;
+    incidenciaAnomaly = zeroHoursMismatch;
+    all.push(zeroHoursMismatch);
+  }
+
+  const highestSeverity: AnomalySeverity | null = all.some((a) => a.severity === 'critical')
+    ? 'critical'
+    : all.length > 0
+    ? 'warning'
+    : null;
+
+  return {
+    hasAnomalies: all.length > 0,
+    highestSeverity,
+    entrada: entradaAnomaly,
+    salida: salidaAnomaly,
+    hNormal: hNormalAnomaly,
+    hExtra: hExtraAnomaly,
+    incidencia: incidenciaAnomaly,
+    all,
+    canSwapInvertedPunches,
+  };
+}
 
 interface AttendanceTableProps {
   reports: EmployeeReport[];
@@ -58,6 +322,69 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
 }) => {
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [onlyWithAnomalies, setOnlyWithAnomalies] = useState<boolean>(false);
+
+  // Resumen global de inconsistencias en los reportes actuales
+  const anomalyStats = useMemo(() => {
+    let employeesWithAnomalies = 0;
+    let totalDaysWithAnomalies = 0;
+    let extremeWorkdays = 0;
+    let impossibleOrInverted = 0;
+    let outOfShift = 0;
+    let calculationMismatches = 0;
+    const byEmployeeId: Record<string, { count: number; critical: number }> = {};
+
+    for (const rep of reports) {
+      const matchedCatalogCode = horarios ? resolveScheduleCodeInCatalog(horarios, rep.empleado.horario) : '';
+      const activeScheduleCode =
+        matchedCatalogCode ||
+        (horarios?.['ADMO'] ? 'ADMO' : horarios ? Object.keys(horarios)[0] || 'ADMO' : 'ADMO');
+
+      let empAnomalyDays = 0;
+      let empCriticalDays = 0;
+
+      for (const d of rep.dias) {
+        const resolvedDayHorario = horarios
+          ? getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek)
+          : d.horarioProgramado;
+        const effectiveDay =
+          resolvedDayHorario !== d.horarioProgramado
+            ? { ...d, horarioProgramado: resolvedDayHorario }
+            : d;
+
+        const analysis = analyzeDayDataAnomalies(effectiveDay);
+        if (analysis.hasAnomalies) {
+          empAnomalyDays++;
+          totalDaysWithAnomalies++;
+          if (analysis.highestSeverity === 'critical') empCriticalDays++;
+          if (analysis.all.some((a) => a.category === 'extreme_workday')) extremeWorkdays++;
+          if (analysis.all.some((a) => a.category === 'impossible_punch')) impossibleOrInverted++;
+          if (analysis.all.some((a) => a.category === 'out_of_shift')) outOfShift++;
+          if (analysis.all.some((a) => a.category === 'calculation_mismatch')) calculationMismatches++;
+        }
+      }
+
+      byEmployeeId[rep.empleado.id] = { count: empAnomalyDays, critical: empCriticalDays };
+      if (empAnomalyDays > 0) {
+        employeesWithAnomalies++;
+      }
+    }
+
+    return {
+      employeesWithAnomalies,
+      totalDaysWithAnomalies,
+      extremeWorkdays,
+      impossibleOrInverted,
+      outOfShift,
+      calculationMismatches,
+      byEmployeeId,
+    };
+  }, [reports, horarios]);
+
+  const displayedReports = useMemo(() => {
+    if (!onlyWithAnomalies) return reports;
+    return reports.filter((r) => (anomalyStats.byEmployeeId[r.empleado.id]?.count || 0) > 0);
+  }, [reports, onlyWithAnomalies, anomalyStats]);
 
   if (reports.length === 0) {
     return (
@@ -73,19 +400,96 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
     );
   }
 
-  const totalPages = Math.ceil(reports.length / pageSize);
-  const startIdx = (currentPage - 1) * pageSize;
-  const paginatedReports = reports.slice(startIdx, startIdx + pageSize);
+  const totalPages = Math.ceil(displayedReports.length / pageSize);
+  const safePage = Math.min(currentPage, Math.max(1, totalPages));
+  const startIdx = (safePage - 1) * pageSize;
+  const paginatedReports = displayedReports.slice(startIdx, startIdx + pageSize);
 
   return (
-    <div className="space-y-6 animate-fade-up">
+    <div className="space-y-4 animate-fade-up">
+      {/* Barra de Auditoría Pre-Exportación (Detección de Datos Inconsistentes) */}
+      {anomalyStats.totalDaysWithAnomalies > 0 ? (
+        <div className="rounded-xl p-3.5 bg-gradient-to-r from-rose-950/50 via-amber-950/35 to-slate-900/90 border border-rose-500/40 shadow-md flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 no-print">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-400 shrink-0 mt-0.5">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-extrabold uppercase tracking-wider text-rose-300">
+                  Auditoría Pre-Exportación: {anomalyStats.totalDaysWithAnomalies} día(s) con datos inconsistentes en {anomalyStats.employeesWithAnomalies} empleado(s)
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-200 border border-rose-500/30 font-semibold">
+                  Revisar antes de exportar Excel / CONTPAQi
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                {anomalyStats.impossibleOrInverted > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/35">
+                    <AlertOctagon className="w-3 h-3 text-rose-400" />
+                    {anomalyStats.impossibleOrInverted} checada(s) invertida(s) / duplicada(s)
+                  </span>
+                )}
+                {anomalyStats.extremeWorkdays > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/35">
+                    <Flame className="w-3 h-3 text-orange-400" />
+                    {anomalyStats.extremeWorkdays} jornada(s) extrema(s) (&gt;12h o extra excesivo)
+                  </span>
+                )}
+                {anomalyStats.outOfShift > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/35">
+                    <Clock className="w-3 h-3 text-amber-400" />
+                    {anomalyStats.outOfShift} fuera de rango de turno
+                  </span>
+                )}
+                {anomalyStats.calculationMismatches > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/35">
+                    <AlertTriangle className="w-3 h-3 text-purple-400" />
+                    {anomalyStats.calculationMismatches} contradicción(es) incidencia vs. horas
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setOnlyWithAnomalies((prev) => !prev);
+              setCurrentPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 border ${
+              onlyWithAnomalies
+                ? 'bg-rose-600 text-white border-rose-400 shadow-lg shadow-rose-950/50'
+                : 'bg-slate-900/90 hover:bg-rose-950/60 text-rose-200 border-rose-500/40'
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>
+              {onlyWithAnomalies
+                ? `Mostrando solo inconsistencias (${anomalyStats.employeesWithAnomalies}) — Ver todos`
+                : `Filtrar solo empleados con inconsistencias (${anomalyStats.employeesWithAnomalies})`}
+            </span>
+          </button>
+        </div>
+      ) : (
+        <div className="rounded-xl px-3.5 py-2.5 bg-emerald-950/20 border border-emerald-500/30 flex items-center justify-between gap-2 text-xs text-emerald-300 no-print">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              <strong>Validación Pre-Exportación OK:</strong> No se detectaron jornadas extremadamente largas, checadas invertidas ni horas fuera del rango de turno.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Barra de paginación superior */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-2 text-xs text-slate-400 no-print">
         <span>
-          Mostrando <strong className="text-slate-200">{Math.min(reports.length, startIdx + 1)}</strong> a{' '}
-          <strong className="text-slate-200">{Math.min(reports.length, startIdx + pageSize)}</strong> de{' '}
-          <strong className="text-slate-200">{reports.length}</strong> empleados
-          {filteredCount !== reports.length && ` (filtrados de ${filteredCount})`}
+          Mostrando <strong className="text-slate-200">{ Math.min(displayedReports.length, startIdx + 1) }</strong> a{' '}
+          <strong className="text-slate-200">{ Math.min(displayedReports.length, startIdx + pageSize) }</strong> de{' '}
+          <strong className="text-slate-200">{ displayedReports.length }</strong> empleados
+          {filteredCount !== displayedReports.length && ` (filtrados de ${filteredCount})`}
         </span>
 
         <div className="flex items-center gap-3">
@@ -111,18 +515,18 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
             <button
               type="button"
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              disabled={currentPage === 1}
+              disabled={safePage === 1}
               className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="font-mono text-xs px-2">
-              {currentPage} / {totalPages || 1}
+              {safePage} / {totalPages || 1}
             </span>
             <button
               type="button"
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              disabled={currentPage >= totalPages}
+              disabled={safePage >= totalPages}
               className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-300 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800"
             >
               <ChevronRight className="w-4 h-4" />
@@ -156,18 +560,18 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
           <button
             type="button"
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
+            disabled={safePage === 1}
             className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 disabled:opacity-30"
           >
             Anterior
           </button>
           <span className="text-xs text-slate-400 font-mono px-3">
-            Página {currentPage} de {totalPages}
+            Página {safePage} de {totalPages}
           </span>
           <button
             type="button"
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-            disabled={currentPage >= totalPages}
+            disabled={safePage >= totalPages}
             className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 disabled:opacity-30"
           >
             Siguiente
@@ -205,6 +609,30 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 }) => {
   const { empleado, dias, totalNormal, faltas, retardos } = report;
 
+  const matchedCatalogCode = horarios ? resolveScheduleCodeInCatalog(horarios, empleado.horario) : '';
+  const activeScheduleCode = matchedCatalogCode || (horarios?.['ADMO'] ? 'ADMO' : (horarios ? Object.keys(horarios)[0] || 'ADMO' : 'ADMO'));
+  const activeScheduleConfig = horarios?.[activeScheduleCode];
+  const hoursSummaryText = formatScheduleHoursSummary(activeScheduleConfig);
+
+  const effectiveDaysWithAnomalies = useMemo(() => {
+    return dias.map((d) => {
+      const resolvedDayHorario = horarios
+        ? getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek)
+        : d.horarioProgramado;
+      const effectiveDay =
+        resolvedDayHorario !== d.horarioProgramado
+          ? { ...d, horarioProgramado: resolvedDayHorario }
+          : d;
+      const anomalies = analyzeDayDataAnomalies(effectiveDay);
+      return { effectiveDay, anomalies };
+    });
+  }, [dias, horarios, activeScheduleCode]);
+
+  const anomalyDaysCount = effectiveDaysWithAnomalies.filter((x) => x.anomalies.hasAnomalies).length;
+  const hasCriticalAnomalies = effectiveDaysWithAnomalies.some(
+    (x) => x.anomalies.highestSeverity === 'critical'
+  );
+
   const supModCount = dias.filter(d => d.modificadoPorSupervisor).length;
   const authorizedExtra = dias.reduce(
     (acc, d) => acc + (d.horasExtrasAutorizadas === true ? d.hExtra : 0),
@@ -218,15 +646,18 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
     const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
     return isScheduledWorkday && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor;
   });
-  const sinIncidencias = faltas === 0 && retardos === 0 && !hasUnresolvedMissingPunches;
-
-  const matchedCatalogCode = horarios ? resolveScheduleCodeInCatalog(horarios, empleado.horario) : '';
-  const activeScheduleCode = matchedCatalogCode || (horarios?.['ADMO'] ? 'ADMO' : (horarios ? Object.keys(horarios)[0] || 'ADMO' : 'ADMO'));
-  const activeScheduleConfig = horarios?.[activeScheduleCode];
-  const hoursSummaryText = formatScheduleHoursSummary(activeScheduleConfig);
+  const sinIncidencias = faltas === 0 && retardos === 0 && !hasUnresolvedMissingPunches && anomalyDaysCount === 0;
 
   return (
-    <div className="rounded-xl overflow-hidden bg-slate-900/90 border border-slate-800 shadow-md transition-all hover:border-slate-700 hover-lift">
+    <div
+      className={`rounded-xl overflow-hidden bg-slate-900/90 border shadow-md transition-all hover-lift ${
+        hasCriticalAnomalies
+          ? 'border-rose-500/60 shadow-rose-950/30'
+          : anomalyDaysCount > 0
+          ? 'border-amber-500/50 shadow-amber-950/20'
+          : 'border-slate-800 hover:border-slate-700'
+      }`}
+    >
       {/* Encabezado del empleado */}
       <div className="p-4 bg-slate-950/70 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
@@ -266,6 +697,20 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
                     <span className="text-slate-300 ml-1.5">· De {hoursSummaryText}</span>
                   </span>
                 </div>
+              )}
+
+              {anomalyDaysCount > 0 && (
+                <span
+                  className={`text-[10px] font-bold px-2.5 py-0.5 rounded flex items-center gap-1 border ${
+                    hasCriticalAnomalies
+                      ? 'bg-rose-500/20 text-rose-200 border-rose-500/50 animate-pulse'
+                      : 'bg-orange-500/20 text-orange-200 border-orange-500/45'
+                  }`}
+                  title="Se detectaron celdas con jornadas extremas, checadas fuera de turno o invertidas"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  {anomalyDaysCount} día(s) con datos inconsistentes
+                </span>
               )}
 
               {sinIncidencias && (
@@ -327,29 +772,21 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60 font-mono">
-            {dias.map((d) => {
-              const resolvedDayHorario = horarios
-                ? getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek)
-                : d.horarioProgramado;
-              const effectiveDay =
-                resolvedDayHorario !== d.horarioProgramado
-                  ? { ...d, horarioProgramado: resolvedDayHorario }
-                  : d;
-              return (
-                <DayRow
-                  key={d.isoDate}
-                  employee={empleado}
-                  day={effectiveDay}
-                  onChangeIncidence={(val) => onUpdateDayIncidence(empleado.id, d.isoDate, val)}
-                  onChangeTimes={(newEnt, newSal) => onUpdateDayTimes(empleado.id, d.isoDate, newEnt, newSal)}
-                  onChangeNote={onUpdateDayNote ? (note) => onUpdateDayNote(empleado.id, d.isoDate, note) : undefined}
-                  onOpenFormatAssistant={onOpenFormatAssistant}
-                  onQuickConfirmFalta={onQuickConfirmFalta ? () => onQuickConfirmFalta(empleado.id, d.isoDate) : undefined}
-                  isSupervisorMode={isSupervisorMode}
-                  onToggleOvertimeApproval={onToggleOvertimeApproval ? (aut) => onToggleOvertimeApproval(empleado.id, d.isoDate, aut) : undefined}
-                />
-              );
-            })}
+            {effectiveDaysWithAnomalies.map(({ effectiveDay, anomalies }) => (
+              <DayRow
+                key={effectiveDay.isoDate}
+                employee={empleado}
+                day={effectiveDay}
+                anomalies={anomalies}
+                onChangeIncidence={(val) => onUpdateDayIncidence(empleado.id, effectiveDay.isoDate, val)}
+                onChangeTimes={(newEnt, newSal) => onUpdateDayTimes(empleado.id, effectiveDay.isoDate, newEnt, newSal)}
+                onChangeNote={onUpdateDayNote ? (note) => onUpdateDayNote(empleado.id, effectiveDay.isoDate, note) : undefined}
+                onOpenFormatAssistant={onOpenFormatAssistant}
+                onQuickConfirmFalta={onQuickConfirmFalta ? () => onQuickConfirmFalta(empleado.id, effectiveDay.isoDate) : undefined}
+                isSupervisorMode={isSupervisorMode}
+                onToggleOvertimeApproval={onToggleOvertimeApproval ? (aut) => onToggleOvertimeApproval(empleado.id, effectiveDay.isoDate, aut) : undefined}
+              />
+            ))}
           </tbody>
         </table>
       </div>
@@ -360,6 +797,7 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
 interface DayRowProps {
   employee: Employee;
   day: ProcessedDay;
+  anomalies: DayDataAnomalies;
   onChangeIncidence: (val: string) => void;
   onChangeTimes: (newEntrada: string, newSalida: string) => void;
   onChangeNote?: (note: string) => void;
@@ -372,6 +810,7 @@ interface DayRowProps {
 const DayRow: React.FC<DayRowProps> = ({
   employee,
   day,
+  anomalies,
   onChangeIncidence,
   onChangeTimes,
   onChangeNote,
@@ -415,12 +854,16 @@ const DayRow: React.FC<DayRowProps> = ({
 
   // Clases condicionales de fila
   let rowBg = 'hover:bg-slate-800/40 transition-colors';
-  if (day.modificadoPorSupervisor) {
+  if (anomalies.highestSeverity === 'critical') {
+    rowBg += ' bg-rose-950/25 border-l-4 border-l-rose-500';
+  } else if (day.modificadoPorSupervisor) {
     if (day.tipoModificacionSupervisor === 'falta_confirmada') {
       rowBg += ' bg-rose-950/20 border-l-4 border-l-rose-500';
     } else {
       rowBg += ' bg-purple-950/25 border-l-4 border-l-purple-500';
     }
+  } else if (anomalies.highestSeverity === 'warning') {
+    rowBg += ' bg-orange-950/20 border-l-4 border-l-orange-500';
   } else if (day.huerfana || faltanChecadasEnDiaLaboral) {
     rowBg += ' bg-amber-950/20 border-l-4 border-l-amber-500';
   } else if (day.rowClass === 'row-success') {
@@ -430,8 +873,11 @@ const DayRow: React.FC<DayRowProps> = ({
   }
 
   const tieneChecadaUnica = tieneEnt !== tieneSal;
+  const mostrarBotonSwitch = tieneChecadaUnica || anomalies.canSwapInvertedPunches;
   const crudos = day.registrosCrudosDia || [];
-  const mostrarPillsCrudos = crudos.length > 0 && (day.huerfana || crudos.length > 2 || crudos.some(c => c.codigo === 'RST'));
+  const mostrarPillsCrudos =
+    crudos.length > 0 &&
+    (day.huerfana || anomalies.hasAnomalies || crudos.length > 2 || crudos.some(c => c.codigo === 'RST'));
 
   const handleSwapTimes = () => {
     onChangeTimes(day.salida, day.entrada);
@@ -464,26 +910,30 @@ const DayRow: React.FC<DayRowProps> = ({
   const tieneEntradaValida = Boolean(day.entrada && day.entrada !== '--:--');
   const tieneSalidaValida = Boolean(day.salida && day.salida !== '--:--');
 
-  // Si ambas checadas están completas y válidas (sea originalmente o ya resueltas), no se pueden alterar arbitrariamente
   const ambasCompletas = tieneEntradaValida && tieneSalidaValida;
-
-  // Entrada bloqueada si:
-  // 1) Es descanso y no checó, o
-  // 2) Ambas están completas, o
-  // 3) Tenía entrada válida (bloquear la que sí tenga)
   const isEntradaBloqueada = (esDiaDescanso && !tieneEntradaValida) || ambasCompletas || tieneEntradaValida;
-
-  // Salida bloqueada si:
-  // 1) Es descanso y no checó, o
-  // 2) Ambas están completas, o
-  // 3) Tenía salida válida (bloquear la que sí tenga)
   const isSalidaBloqueada = (esDiaDescanso && !tieneSalidaValida) || ambasCompletas || tieneSalidaValida;
 
   return (
     <tr className={rowBg}>
       {/* Fecha */}
       <td className="p-3 pl-4 text-slate-300 font-medium whitespace-nowrap align-top">
-        {day.isoDate}
+        <div className="flex flex-col gap-1">
+          <span>{day.isoDate}</span>
+          {anomalies.hasAnomalies && (
+            <span
+              className={`inline-flex items-center gap-1 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded w-fit ${
+                anomalies.highestSeverity === 'critical'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  : 'bg-orange-500/20 text-orange-300 border border-orange-500/40'
+              }`}
+              title={anomalies.all.map((a) => a.detail).join(' | ')}
+            >
+              <AlertOctagon className="w-2.5 h-2.5 shrink-0" />
+              {anomalies.highestSeverity === 'critical' ? 'Dato Crítico' : 'Revisar Dato'}
+            </span>
+          )}
+        </div>
       </td>
 
       {/* Día de la semana */}
@@ -515,21 +965,45 @@ const DayRow: React.FC<DayRowProps> = ({
         )}
       </td>
 
-      {/* Entrada (Bloqueada si ya tiene valor; editable solo si falta) */}
-      <td className="p-3 whitespace-nowrap align-top">
+      {/* Celda Entrada con indicador visual de inconsistencia */}
+      <td
+        className={`p-3 whitespace-nowrap align-top transition-colors ${
+          anomalies.entrada
+            ? anomalies.entrada.severity === 'critical'
+              ? 'bg-rose-950/40 ring-1 ring-inset ring-rose-500/50'
+              : 'bg-orange-950/30 ring-1 ring-inset ring-orange-500/40'
+            : ''
+        }`}
+      >
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
             {isEntradaBloqueada ? (
               <div
                 className={`w-24 rounded px-2 py-1 text-xs font-mono font-bold flex items-center justify-between border select-none ${
-                  day.modificadoPorSupervisor && day.entrada !== day.entradaOriginal
+                  anomalies.entrada
+                    ? anomalies.entrada.severity === 'critical'
+                      ? 'bg-rose-950/70 border-rose-500 text-rose-200 shadow-sm shadow-rose-950'
+                      : 'bg-orange-950/60 border-orange-500/80 text-orange-200'
+                    : day.modificadoPorSupervisor && day.entrada !== day.entradaOriginal
                     ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
                     : 'bg-slate-950/80 border-slate-800 text-slate-200'
                 }`}
-                title="Checada de entrada registrada y protegida contra edición"
+                title={
+                  anomalies.entrada
+                    ? anomalies.entrada.detail
+                    : 'Checada de entrada registrada y protegida contra edición'
+                }
               >
                 <span>{day.entrada}</span>
-                <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+                {anomalies.entrada ? (
+                  <AlertTriangle
+                    className={`w-3.5 h-3.5 ml-1 shrink-0 ${
+                      anomalies.entrada.severity === 'critical' ? 'text-rose-400 animate-bounce' : 'text-orange-400'
+                    }`}
+                  />
+                ) : (
+                  <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+                )}
               </div>
             ) : (
               <input
@@ -541,6 +1015,21 @@ const DayRow: React.FC<DayRowProps> = ({
               />
             )}
           </div>
+
+          {anomalies.entrada && (
+            <span
+              className={`inline-flex items-center gap-1 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded w-fit ${
+                anomalies.entrada.severity === 'critical'
+                  ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                  : 'bg-orange-500/20 text-orange-200 border border-orange-500/35'
+              }`}
+              title={anomalies.entrada.detail}
+            >
+              <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+              {anomalies.entrada.shortLabel}
+            </span>
+          )}
+
           {day.modificadoPorSupervisor && day.entrada !== (day.entradaOriginal || '--:--') && (
             <span className="text-[9px] text-purple-300 font-sans">
               Orig: {day.entradaOriginal || 'Sin checada'}
@@ -549,32 +1038,66 @@ const DayRow: React.FC<DayRowProps> = ({
         </div>
       </td>
 
-      {/* Salida (Bloqueada si ya tiene valor; switch habilitado si solo hay 1 checada) */}
-      <td className="p-3 whitespace-nowrap align-top">
+      {/* Celda Salida con indicador visual de inconsistencia */}
+      <td
+        className={`p-3 whitespace-nowrap align-top transition-colors ${
+          anomalies.salida
+            ? anomalies.salida.severity === 'critical'
+              ? 'bg-rose-950/40 ring-1 ring-inset ring-rose-500/50'
+              : 'bg-orange-950/30 ring-1 ring-inset ring-orange-500/40'
+            : ''
+        }`}
+      >
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
-            {tieneChecadaUnica && (
+            {mostrarBotonSwitch && (
               <button
                 type="button"
                 onClick={handleSwapTimes}
-                className="p-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all no-print cursor-pointer flex items-center gap-1 shadow-sm"
-                title="Mover checada física única entre Entrada ⇄ Salida (Switch de RST / Huérfana)"
+                className={`p-1 rounded transition-all no-print cursor-pointer flex items-center gap-1 shadow-sm border ${
+                  anomalies.canSwapInvertedPunches
+                    ? 'bg-rose-500/30 hover:bg-rose-500/40 text-rose-200 border-rose-400 animate-pulse'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                }`}
+                title={
+                  anomalies.canSwapInvertedPunches
+                    ? 'Corregir checadas invertidas intercambiando Entrada ⇄ Salida'
+                    : 'Mover checada física única entre Entrada ⇄ Salida (Switch de RST / Huérfana)'
+                }
               >
-                <ArrowLeftRight className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-[9px] font-bold font-sans hidden sm:inline">Switch</span>
+                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-bold font-sans hidden sm:inline">
+                  {anomalies.canSwapInvertedPunches ? 'Invertir' : 'Switch'}
+                </span>
               </button>
             )}
             {isSalidaBloqueada ? (
               <div
                 className={`w-24 rounded px-2 py-1 text-xs font-mono font-bold flex items-center justify-between border select-none ${
-                  day.modificadoPorSupervisor && day.salida !== day.salidaOriginal
+                  anomalies.salida
+                    ? anomalies.salida.severity === 'critical'
+                      ? 'bg-rose-950/70 border-rose-500 text-rose-200 shadow-sm shadow-rose-950'
+                      : 'bg-orange-950/60 border-orange-500/80 text-orange-200'
+                    : day.modificadoPorSupervisor && day.salida !== day.salidaOriginal
                     ? 'bg-purple-950/40 border-purple-500/60 text-purple-200'
                     : 'bg-slate-950/80 border-slate-800 text-slate-200'
                 }`}
-                title="Checada de salida registrada y protegida contra edición"
+                title={
+                  anomalies.salida
+                    ? anomalies.salida.detail
+                    : 'Checada de salida registrada y protegida contra edición'
+                }
               >
                 <span>{day.salida}</span>
-                <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+                {anomalies.salida ? (
+                  <AlertTriangle
+                    className={`w-3.5 h-3.5 ml-1 shrink-0 ${
+                      anomalies.salida.severity === 'critical' ? 'text-rose-400 animate-bounce' : 'text-orange-400'
+                    }`}
+                  />
+                ) : (
+                  <Lock className="w-3 h-3 text-slate-500 ml-1 shrink-0" />
+                )}
               </div>
             ) : (
               <input
@@ -586,6 +1109,21 @@ const DayRow: React.FC<DayRowProps> = ({
               />
             )}
           </div>
+
+          {anomalies.salida && (
+            <span
+              className={`inline-flex items-center gap-1 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded w-fit ${
+                anomalies.salida.severity === 'critical'
+                  ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                  : 'bg-orange-500/20 text-orange-200 border border-orange-500/35'
+              }`}
+              title={anomalies.salida.detail}
+            >
+              <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+              {anomalies.salida.shortLabel}
+            </span>
+          )}
+
           {day.modificadoPorSupervisor && day.salida !== (day.salidaOriginal || '--:--') && (
             <span className="text-[9px] text-purple-300 font-sans">
               Orig: {day.salidaOriginal || 'Sin checada'}
@@ -594,18 +1132,68 @@ const DayRow: React.FC<DayRowProps> = ({
         </div>
       </td>
 
-      {/* H. Normal */}
-      <td className="p-3 text-center font-bold text-emerald-400 align-top">
-        {day.hNormal > 0 ? day.hNormal.toFixed(2) : '-'}
+      {/* Celda H. Normal con indicador visual de jornada extrema o contradicción */}
+      <td
+        className={`p-3 text-center font-bold align-top transition-colors ${
+          anomalies.hNormal
+            ? anomalies.hNormal.severity === 'critical'
+              ? 'bg-rose-950/40 ring-1 ring-inset ring-rose-500/50 text-rose-300'
+              : 'bg-orange-950/30 ring-1 ring-inset ring-orange-500/40 text-orange-300'
+            : 'text-emerald-400'
+        }`}
+      >
+        <div className="flex flex-col items-center gap-1">
+          <span>{day.hNormal > 0 ? day.hNormal.toFixed(2) : '-'}</span>
+          {anomalies.hNormal && (
+            <span
+              className={`inline-flex items-center gap-0.5 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${
+                anomalies.hNormal.severity === 'critical'
+                  ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                  : 'bg-orange-500/20 text-orange-200 border border-orange-500/35'
+              }`}
+              title={anomalies.hNormal.detail}
+            >
+              <Flame className="w-2.5 h-2.5 shrink-0" />
+              {anomalies.hNormal.shortLabel}
+            </span>
+          )}
+        </div>
       </td>
 
-      {/* H. Extra y Pregunta de Autorización de Tiempo Extra */}
-      <td className="p-3 text-center align-top whitespace-nowrap">
+      {/* Celda H. Extra y Pregunta de Autorización de Tiempo Extra */}
+      <td
+        className={`p-3 text-center align-top whitespace-nowrap transition-colors ${
+          anomalies.hExtra
+            ? anomalies.hExtra.severity === 'critical'
+              ? 'bg-rose-950/40 ring-1 ring-inset ring-rose-500/50'
+              : 'bg-orange-950/30 ring-1 ring-inset ring-orange-500/40'
+            : ''
+        }`}
+      >
         {day.hExtra > 0 ? (
           <div className="flex flex-col items-center gap-1.5">
-            <span className="font-bold text-amber-400 font-mono text-xs">
+            <span
+              className={`font-bold font-mono text-xs ${
+                anomalies.hExtra ? 'text-rose-300' : 'text-amber-400'
+              }`}
+              title={anomalies.hExtra?.detail}
+            >
               {day.hExtra.toFixed(2)}h
             </span>
+
+            {anomalies.hExtra && (
+              <span
+                className={`inline-flex items-center gap-0.5 text-[9px] font-sans font-bold px-1.5 py-0.5 rounded ${
+                  anomalies.hExtra.severity === 'critical'
+                    ? 'bg-rose-500/25 text-rose-200 border border-rose-500/40'
+                    : 'bg-orange-500/20 text-orange-200 border border-orange-500/35'
+                }`}
+                title={anomalies.hExtra.detail}
+              >
+                <Flame className="w-2.5 h-2.5 shrink-0" />
+                {anomalies.hExtra.shortLabel}
+              </span>
+            )}
 
             {/* Prompt interactivo: ¿Tiempo extra autorizado? */}
             <div className="flex flex-col items-center gap-1 p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[10px]">
@@ -666,10 +1254,11 @@ const DayRow: React.FC<DayRowProps> = ({
       {/* Incidencia, formatos, advertencias y acciones de resolución */}
       <td className="p-3 pr-4 font-sans min-w-[290px] align-top">
         <div className="flex flex-col gap-2">
-          {/* Bloqueo estricto para supervisores únicamente en días de Asistencia completa original o Descanso/Festivo sin modificar */}
+          {/* Bloqueo estricto para supervisores únicamente en días de Asistencia completa original o Descanso/Festivo sin modificar y sin anomalías */}
           {isSupervisorMode &&
           !day.modificadoPorSupervisor &&
           !day.huerfana &&
+          !anomalies.hasAnomalies &&
           ((day.incidencia === 'Asistencia' && tieneEntradaValida && tieneSalidaValida) ||
             day.incidencia === 'Descanso' ||
             day.incidencia === 'Festivo') ? (
@@ -698,7 +1287,9 @@ const DayRow: React.FC<DayRowProps> = ({
                     value={currentInc}
                     onChange={(e) => onChangeIncidence(e.target.value)}
                     className={`flex-1 text-xs rounded-md px-2 py-1 bg-slate-950 border outline-none transition-colors ${
-                      day.modificadoPorSupervisor
+                      anomalies.incidencia
+                        ? 'border-rose-500 text-rose-200 font-bold focus:border-rose-400'
+                        : day.modificadoPorSupervisor
                         ? 'border-purple-500/60 text-purple-200 font-semibold focus:border-purple-400'
                         : 'border-slate-800 text-slate-200 focus:border-amber-500/60'
                     }`}
@@ -713,6 +1304,46 @@ const DayRow: React.FC<DayRowProps> = ({
                   </select>
                 );
               })()}
+            </div>
+          )}
+
+          {/* ALERTA DE INCONSISTENCIA DE DATOS (PRE-EXPORTACIÓN) */}
+          {anomalies.hasAnomalies && (
+            <div
+              className={`p-2 rounded-lg border text-[10px] space-y-1.5 ${
+                anomalies.highestSeverity === 'critical'
+                  ? 'bg-rose-500/15 border-rose-500/45 text-rose-200'
+                  : 'bg-orange-500/15 border-orange-500/40 text-orange-200'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 font-bold">
+                <span className="flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                  <span>
+                    {anomalies.highestSeverity === 'critical'
+                      ? 'DATO INCONSISTENTE DETECTADO'
+                      : 'ADVERTENCIA DE RANGO / JORNADA'}
+                  </span>
+                </span>
+                {anomalies.canSwapInvertedPunches && (
+                  <button
+                    type="button"
+                    onClick={handleSwapTimes}
+                    className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-[9px] font-bold flex items-center gap-1 cursor-pointer shadow-sm"
+                  >
+                    <ArrowLeftRight className="w-3 h-3" />
+                    Invertir Entrada ⇄ Salida
+                  </button>
+                )}
+              </div>
+              <ul className="space-y-1 pl-1">
+                {anomalies.all.map((anom, idx) => (
+                  <li key={idx} className="leading-snug text-[10px] flex items-start gap-1.5">
+                    <span className="font-bold shrink-0">•</span>
+                    <span>{anom.detail}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -885,7 +1516,7 @@ const DayRow: React.FC<DayRowProps> = ({
 
           {/* Comentario rápido del día (bloqueado para supervisores si es Asistencia o Descanso) */}
           {onChangeNote && (
-            isSupervisorMode && (day.incidencia === 'Asistencia' || day.incidencia === 'Descanso' || day.incidencia === 'Festivo') ? null : (
+            isSupervisorMode && (day.incidencia === 'Asistencia' || day.incidencia === 'Descanso' || day.incidencia === 'Festivo') && !anomalies.hasAnomalies ? null : (
               <input
                 type="text"
                 value={day.notaSupervisorDia || ''}
@@ -919,3 +1550,4 @@ const DayRow: React.FC<DayRowProps> = ({
     </tr>
   );
 };
+

@@ -24,6 +24,7 @@ import {
   EventsDB, 
   OvertimeRulesConfig,
   PayrollSummary, 
+  ProcessedDay,
   ReadingMode, 
   ScheduleConfig 
 } from './types/attendance';
@@ -31,6 +32,7 @@ import {
   generatePayrollWeeks, 
   PayrollWeekOption,
   detectPayrollWeekFromDates,
+  getDateRangeISO,
   normalizeEmployeeId
 } from './utils/calendarUtils';
 
@@ -42,6 +44,8 @@ import {
   calcularMetricasDia,
   consolidarEventosConHorarios, 
   generarReporteAsistencia,
+  getScheduleForDay,
+  resolveScheduleCodeInCatalog,
   sincronizarReportesConHorarios
 } from './core/attendanceEngine';
 import { parseEmployeesFile } from './parsers/employeeParser';
@@ -64,7 +68,11 @@ import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseMod
 import { SendPayrollEmailModal } from './components/portal/SendPayrollEmailModal';
 import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
-import { DayResolutionPayload } from './components/portal/MissingPunchFormatModal';
+import {
+  DayResolutionPayload,
+  MissingPunchFormatModal,
+  ResolutionMode,
+} from './components/portal/MissingPunchFormatModal';
 import { WelcomeDashboard } from './components/portal/WelcomeDashboard';
 import {
   DispersionModeSelector,
@@ -178,6 +186,12 @@ export default function App() {
   const [isNewIncidentModalOpen, setIsNewIncidentModalOpen] = useState<boolean>(false);
   const [initialIncidentEmployeeId, setInitialIncidentEmployeeId] = useState<string | undefined>(undefined);
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState<boolean>(false);
+  const [globalFormatModalTarget, setGlobalFormatModalTarget] = useState<{
+    employee: Employee;
+    day: ProcessedDay;
+    mode: ResolutionMode;
+  } | null>(null);
+  const lastLocalReportEditAtRef = useRef<number>(0);
   const [isDisperseByListModalOpen, setIsDisperseByListModalOpen] = useState<boolean>(false);
   const [disperseByListMsg, setDisperseByListMsg] = useState<string>('');
   const [disperseSendEmail, setDisperseSendEmail] = useState<boolean>(true);
@@ -501,13 +515,12 @@ export default function App() {
     }
   }, [reportes, resumen, selectedWeek]);
 
-  // Guardar automáticamente en el servidor Hostinger KVM 2 cualquier cambio en empleados, checadas, reportes trabajados o configuración
+  // Guardar automáticamente en el servidor cualquier cambio en empleados, reportes trabajados o configuración
   useEffect(() => {
     if (!isServerHydrated) return;
     const timer = setTimeout(() => {
       PortalService.pushToServer({
         empleadosDB,
-        eventosDB,
         vacacionesDB,
         reportes,
         resumen,
@@ -525,7 +538,6 @@ export default function App() {
   }, [
     isServerHydrated,
     empleadosDB,
-    eventosDB,
     vacacionesDB,
     reportes,
     resumen,
@@ -535,6 +547,15 @@ export default function App() {
     config,
     emailConfig,
   ]);
+
+  // Sincronizar eventosDB al servidor únicamente cuando cambie el catálogo de checadas biométricas
+  useEffect(() => {
+    if (!isServerHydrated || Object.keys(eventosDB).length === 0) return;
+    const timer = setTimeout(() => {
+      PortalService.pushToServer({ eventosDB });
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [isServerHydrated, eventosDB]);
 
   // Revisión periódica (cada 45s) de alertas automáticas cuando el plazo de liberación está por vencer
   useEffect(() => {
@@ -582,15 +603,21 @@ export default function App() {
     return portalUsers.find(u => u.id === activeUserId) || portalUsers[0];
   }, [portalUsers, activeUserId]);
 
-  // Sincronización automática de incidencias y vacaciones aprobadas con el motor de cálculo
+  // Sincronización automática de incidencias y vacaciones aprobadas con el motor de cálculo (solo si hay cambios reales)
   useEffect(() => {
     const approvedVacations = PortalService.extractApprovedIncidentsAsVacationsDB(incidents);
     setVacacionesDB(prev => {
+      let hasChanges = false;
       const merged = { ...prev };
       Object.keys(approvedVacations).forEach(empId => {
-        merged[empId] = { ...(merged[empId] || {}), ...approvedVacations[empId] };
+        const nextEmpVac = { ...(merged[empId] || {}), ...approvedVacations[empId] };
+        const prevEmpVac = merged[empId] || {};
+        if (JSON.stringify(nextEmpVac) !== JSON.stringify(prevEmpVac)) {
+          hasChanges = true;
+          merged[empId] = nextEmpVac;
+        }
       });
-      return merged;
+      return hasChanges ? merged : prev;
     });
   }, [incidents]);
 
@@ -787,18 +814,53 @@ export default function App() {
         setReleases(incomingState.releases);
       }
 
-      // 6. Actualizar reportes en vivo si el supervisor o RH está visualizando la semana activa
+      // 6. Actualizar reportes en vivo si el supervisor o RH está visualizando la semana activa,
+      // protegiendo siempre cualquier edición local reciente o días modificados por el supervisor
       if (Array.isArray(incomingState.reportes) && incomingState.reportes.length > 0) {
+        if (Date.now() - lastLocalReportEditAtRef.current < 4000) {
+          return;
+        }
         const currentHorarios = StorageService.loadHorarios();
         const currentAsignaciones = StorageService.loadAsignaciones();
         const currentSavedEmps = StorageService.loadSavedEmployees()?.empleados || {};
-        const syncedIncoming = sincronizarReportesConHorarios(
-          incomingState.reportes as EmployeeReport[],
-          currentHorarios,
-          currentAsignaciones,
-          currentSavedEmps
-        );
-        setReportes(syncedIncoming);
+        setReportes(prevReportes => {
+          const mergedIncoming = (incomingState.reportes as EmployeeReport[]).map(incRep => {
+            const normId = normalizeEmployeeId(incRep?.empleado?.id);
+            const localRep = prevReportes.find(r => normalizeEmployeeId(r.empleado.id) === normId);
+            if (!localRep) return incRep;
+
+            const mergedDias = incRep.dias.map(incDay => {
+              const localDay = localRep.dias.find(d => d.isoDate === incDay.isoDate);
+              if (!localDay) return incDay;
+              const localEdited =
+                Boolean(localDay.modificadoPorSupervisor) ||
+                localDay.horasExtrasAutorizadas !== undefined ||
+                Boolean(localDay.notaSupervisorDia) ||
+                Boolean(localDay.formatoSubidoNombre);
+              const incEdited =
+                Boolean(incDay.modificadoPorSupervisor) ||
+                incDay.horasExtrasAutorizadas !== undefined ||
+                Boolean(incDay.notaSupervisorDia) ||
+                Boolean(incDay.formatoSubidoNombre);
+              if (localEdited && !incEdited) {
+                return localDay;
+              }
+              return incDay;
+            });
+
+            return {
+              ...incRep,
+              dias: mergedDias,
+            };
+          });
+
+          return sincronizarReportesConHorarios(
+            mergedIncoming,
+            currentHorarios,
+            currentAsignaciones,
+            currentSavedEmps
+          );
+        });
         if (incomingState.resumen) {
           setResumen(incomingState.resumen);
         }
@@ -1222,17 +1284,31 @@ export default function App() {
     }, 150);
   };
 
-  // Sincronizar snapshot de la dispersión activa cada vez que se modifica algún día del reporte
+  // Sincronizar snapshot de la dispersión activa y persistir inmediatamente reportes en el servidor cada vez que se modifica algún día
   const syncActiveDispersalSnapshot = useCallback(
-    (updatedReportes: EmployeeReport[], weekStr: string) => {
+    (updatedReportes: EmployeeReport[], weekStr: string, nextResumen?: PayrollSummary | null) => {
       if (updatedReportes.length === 0) return;
+      lastLocalReportEditAtRef.current = Date.now();
       const weekObj = payrollWeeks.find(w => w.value === weekStr);
       const weekNum = weekObj?.weekNumber;
-      if (!weekNum) return;
+
+      const serverReportPayload: Record<string, unknown> = {
+        reportes: updatedReportes,
+        ...(nextResumen !== undefined ? { resumen: nextResumen } : {}),
+        ...(weekStr ? { selectedWeek: weekStr } : {}),
+      };
+
+      if (!weekNum) {
+        PortalService.pushToServer(serverReportPayload);
+        return;
+      }
 
       setDispersals(prev => {
         const idx = prev.findIndex(d => d.semanaNumero === weekNum);
-        if (idx < 0) return prev;
+        if (idx < 0) {
+          PortalService.pushToServer(serverReportPayload);
+          return prev;
+        }
         const totalNorm = updatedReportes.reduce((s, r) => s + r.totalNormal, 0);
         const totalExt = updatedReportes.reduce((s, r) => s + r.totalExtra, 0);
         const next = [...prev];
@@ -1242,7 +1318,7 @@ export default function App() {
           totalHorasExtras: totalExt,
           reportesSnapshot: updatedReportes,
         };
-        PortalService.saveDispersals(next);
+        PortalService.saveDispersals(next, serverReportPayload);
         return next;
       });
     },
@@ -1251,9 +1327,22 @@ export default function App() {
 
   // Actualización en tiempo real y almacenamiento permanente de una incidencia editada por el usuario
   const handleUpdateDayIncidence = (employeeId: string, isoDate: string, newIncidence: string) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(employeeId) || employeeId;
+
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== employeeId) return rep;
+
+        const rawScheduleCode =
+          asignaciones[normRepId] ??
+          asignaciones[rep.empleado.id] ??
+          empleadosDB[normRepId]?.horario ??
+          rep.empleado.horario ??
+          '';
+        const activeScheduleCode =
+          resolveScheduleCodeInCatalog(horarios, rawScheduleCode) || 'ADMO';
 
         let sumN = 0;
         let sumE = 0;
@@ -1271,28 +1360,74 @@ export default function App() {
             return d;
           }
 
+          const effectiveHorario =
+            getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek) ?? d.horarioProgramado;
+          const origEnt = d.entradaOriginal ?? d.entrada;
+          const origSal = d.salidaOriginal ?? d.salida;
+
           const incUpper = newIncidence.toUpperCase();
           const isFalta = incUpper.includes('FALTA');
           const isSinGoce = incUpper.includes('SIN GOCE');
+          const isChecadaSinGafete = incUpper.includes('CHECAD');
           const isPaidOrJustified =
             newIncidence === 'Asistencia' ||
             incUpper.includes('VACACIONES') ||
             incUpper.includes('CON GOCE') ||
             incUpper.includes('PASE') ||
             incUpper.includes('INCAPACIDAD') ||
-            incUpper.includes('CHECAD') ||
+            isChecadaSinGafete ||
             incUpper.includes('RETARDO') ||
-            incUpper.includes('FESTIVO');
+            incUpper.includes('FESTIVO') ||
+            incUpper.includes('HOME OFFICE') ||
+            incUpper.includes('VIAJE') ||
+            incUpper.startsWith('OTRA:');
 
+          let nextEntrada = d.entrada;
+          let nextSalida = d.salida;
           let nextHNormal = d.hNormal;
           let nextHExtra = d.hExtra;
           let nextHorasExtrasAut = d.horasExtrasAutorizadas;
 
-          if (isFalta || isSinGoce || newIncidence === 'Descanso') {
+          if (isFalta || newIncidence === 'Descanso') {
+            nextEntrada = '--:--';
+            nextSalida = '--:--';
             nextHNormal = 0;
             nextHExtra = 0;
             nextHorasExtrasAut = false;
-          } else if (isPaidOrJustified && d.hNormal === 0 && d.horarioProgramado) {
+          } else if (isSinGoce) {
+            nextHNormal = 0;
+            nextHExtra = 0;
+            nextHorasExtrasAut = false;
+          } else if (isChecadaSinGafete || newIncidence === 'Asistencia') {
+            // Si elige Checada sin Gafete o Asistencia y faltaba alguna checada en un día con horario programado,
+            // completar con el horario programado del colaborador y calcular métricas
+            if ((!nextEntrada || nextEntrada === '--:--') && effectiveHorario?.entrada) {
+              nextEntrada = effectiveHorario.entrada;
+            }
+            if ((!nextSalida || nextSalida === '--:--') && effectiveHorario?.salida) {
+              nextSalida = effectiveHorario.salida;
+            }
+            if (nextEntrada && nextEntrada !== '--:--' && nextSalida && nextSalida !== '--:--') {
+              const isRST = Boolean(
+                eventosDB[normRepId]?.[isoDate]?.isRST || eventosDB[employeeId]?.[isoDate]?.isRST
+              );
+              const metricas = calcularMetricasDia(
+                nextEntrada,
+                nextSalida,
+                effectiveHorario,
+                config.jornadaBase,
+                isRST,
+                undefined,
+                isoDate,
+                Boolean(rawScheduleCode),
+                config.overtimeRules
+              );
+              nextHNormal = metricas.hNormal > 0 ? metricas.hNormal : config.jornadaBase || 8;
+              nextHExtra = metricas.hExtra;
+            } else if (nextHNormal === 0 && effectiveHorario) {
+              nextHNormal = config.jornadaBase || 8;
+            }
+          } else if (isPaidOrJustified && nextHNormal === 0 && effectiveHorario) {
             nextHNormal = config.jornadaBase || 8;
           }
 
@@ -1315,14 +1450,17 @@ export default function App() {
 
           const tipoMod = isFalta
             ? ('falta_confirmada' as const)
-            : incUpper.includes('CHECAD')
+            : isChecadaSinGafete
             ? ('formato_checada_sin_gafete' as const)
             : ('formato_permiso' as const);
 
           return {
             ...d,
-            entradaOriginal: d.entradaOriginal ?? d.entrada,
-            salidaOriginal: d.salidaOriginal ?? d.salida,
+            horarioProgramado: effectiveHorario,
+            entradaOriginal: origEnt,
+            salidaOriginal: origSal,
+            entrada: nextEntrada,
+            salida: nextSalida,
             incidencia: newIncidence,
             hNormal: nextHNormal,
             hExtra: nextHExtra,
@@ -1331,8 +1469,12 @@ export default function App() {
             rowClass,
             modificadoPorSupervisor: true,
             tipoModificacionSupervisor: tipoMod,
-            advertencia: newIncidence
-              ? `🟣 INCIDENCIA REGISTRADA: ${newIncidence.toUpperCase()}`
+            advertencia: isFalta
+              ? '🚫 FALTA CONFIRMADA POR SUPERVISOR (El trabajador no se presentó)'
+              : isChecadaSinGafete
+              ? '🟣 CHECADA SIN GAFETE VALIDADA POR SUPERVISOR'
+              : newIncidence
+              ? `📋 ${newIncidence.toUpperCase()} REGISTRADO POR SUPERVISOR`
               : '',
           };
         });
@@ -1358,21 +1500,34 @@ export default function App() {
         resumen: nextResumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
       return updated;
     });
 
     setStatusMessage(
-      `✓ Incidencia "${newIncidence || 'Sin incidencia'}" guardada y almacenada para colaborador #${employeeId} (${isoDate})`
+      `✓ Incidencia "${newIncidence || 'Sin incidencia'}" guardada y almacenada para colaborador #${normTargetId} (${isoDate})`
     );
     setStatusType('success');
   };
 
   // Actualización en tiempo real cuando el usuario corrige o intercambia Entrada / Salida manualmente en la tabla
   const handleUpdateDayTimes = (employeeId: string, isoDate: string, newEntrada: string, newSalida: string) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(employeeId) || employeeId;
+
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== employeeId) return rep;
+
+        const rawScheduleCode =
+          asignaciones[normRepId] ??
+          asignaciones[rep.empleado.id] ??
+          empleadosDB[normRepId]?.horario ??
+          rep.empleado.horario ??
+          '';
+        const activeScheduleCode =
+          resolveScheduleCodeInCatalog(horarios, rawScheduleCode) || 'ADMO';
 
         let sumN = 0;
         let sumE = 0;
@@ -1390,17 +1545,21 @@ export default function App() {
             return d;
           }
 
-          const vca = vacacionesDB[employeeId]?.[isoDate];
-          const isRST = Boolean(eventosDB[employeeId]?.[isoDate]?.isRST);
+          const effectiveHorario =
+            getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek) ?? d.horarioProgramado;
+          const vca = vacacionesDB[normRepId]?.[isoDate] ?? vacacionesDB[employeeId]?.[isoDate];
+          const isRST = Boolean(
+            eventosDB[normRepId]?.[isoDate]?.isRST || eventosDB[employeeId]?.[isoDate]?.isRST
+          );
           const metricas = calcularMetricasDia(
             newEntrada,
             newSalida,
-            d.horarioProgramado,
+            effectiveHorario,
             config.jornadaBase,
             isRST,
             vca,
             isoDate,
-            Boolean(rep.empleado.horario),
+            Boolean(rawScheduleCode),
             config.overtimeRules
           );
 
@@ -1418,13 +1577,14 @@ export default function App() {
 
           return {
             ...d,
+            horarioProgramado: effectiveHorario,
             entradaOriginal: origEnt,
             salidaOriginal: origSal,
             entrada: newEntrada,
             salida: newSalida,
             hNormal: metricas.hNormal,
             hExtra: metricas.hExtra,
-            incidencia: metricas.incidencia,
+            incidencia: metricas.incidencia === 'Falta' && wasModified ? 'Checada sin Gafete' : metricas.incidencia,
             advertencia: wasModified
               ? d.formatoSubidoNombre
                 ? `🟣 CHECADA AGREGADA POR SUPERVISOR (Formato: ${d.formatoSubidoNombre})`
@@ -1460,7 +1620,7 @@ export default function App() {
         resumen: nextResumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
       return updated;
     });
 
@@ -1470,9 +1630,13 @@ export default function App() {
 
   // Actualizar nota o comentario del supervisor en un día específico y preservarlo
   const handleUpdateDayNote = (employeeId: string, isoDate: string, note: string) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(employeeId) || employeeId;
+
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== employeeId) return rep;
         return {
           ...rep,
           dias: rep.dias.map(d =>
@@ -1491,16 +1655,20 @@ export default function App() {
         resumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, resumen);
       return updated;
     });
   };
 
   // Autorizar o desautorizar tiempo extra detectado por el supervisor y recalcular el total de horas extras en tiempo real
   const handleToggleOvertimeApproval = (employeeId: string, isoDate: string, autorizada: boolean) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(employeeId) || employeeId;
+
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== employeeId) return rep;
         const updatedDias = rep.dias.map(d => {
           if (d.isoDate !== isoDate) return d;
           return {
@@ -1527,22 +1695,26 @@ export default function App() {
         resumen: nextResumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
       return updated;
     });
     setStatusMessage(
       autorizada
-        ? `✓ Tiempo extra AUTORIZADO para #${employeeId}. Se sumó al total de Horas Extras y generará clave en CONTPAQi.`
-        : `✕ Tiempo extra marcado como NO AUTORIZADO para #${employeeId}. No se computa en el total ni en CONTPAQi.`
+        ? `✓ Tiempo extra AUTORIZADO para #${normTargetId}. Se sumó al total de Horas Extras y generará clave en CONTPAQi.`
+        : `✕ Tiempo extra marcado como NO AUTORIZADO para #${normTargetId}. No se computa en el total ni en CONTPAQi.`
     );
     setStatusType(autorizada ? 'success' : 'info');
   };
 
   // Confirmar rápidamente que el trabajador NO vino ese día laboral ("Es Falta")
   const handleQuickConfirmFalta = (employeeId: string, isoDate: string) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(employeeId) || employeeId;
+
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== employeeId) return rep;
 
         let sumN = 0;
         let sumE = 0;
@@ -1601,7 +1773,7 @@ export default function App() {
         resumen: nextResumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
       return updated;
     });
 
@@ -1611,15 +1783,32 @@ export default function App() {
 
   // Resolver un día laboral sin las 2 checadas desde el asistente "¿Quieres hacer un formato?"
   const handleResolveMissingPunchDay = (payload: DayResolutionPayload) => {
+    lastLocalReportEditAtRef.current = Date.now();
+    const normTargetId = normalizeEmployeeId(payload.employeeId) || payload.employeeId;
     const empObj =
+      empleadosDB[normTargetId] ||
       empleadosDB[payload.employeeId] ||
-      reportes.find(r => r.empleado.id === payload.employeeId)?.empleado;
-    const empName = empObj?.nombre || `Colaborador #${payload.employeeId}`;
+      reportes.find(
+        r =>
+          normalizeEmployeeId(r.empleado.id) === normTargetId ||
+          r.empleado.id === payload.employeeId
+      )?.empleado;
+    const empName = empObj?.nombre || `Colaborador #${normTargetId}`;
     const supName = empObj?.jefe || currentSupervisorForRelease;
 
     setReportes(prevReportes => {
       const updated = prevReportes.map(rep => {
-        if (rep.empleado.id !== payload.employeeId) return rep;
+        const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+        if (normRepId !== normTargetId && rep.empleado.id !== payload.employeeId) return rep;
+
+        const rawScheduleCode =
+          asignaciones[normRepId] ??
+          asignaciones[rep.empleado.id] ??
+          empleadosDB[normRepId]?.horario ??
+          rep.empleado.horario ??
+          '';
+        const activeScheduleCode =
+          resolveScheduleCodeInCatalog(horarios, rawScheduleCode) || 'ADMO';
 
         let sumN = 0;
         let sumE = 0;
@@ -1637,6 +1826,8 @@ export default function App() {
             return d;
           }
 
+          const effectiveHorario =
+            getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek) ?? d.horarioProgramado;
           const origEnt = d.entradaOriginal ?? d.entrada;
           const origSal = d.salidaOriginal ?? d.salida;
 
@@ -1644,6 +1835,7 @@ export default function App() {
             empFaltas++;
             return {
               ...d,
+              horarioProgramado: effectiveHorario,
               entradaOriginal: origEnt,
               salidaOriginal: origSal,
               entrada: '--:--',
@@ -1675,17 +1867,20 @@ export default function App() {
               payload.entrada !== '' &&
               payload.salida !== '';
 
-            const isRST = Boolean(eventosDB[payload.employeeId]?.[payload.isoDate]?.isRST);
+            const isRST = Boolean(
+              eventosDB[normRepId]?.[payload.isoDate]?.isRST ||
+                eventosDB[payload.employeeId]?.[payload.isoDate]?.isRST
+            );
             const metricas = hasValidTimes
               ? calcularMetricasDia(
                   payload.entrada,
                   payload.salida,
-                  d.horarioProgramado,
+                  effectiveHorario,
                   config.jornadaBase,
                   isRST,
                   vcaLabel,
                   payload.isoDate,
-                  Boolean(rep.empleado.horario),
+                  Boolean(rawScheduleCode),
                   config.overtimeRules
                 )
               : {
@@ -1699,10 +1894,11 @@ export default function App() {
 
             sumN += metricas.hNormal;
             if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
-            empAsist++;
+            if (metricas.hNormal > 0) empAsist++;
 
             return {
               ...d,
+              horarioProgramado: effectiveHorario,
               entradaOriginal: origEnt,
               salidaOriginal: origSal,
               entrada: hasValidTimes ? payload.entrada : d.entrada,
@@ -1712,7 +1908,7 @@ export default function App() {
               incidencia: vcaLabel,
               advertencia: `📋 ${vcaLabel.toUpperCase()} REGISTRADO POR SUPERVISOR`,
               huerfana: false,
-              rowClass: 'row-success' as const,
+              rowClass: payload.tipoIncidencia === 'Permiso sin goce' ? ('row-warning' as const) : ('row-success' as const),
               modificadoPorSupervisor: true,
               tipoModificacionSupervisor: 'formato_permiso' as const,
               notaSupervisorDia: payload.motivo,
@@ -1722,39 +1918,49 @@ export default function App() {
           }
 
           // Modo 'checada_sin_gafete'
-          const isRST = Boolean(eventosDB[payload.employeeId]?.[payload.isoDate]?.isRST);
+          const isRST = Boolean(
+            eventosDB[normRepId]?.[payload.isoDate]?.isRST ||
+              eventosDB[payload.employeeId]?.[payload.isoDate]?.isRST
+          );
           const metricas = calcularMetricasDia(
             payload.entrada,
             payload.salida,
-            d.horarioProgramado,
+            effectiveHorario,
             config.jornadaBase,
             isRST,
             undefined,
             payload.isoDate,
-            Boolean(rep.empleado.horario),
+            Boolean(rawScheduleCode),
             config.overtimeRules
           );
 
-          sumN += metricas.hNormal;
+          const resolvedHNormal =
+            metricas.hNormal > 0 ? metricas.hNormal : effectiveHorario ? config.jornadaBase : 0;
+
+          sumN += resolvedHNormal;
           if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
-          if (metricas.incidencia === 'Asistencia') empAsist++;
+          if (metricas.incidencia === 'Asistencia' || resolvedHNormal > 0) empAsist++;
           else if (metricas.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
           else if (metricas.incidencia.toUpperCase().includes('RETARDO')) empRet++;
 
           return {
             ...d,
+            horarioProgramado: effectiveHorario,
             entradaOriginal: origEnt,
             salidaOriginal: origSal,
             entrada: payload.entrada,
             salida: payload.salida,
-            hNormal: metricas.hNormal,
+            hNormal: resolvedHNormal,
             hExtra: metricas.hExtra,
-            incidencia: metricas.incidencia === 'Falta' ? 'Checada sin Gafete' : metricas.incidencia,
+            incidencia:
+              metricas.incidencia === 'Falta' || metricas.incidencia === 'Asistencia'
+                ? 'Checada sin Gafete'
+                : metricas.incidencia,
             advertencia: payload.archivoNombre
               ? `🟣 CHECADA AGREGADA POR SUPERVISOR (Respaldo: ${payload.archivoNombre})`
               : '🟣 CHECADA COMPLETADA POR SUPERVISOR (Faltaba 1 checada - Formato opcional)',
-            huerfana: metricas.huerfana,
-            rowClass: metricas.rowClass,
+            huerfana: false,
+            rowClass: 'row-success' as const,
             modificadoPorSupervisor: true,
             tipoModificacionSupervisor: 'formato_checada_sin_gafete' as const,
             notaSupervisorDia: payload.motivo,
@@ -1784,7 +1990,7 @@ export default function App() {
         resumen: nextResumen,
         selectedWeek,
       });
-      syncActiveDispersalSnapshot(updated, selectedWeek);
+      syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
       return updated;
     });
 
@@ -2591,6 +2797,180 @@ export default function App() {
     showToast('El usuario fue removido del sistema.', 'info', 'Usuario Eliminado');
   };
 
+  // Aplicar una solicitud de incidencia (creada o aprobada) directamente sobre los días de la nómina activa
+  const applyIncidentToActiveReports = useCallback(
+    (inc: IncidentRequest) => {
+      if (inc.tipo === 'Cambio de horario') return;
+      const normEmpId = normalizeEmployeeId(inc.empleadoId) || inc.empleadoId;
+      const endIso =
+        !inc.fechaFin || inc.fechaFin === 'INDEFINIDO' ? inc.fechaInicio : inc.fechaFin;
+      const targetDates = new Set(getDateRangeISO(inc.fechaInicio, endIso));
+      if (targetDates.size === 0) return;
+
+      lastLocalReportEditAtRef.current = Date.now();
+
+      setReportes(prevReportes => {
+        if (prevReportes.length === 0) return prevReportes;
+        let anyModified = false;
+
+        const updated = prevReportes.map(rep => {
+          const normRepId = normalizeEmployeeId(rep.empleado.id) || rep.empleado.id;
+          if (normRepId !== normEmpId && rep.empleado.id !== inc.empleadoId) return rep;
+
+          const rawScheduleCode =
+            asignaciones[normRepId] ??
+            asignaciones[rep.empleado.id] ??
+            empleadosDB[normRepId]?.horario ??
+            rep.empleado.horario ??
+            '';
+          const activeScheduleCode =
+            resolveScheduleCodeInCatalog(horarios, rawScheduleCode) || 'ADMO';
+
+          let sumN = 0;
+          let sumE = 0;
+          let empAsist = 0;
+          let empFaltas = 0;
+          let empRet = 0;
+
+          const updatedDias = rep.dias.map(d => {
+            if (!targetDates.has(d.isoDate)) {
+              sumN += d.hNormal;
+              if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
+              if (d.incidencia === 'Asistencia') empAsist++;
+              else if (d.incidencia.toUpperCase().includes('FALTA')) empFaltas++;
+              else if (d.incidencia.toUpperCase().includes('RETARDO')) empRet++;
+              return d;
+            }
+
+            anyModified = true;
+            const effectiveHorario =
+              getScheduleForDay(horarios, activeScheduleCode, d.dayOfWeek) ?? d.horarioProgramado;
+            const origEnt = d.entradaOriginal ?? d.entrada;
+            const origSal = d.salidaOriginal ?? d.salida;
+
+            if (inc.tipo === 'Checado sin Gafete') {
+              const ent =
+                inc.entradaPropuesta && inc.entradaPropuesta !== '--:--'
+                  ? inc.entradaPropuesta
+                  : d.entrada && d.entrada !== '--:--'
+                  ? d.entrada
+                  : effectiveHorario?.entrada || '08:00';
+              const sal =
+                inc.salidaPropuesta && inc.salidaPropuesta !== '--:--'
+                  ? inc.salidaPropuesta
+                  : d.salida && d.salida !== '--:--'
+                  ? d.salida
+                  : effectiveHorario?.salida || '17:00';
+              const isRST = Boolean(eventosDB[normRepId]?.[d.isoDate]?.isRST);
+              const metricas = calcularMetricasDia(
+                ent,
+                sal,
+                effectiveHorario,
+                config.jornadaBase,
+                isRST,
+                undefined,
+                d.isoDate,
+                Boolean(rawScheduleCode),
+                config.overtimeRules
+              );
+              const resolvedHNormal =
+                metricas.hNormal > 0 ? metricas.hNormal : effectiveHorario ? config.jornadaBase : 0;
+
+              sumN += resolvedHNormal;
+              if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
+              empAsist++;
+
+              return {
+                ...d,
+                horarioProgramado: effectiveHorario,
+                entradaOriginal: origEnt,
+                salidaOriginal: origSal,
+                entrada: ent,
+                salida: sal,
+                hNormal: resolvedHNormal,
+                hExtra: metricas.hExtra,
+                incidencia: 'Checada sin Gafete',
+                advertencia: inc.archivoFormatoNombre
+                  ? `🟣 CHECADA AGREGADA POR SUPERVISOR (Respaldo: ${inc.archivoFormatoNombre})`
+                  : '🟣 CHECADA SIN GAFETE REGISTRADA POR SUPERVISOR',
+                huerfana: false,
+                rowClass: 'row-success' as const,
+                modificadoPorSupervisor: true,
+                tipoModificacionSupervisor: 'formato_checada_sin_gafete' as const,
+                notaSupervisorDia: inc.motivo || d.notaSupervisorDia,
+                formatoSubidoNombre: inc.archivoFormatoNombre || d.formatoSubidoNombre,
+                formatoSubidoBase64: inc.archivoFormatoBase64 || d.formatoSubidoBase64,
+              };
+            }
+
+            const vcaLabel =
+              inc.tipo === 'Otro' && inc.especificacionOtro
+                ? `Otra: ${inc.especificacionOtro}`
+                : inc.tipo;
+            const isSinGoce = vcaLabel.toUpperCase().includes('SIN GOCE');
+            const nextHNormal = isSinGoce ? 0 : effectiveHorario ? config.jornadaBase : d.hNormal;
+
+            sumN += nextHNormal;
+            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
+            if (!isSinGoce && nextHNormal > 0) empAsist++;
+
+            return {
+              ...d,
+              horarioProgramado: effectiveHorario,
+              entradaOriginal: origEnt,
+              salidaOriginal: origSal,
+              hNormal: nextHNormal,
+              hExtra: isSinGoce ? 0 : d.hExtra,
+              incidencia: vcaLabel,
+              advertencia: `📋 ${vcaLabel.toUpperCase()} REGISTRADO (${inc.status === 'aprobada' ? 'APROBADO' : 'EN REVISIÓN RH'})`,
+              huerfana: false,
+              rowClass: isSinGoce ? ('row-warning' as const) : ('row-success' as const),
+              modificadoPorSupervisor: true,
+              tipoModificacionSupervisor: 'formato_permiso' as const,
+              notaSupervisorDia: inc.motivo || d.notaSupervisorDia,
+              formatoSubidoNombre: inc.archivoFormatoNombre || d.formatoSubidoNombre,
+              formatoSubidoBase64: inc.archivoFormatoBase64 || d.formatoSubidoBase64,
+            };
+          });
+
+          return {
+            ...rep,
+            dias: updatedDias,
+            totalNormal: sumN,
+            totalExtra: sumE,
+            asistencias: empAsist,
+            faltas: empFaltas,
+            retardos: empRet,
+            asistenciaPerfecta: empFaltas === 0 && empRet === 0 && empAsist > 0,
+          };
+        });
+
+        if (!anyModified) return prevReportes;
+
+        const nextResumen = recomputeSummaryFromReports(updated);
+        setResumen(nextResumen);
+        StorageService.saveReportesState({
+          reportes: updated,
+          resumen: nextResumen,
+          selectedWeek,
+        });
+        syncActiveDispersalSnapshot(updated, selectedWeek, nextResumen);
+        return updated;
+      });
+    },
+    [
+      asignaciones,
+      config.jornadaBase,
+      config.overtimeRules,
+      empleadosDB,
+      eventosDB,
+      horarios,
+      recomputeSummaryFromReports,
+      selectedWeek,
+      syncActiveDispersalSnapshot,
+    ]
+  );
+
   // Incidencias (Aprobar, Rechazar, Crear)
   const handleApproveIncident = (incidentId: string, notes?: string) => {
     const targetInc = incidents.find(i => i.id === incidentId);
@@ -2611,6 +2991,7 @@ export default function App() {
       return updated;
     });
     if (targetInc) {
+      applyIncidentToActiveReports({ ...targetInc, status: 'aprobada' });
       const supNotif: PortalNotification = {
         id: `notif_inc_ok_${incidentId}_${Date.now()}`,
         targetSupervisor: (targetInc.supervisorNombre || 'ALL').toUpperCase(),
@@ -2724,21 +3105,9 @@ export default function App() {
         PortalService.saveNotifications(updatedNotifs);
         return updatedNotifs;
       });
-    }
-
-    // Si es Checado sin Gafete auto-aprobado por supervisor, reflejar la hora en la tabla activa si existe
-    if (
-      newIncident.autoAprobadaPorSupervisor &&
-      newIncident.tipo === 'Checado sin Gafete' &&
-      newIncident.entradaPropuesta &&
-      newIncident.salidaPropuesta
-    ) {
-      handleUpdateDayTimes(
-        newIncident.empleadoId,
-        newIncident.fechaInicio,
-        newIncident.entradaPropuesta,
-        newIncident.salidaPropuesta
-      );
+    } else {
+      // Reflejar inmediatamente la incidencia (Checado sin Gafete, Permiso, Vacaciones, etc.) en la lista activa
+      applyIncidentToActiveReports(newIncident);
     }
 
     setIsNewIncidentModalOpen(false);
@@ -2759,9 +3128,9 @@ export default function App() {
         'Cambio de Horario Solicitado'
       );
     } else {
-      setStatusMessage('✓ Solicitud de incidencia enviada exitosamente a RH para revisión');
+      setStatusMessage('✓ Solicitud de incidencia aplicada en la lista y enviada a RH para revisión');
       setStatusType('success');
-      showToast('Solicitud de incidencia enviada exitosamente a Recursos Humanos / Nóminas.', 'success', 'Incidencia Registrada');
+      showToast('Solicitud de incidencia registrada en la lista y enviada a Recursos Humanos / Nóminas.', 'success', 'Incidencia Registrada');
     }
   };
 
@@ -3592,6 +3961,9 @@ export default function App() {
                   onUpdateDayIncidence={handleUpdateDayIncidence}
                   onUpdateDayTimes={handleUpdateDayTimes}
                   onUpdateDayNote={handleUpdateDayNote}
+                  onOpenFormatAssistant={(employee, day, mode) =>
+                    setGlobalFormatModalTarget({ employee, day, mode })
+                  }
                   onQuickConfirmFalta={handleQuickConfirmFalta}
                   horarios={horarios}
                   onAssignSchedule={handleAssignIndividual}
@@ -3950,6 +4322,21 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal Asistente Global de Formato de Checada / Permiso / Falta para el módulo de Nómina */}
+      {globalFormatModalTarget && (
+        <MissingPunchFormatModal
+          employee={globalFormatModalTarget.employee}
+          day={globalFormatModalTarget.day}
+          initialMode={globalFormatModalTarget.mode}
+          supervisorName={globalFormatModalTarget.employee.jefe || currentSupervisorForRelease || 'SUPERVISOR'}
+          onClose={() => setGlobalFormatModalTarget(null)}
+          onConfirmResolution={(payload) => {
+            handleResolveMissingPunchDay(payload);
+            setGlobalFormatModalTarget(null);
+          }}
+        />
       )}
 
       {/* Notificaciones flotantes Toast para acciones masivas y feedback visual */}

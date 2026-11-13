@@ -184,6 +184,7 @@ export class StorageService {
     resumen: PayrollSummary | null;
     selectedWeek?: string;
   }): void {
+    const nowISO = new Date().toISOString();
     try {
       localStorage.setItem(
         STORAGE_KEYS.REPORTES_STATE,
@@ -191,11 +192,33 @@ export class StorageService {
           reportes: state.reportes,
           resumen: state.resumen,
           selectedWeek: state.selectedWeek,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowISO,
         })
       );
-    } catch (e) {
-      console.warn('Error saving reportes state to localStorage', e);
+    } catch {
+      // Si se excede la cuota de 5MB de localStorage (ej. por adjuntos base64 o catálogos grandes),
+      // guardar versión compacta preservando todas las incidencias, checadas y ediciones del supervisor
+      try {
+        const compactReportes = state.reportes.map(rep => ({
+          ...rep,
+          dias: rep.dias.map(d => ({
+            ...d,
+            registrosCrudosDia: undefined,
+            formatoSubidoBase64: undefined,
+          })),
+        }));
+        localStorage.setItem(
+          STORAGE_KEYS.REPORTES_STATE,
+          JSON.stringify({
+            reportes: compactReportes,
+            resumen: state.resumen,
+            selectedWeek: state.selectedWeek,
+            updatedAt: nowISO,
+          })
+        );
+      } catch (err) {
+        console.warn('Error saving compact reportes state to localStorage', err);
+      }
     }
   }
 

@@ -981,6 +981,10 @@ export function sincronizarReportesConHorarios(
       );
 
       const incUpper = (d.incidencia || '').toUpperCase();
+      const tieneEntValida = Boolean(d.entrada && d.entrada !== '--:--');
+      const tieneSalValida = Boolean(d.salida && d.salida !== '--:--');
+      const tieneAmbasChecadas = tieneEntValida && tieneSalValida;
+
       const isExplicitSupervisorAbsence =
         Boolean(d.modificadoPorSupervisor) &&
         (d.tipoModificacionSupervisor === 'falta_confirmada' ||
@@ -988,14 +992,14 @@ export function sincronizarReportesConHorarios(
           incUpper.includes('SIN GOCE') ||
           d.incidencia === 'Descanso');
 
-      const isExplicitSupervisorPaidLeaveWithoutPunches =
+      const isExplicitSupervisorJustifiedWithoutBothPunches =
         Boolean(d.modificadoPorSupervisor) &&
-        (d.entrada === '--:--' || !d.entrada || d.salida === '--:--' || !d.salida) &&
+        !isExplicitSupervisorAbsence &&
+        !tieneAmbasChecadas &&
         (d.tipoModificacionSupervisor === 'formato_permiso' ||
-          incUpper.includes('VACACIONES') ||
-          incUpper.includes('CON GOCE') ||
-          incUpper.includes('INCAPACIDAD') ||
-          incUpper.includes('PASE'));
+          d.tipoModificacionSupervisor === 'formato_checada_sin_gafete' ||
+          d.tipoModificacionSupervisor === 'checada_agregada' ||
+          Boolean(d.incidencia));
 
       let nextHNormal = metricas.hNormal;
       let nextHExtra = metricas.hExtra;
@@ -1010,28 +1014,28 @@ export function sincronizarReportesConHorarios(
         nextIncidencia = d.incidencia;
         nextAdvertencia = d.advertencia;
         nextHuerfana = false;
-        nextRowClass = d.rowClass;
-      } else if (isExplicitSupervisorPaidLeaveWithoutPunches) {
-        nextHNormal = d.hNormal > 0 ? d.hNormal : jornadaBase;
-        nextHExtra = 0;
-        nextIncidencia = d.incidencia;
-        nextAdvertencia = d.advertencia;
-        nextHuerfana = false;
-        nextRowClass = d.rowClass;
-      } else if (d.modificadoPorSupervisor && !scheduleChanged) {
-        // Si el supervisor agregó checada o modificó incidencia en este día,
-        // siempre usamos las horas normales y extras calculadas con el horario programado vigente (`expectedHorario`),
-        // pero respetamos la etiqueta de incidencia elegida por el supervisor.
+        nextRowClass = d.rowClass || 'row-danger';
+      } else if (isExplicitSupervisorJustifiedWithoutBothPunches) {
+        nextHNormal = d.hNormal > 0 ? d.hNormal : expectedHorario ? jornadaBase : 0;
+        nextHExtra = d.hExtra || 0;
         nextIncidencia = d.incidencia || metricas.incidencia;
         nextAdvertencia = d.advertencia;
-        nextHuerfana = d.huerfana;
-        nextRowClass = d.rowClass;
-      } else if (d.modificadoPorSupervisor && scheduleChanged) {
-        // Si cambió el horario programado del empleado, recalculamos horas con el nuevo horario
-        // y conservamos la incidencia manual solo si hubo un tipoModificacionSupervisor explícito
-        if (d.tipoModificacionSupervisor) {
-          nextIncidencia = d.incidencia || metricas.incidencia;
-        }
+        nextHuerfana = false;
+        nextRowClass = d.rowClass || 'row-success';
+      } else if (d.modificadoPorSupervisor) {
+        // Tiene ambas checadas y fue modificado por el supervisor (ej. Checada sin Gafete o Permiso con checadas):
+        // usamos las horas calculadas con el horario vigente y preservamos la elección del supervisor.
+        nextHNormal = metricas.hNormal > 0 ? metricas.hNormal : d.hNormal;
+        nextHExtra = metricas.hExtra;
+        nextIncidencia =
+          d.incidencia && !d.incidencia.toUpperCase().includes('FALTA')
+            ? d.incidencia
+            : metricas.incidencia === 'Falta'
+            ? 'Checada sin Gafete'
+            : metricas.incidencia;
+        nextAdvertencia = d.advertencia || metricas.advertencia;
+        nextHuerfana = false;
+        nextRowClass = d.rowClass || metricas.rowClass;
       }
 
       sumNormal += nextHNormal;
@@ -1040,7 +1044,13 @@ export function sincronizarReportesConHorarios(
       }
 
       const finalIncUp = (nextIncidencia || '').toUpperCase();
-      if (nextIncidencia === 'Asistencia') {
+      if (
+        nextIncidencia === 'Asistencia' ||
+        (Boolean(d.modificadoPorSupervisor) &&
+          !isExplicitSupervisorAbsence &&
+          !finalIncUp.includes('RETARDO') &&
+          nextHNormal > 0)
+      ) {
         countAsist++;
       } else if (finalIncUp.includes('FALTA')) {
         countFaltas++;
