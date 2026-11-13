@@ -8,6 +8,7 @@ export type UserRole = 'admin' | 'rh' | 'supervisor';
 export type PortalModule = 
   | 'nomina'            // Módulo de Dispersión y Cálculo Global de Nómina
   | 'trabajar_listas'   // Módulo para Trabajar y Liberar Listas de Nómina Asignadas
+  | 'empleados'         // Padrón Permanente de Empleados y Asignación de Listas (Multi-Empresa)
   | 'semaforo'          // Semáforo de Nóminas y Monitoreo
   | 'incidencias'       // Bandeja de Incidencias
   | 'contpaqi'          // Exportador CONTPAQi® Nóminas
@@ -20,6 +21,7 @@ export type PortalModule =
 export const ALL_PORTAL_MODULES: PortalModule[] = [
   'nomina',
   'trabajar_listas',
+  'empleados',
   'semaforo',
   'incidencias',
   'contpaqi',
@@ -40,6 +42,11 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
     short: 'Trabajar Listas',
     title: 'Módulo para Trabajar Listas',
     description: 'Revisar asistencia, justificar faltas, autorizar extras y liberar las listas asignadas',
+  },
+  empleados: {
+    short: 'Empleados y Listas',
+    title: 'Padrón de Empleados y Listas',
+    description: 'Consultar qué lista tiene cada empleado, gestionar múltiples empresas y reasignar listas permanentemente',
   },
   semaforo: {
     short: 'Semáforo',
@@ -123,11 +130,19 @@ export function getUserAllowedModules(user: PortalUser): PortalModule[] {
     ) {
       return ['trabajar_listas', 'incidencias'];
     }
+    // Migración transparente: usuarios RH o con permiso de Dispersión ('nomina') obtienen acceso al Padrón ('empleados')
+    if (
+      (user.role === 'rh' || user.allowedModules.includes('nomina')) &&
+      !user.allowedModules.includes('empleados')
+    ) {
+      return [...user.allowedModules, 'empleados'];
+    }
     return user.allowedModules;
   }
   if (user.role === 'rh') {
     return [
       'nomina',
+      'empleados',
       'semaforo',
       'incidencias',
       'contpaqi',

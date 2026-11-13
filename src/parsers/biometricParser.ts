@@ -248,3 +248,90 @@ export async function parseBiometricEventsFile(
 
   return { eventosDB, totalEventos };
 }
+
+/**
+ * Fusiona dos bases de eventos biométricos (por ej. al subir las bases de datos de 2 empresas distintas)
+ * conservando todas las checadas de ambos archivos sin duplicar registros del mismo minuto/código.
+ */
+export function mergeEventsDB(base: EventsDB, incoming: EventsDB): EventsDB {
+  const merged: EventsDB = {};
+
+  const cloneDay = (d: EventsDB[string][string]): EventsDB[string][string] => ({
+    entradas: Object.fromEntries(
+      Object.entries(d.entradas || {}).map(([k, arr]) => [k, [...(arr || [])]])
+    ),
+    salidas: Object.fromEntries(
+      Object.entries(d.salidas || {}).map(([k, arr]) => [k, [...(arr || [])]])
+    ),
+    rstHoras: [...(d.rstHoras || [])],
+    registrosCrudos: (d.registrosCrudos || []).map(r => ({ ...r })),
+    isRST: Boolean(d.isRST),
+    ret: Boolean(d.ret),
+    todas: [...(d.todas || [])],
+    entradaFinal: d.entradaFinal,
+    salidaFinal: d.salidaFinal,
+  });
+
+  Object.entries(base || {}).forEach(([empId, empDates]) => {
+    merged[empId] = {};
+    Object.entries(empDates || {}).forEach(([iso, day]) => {
+      if (day) merged[empId][iso] = cloneDay(day);
+    });
+  });
+
+  Object.entries(incoming || {}).forEach(([empId, empDates]) => {
+    if (!merged[empId]) merged[empId] = {};
+    Object.entries(empDates || {}).forEach(([iso, incDay]) => {
+      if (!incDay) return;
+      const existing = merged[empId][iso];
+      if (!existing) {
+        merged[empId][iso] = cloneDay(incDay);
+        return;
+      }
+
+      // Combinar registrosCrudos sin duplicados
+      (incDay.registrosCrudos || []).forEach(r => {
+        const exists = existing.registrosCrudos.some(
+          er => er.hora === r.hora && er.codigo === r.codigo
+        );
+        if (!exists) {
+          existing.registrosCrudos.push({ ...r });
+        }
+      });
+      existing.registrosCrudos.sort((a, b) => timeToMinutes(a.hora) - timeToMinutes(b.hora));
+
+      // Combinar entradas
+      Object.entries(incDay.entradas || {}).forEach(([code, hours]) => {
+        if (!existing.entradas[code]) existing.entradas[code] = [];
+        (hours || []).forEach(h => {
+          if (!existing.entradas[code].includes(h)) {
+            existing.entradas[code].push(h);
+          }
+        });
+      });
+
+      // Combinar salidas
+      Object.entries(incDay.salidas || {}).forEach(([code, hours]) => {
+        if (!existing.salidas[code]) existing.salidas[code] = [];
+        (hours || []).forEach(h => {
+          if (!existing.salidas[code].includes(h)) {
+            existing.salidas[code].push(h);
+          }
+        });
+      });
+
+      // Combinar rstHoras
+      (incDay.rstHoras || []).forEach(h => {
+        if (!existing.rstHoras.includes(h)) {
+          existing.rstHoras.push(h);
+        }
+      });
+
+      existing.isRST = Boolean(existing.isRST || incDay.isRST);
+      existing.ret = Boolean(existing.ret || incDay.ret);
+    });
+  });
+
+  return merged;
+}
+

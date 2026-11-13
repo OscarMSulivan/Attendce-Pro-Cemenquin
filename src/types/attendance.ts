@@ -24,6 +24,10 @@ export interface Employee {
   tipoHorario?: string;
   puesto?: string;
   turno?: string;
+  empresa?: string; // Nombre de la empresa o razón social origen (soporte multi-empresa)
+  origenArchivo?: string; // Nombre del archivo desde el que se importó por última vez
+  actualizadoEn?: string; // Fecha ISO de última actualización en el padrón permanente
+  listaPersonalizada?: boolean; // Si es true, la lista (jefe) fue asignada manualmente y se protege al re-importar
 }
 
 

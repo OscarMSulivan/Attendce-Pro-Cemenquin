@@ -27,6 +27,7 @@ interface FileDropzoneSectionProps {
   savedEmployeesInfo: { count: number; savedAt: string } | null;
   onUseSavedEmployees: () => void;
   onClearSavedEmployees: () => void;
+  onOpenEmployeesModule?: () => void;
 }
 
 export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
@@ -42,6 +43,7 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
   savedEmployeesInfo,
   onUseSavedEmployees,
   onClearSavedEmployees,
+  onOpenEmployeesModule,
 }) => {
   const fileEmpRef = useRef<HTMLInputElement>(null);
   const fileEvtRef = useRef<HTMLInputElement>(null);
@@ -71,7 +73,7 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
             Insumos de nómina y reloj biométrico
           </h3>
           <span className="hidden sm:inline-block text-[11px] text-[#87888C]">
-            — Importa catálogo, eventos biométricos e incidencias (.xlsx, .xls, .csv)
+            — Fusión multi-empresa activa: los empleados se almacenan permanentemente sin borrarse al subir otra base
           </span>
         </div>
         <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums text-[#87888C]">
@@ -99,12 +101,12 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
                 <span className="px-1.5 py-0.5 rounded bg-[#171821] text-[#87888C] border border-white/[0.08] text-[10px] font-mono font-bold tabular-nums">
                   01
                 </span>
-                Base de empleados
+                Padrón de empleados
               </span>
               {employeesCount > 0 ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#10B981] tabular-nums">
                   <CheckCircle className="w-3.5 h-3.5" />
-                  {employeesCount} reg.
+                  {employeesCount} guardados
                 </span>
               ) : (
                 <span className="text-[10px] font-mono text-[#87888C]">Requerido</span>
@@ -112,34 +114,50 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
             </div>
 
             <p className="text-[11px] text-[#87888C] mb-3 leading-relaxed">
-              Catálogo maestro de colaboradores con horarios y supervisor asignado.
+              Padrón permanente multi-empresa. Subir una nueva base fusiona y conserva los empleados existentes.
             </p>
           </div>
 
-          <div>
+          <div className="space-y-2">
             <input
               type="file"
               ref={fileEmpRef}
               accept=".csv,.xlsx,.xls"
               className="hidden"
               onChange={(e) => {
-                if (e.target.files?.[0]) onLoadEmployees(e.target.files[0]);
+                if (e.target.files?.[0]) {
+                  onLoadEmployees(e.target.files[0]);
+                  e.target.value = '';
+                }
               }}
             />
 
-            <button
-              type="button"
-              onClick={() => fileEmpRef.current?.click()}
-              disabled={isLoadingEmployees}
-              className="w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-[#A9DFD8]" />
-              {isLoadingEmployees
-                ? 'Procesando...'
-                : employeesCount > 0
-                ? 'Reemplazar catálogo'
-                : 'Seleccionar archivo'}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => fileEmpRef.current?.click()}
+                disabled={isLoadingEmployees}
+                className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-[#A9DFD8]" />
+                {isLoadingEmployees
+                  ? 'Procesando...'
+                  : employeesCount > 0
+                  ? 'Fusionar otra base / empresa'
+                  : 'Seleccionar archivo'}
+              </button>
+
+              {onOpenEmployeesModule && (
+                <button
+                  type="button"
+                  onClick={onOpenEmployeesModule}
+                  className="py-2 px-2.5 rounded-lg text-xs font-bold bg-[#A9DFD8]/15 hover:bg-[#A9DFD8]/25 text-[#A9DFD8] border border-[#A9DFD8]/30 transition-colors cursor-pointer shrink-0"
+                  title="Abrir módulo de Empleados y Listas"
+                >
+                  Ver Listas
+                </button>
+              )}
+            </div>
 
             {/* Banner de base guardada en almacenamiento si existe */}
             {savedEmployeesInfo && employeesCount === 0 && (
@@ -189,7 +207,7 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
               {eventsCount > 0 ? (
                 <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#10B981] tabular-nums">
                   <CheckCircle className="w-3.5 h-3.5" />
-                  {eventsCount} evts.
+                  {eventsCount} emp. con evts.
                 </span>
               ) : (
                 <span className="text-[10px] font-mono text-[#87888C]">Requerido</span>
@@ -197,7 +215,7 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
             </div>
 
             <p className="text-[11px] text-[#87888C] mb-3 leading-relaxed">
-              Exportación de reloj biométrico con marcas ENT, ERT, SNT y RST.
+              Exportación de reloj biométrico (se acumulan checadas al subir archivos de 2 empresas).
             </p>
           </div>
 
@@ -208,7 +226,10 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
               accept=".xlsx,.xls,.csv"
               className="hidden"
               onChange={(e) => {
-                if (e.target.files?.[0]) onLoadEvents(e.target.files[0]);
+                if (e.target.files?.[0]) {
+                  onLoadEvents(e.target.files[0]);
+                  e.target.value = '';
+                }
               }}
             />
 
@@ -222,7 +243,7 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
               {isLoadingEvents
                 ? 'Procesando...'
                 : eventsCount > 0
-                ? 'Reemplazar eventos'
+                ? 'Sumar / Cargar checador'
                 : 'Cargar checador'}
             </button>
           </div>

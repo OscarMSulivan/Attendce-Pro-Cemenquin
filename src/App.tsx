@@ -34,7 +34,8 @@ import {
   PayrollWeekOption,
   detectPayrollWeekFromDates,
   getDateRangeISO,
-  normalizeEmployeeId
+  normalizeEmployeeId,
+  normalizeSupervisorName
 } from './utils/calendarUtils';
 
 import { 
@@ -50,7 +51,7 @@ import {
   sincronizarReportesConHorarios
 } from './core/attendanceEngine';
 import { parseEmployeesFile } from './parsers/employeeParser';
-import { parseBiometricEventsFile } from './parsers/biometricParser';
+import { parseBiometricEventsFile, mergeEventsDB } from './parsers/biometricParser';
 import { parseVacationsFile } from './parsers/vacationParser';
 import {
   exportPayrollExcelBySupervisor,
@@ -64,6 +65,7 @@ import { RHPayrollMonitorView } from './components/portal/RHPayrollMonitorView';
 import { SupervisorWorkspaceView } from './components/portal/SupervisorWorkspaceView';
 import { IncidentsManagementView } from './components/portal/IncidentsManagementView';
 import { AdminUsersView } from './components/portal/AdminUsersView';
+import { EmployeesDirectoryView } from './components/portal/EmployeesDirectoryView';
 import { NewIncidentModal } from './components/portal/NewIncidentModal';
 import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseModal';
 import { SendPayrollEmailModal } from './components/portal/SendPayrollEmailModal';
@@ -105,10 +107,17 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(StorageService.loadConfig);
   const [horarios, setHorarios] = useState<Record<string, ScheduleConfig>>(StorageService.loadHorarios);
   const [asignaciones, setAsignaciones] = useState<Record<string, string>>(StorageService.loadAsignaciones);
-  const [savedEmployeesInfo, setSavedEmployeesInfo] = useState<{ count: number; savedAt: string } | null>(null);
+  const [savedEmployeesInfo, setSavedEmployeesInfo] = useState<{ count: number; savedAt: string } | null>(() => {
+    const saved = StorageService.loadSavedEmployees();
+    return saved && saved.empleados && Object.keys(saved.empleados).length > 0
+      ? { count: Object.keys(saved.empleados).length, savedAt: saved.savedAt }
+      : null;
+  });
 
-  // Bases de datos en memoria
-  const [empleadosDB, setEmpleadosDB] = useState<Record<string, Employee>>({});
+  // Bases de datos en memoria (empleadosDB se inicializa directamente desde el padrón permanente guardado)
+  const [empleadosDB, setEmpleadosDB] = useState<Record<string, Employee>>(
+    () => StorageService.loadSavedEmployees()?.empleados || {}
+  );
   const [eventosDB, setEventosDB] = useState<EventsDB>({});
   const [vacacionesDB, setVacacionesDB] = useState<Record<string, Record<string, string>>>({});
 
@@ -305,10 +314,6 @@ export default function App() {
           }
 
           const localSaved = StorageService.loadSavedEmployees();
-          const rawEmpleadosSource =
-            serverData.empleadosDB && Object.keys(serverData.empleadosDB).length > 0
-              ? serverData.empleadosDB
-              : localSaved?.empleados || empleadosDB;
 
           // Rescatar también cualquier horario previamente guardado en localSaved.empleados
           if (localSaved?.empleados) {
@@ -352,17 +357,52 @@ export default function App() {
           setAsignaciones(hydratedAsignaciones);
           StorageService.saveAsignaciones(hydratedAsignaciones);
 
-          // Construir hydratedEmpleados aplicando siempre las asignaciones de horario normalizadas
+          // Construir hydratedEmpleados fusionando TODAS las fuentes (localStorage, estado en memoria, servidor y reportes)
           const hydratedEmpleados: Record<string, Employee> = {};
-          Object.values(rawEmpleadosSource).forEach(emp => {
+          const mergeEmployeeRecord = (emp: Employee | undefined) => {
+            if (!emp || !emp.id) return;
             const normId = normalizeEmployeeId(emp.id) || emp.id;
-            const assignedHorario = hydratedAsignaciones[normId] ?? hydratedAsignaciones[emp.id] ?? emp.horario ?? '';
+            const existing = hydratedEmpleados[normId];
+            const assignedHorario =
+              hydratedAsignaciones[normId] ??
+              hydratedAsignaciones[emp.id] ??
+              emp.horario ??
+              existing?.horario ??
+              '';
+            const keepCustomList = Boolean(existing?.listaPersonalizada && !emp.listaPersonalizada);
             hydratedEmpleados[normId] = {
+              ...(existing || {}),
               ...emp,
               id: normId,
+              nombre: emp.nombre || existing?.nombre || '',
+              jefe: keepCustomList
+                ? existing.jefe
+                : emp.jefe && emp.jefe !== 'GENERAL' && emp.jefe !== 'General'
+                ? normalizeSupervisorName(emp.jefe)
+                : existing?.jefe || normalizeSupervisorName(emp.jefe || 'GENERAL'),
+              listaPersonalizada: keepCustomList ? true : Boolean(emp.listaPersonalizada || existing?.listaPersonalizada),
+              empresa: emp.empresa || existing?.empresa || undefined,
+              origenArchivo: emp.origenArchivo || existing?.origenArchivo || undefined,
               horario: assignedHorario,
             };
+          };
+
+          // 1. Empleados de reportes históricos / activos (rescate base)
+          [...localReports, ...serverReports].forEach(r => {
+            if (r?.empleado) mergeEmployeeRecord(r.empleado);
           });
+          // 2. Empleados guardados localmente
+          if (localSaved?.empleados) {
+            Object.values(localSaved.empleados).forEach(emp => mergeEmployeeRecord(emp));
+          }
+          // 3. Empleados en memoria actual
+          Object.values(empleadosDB).forEach(emp => mergeEmployeeRecord(emp));
+          // 4. Empleados en servidor (priorizando listas personalizadas)
+          if (serverData.empleadosDB && typeof serverData.empleadosDB === 'object') {
+            Object.values(serverData.empleadosDB as Record<string, Employee>).forEach(emp =>
+              mergeEmployeeRecord(emp)
+            );
+          }
 
           if (Object.keys(hydratedEmpleados).length > 0) {
             setEmpleadosDB(hydratedEmpleados);
@@ -1114,25 +1154,90 @@ export default function App() {
     }
   };
 
-  // 1. Cargar Base de Empleados
-  const handleLoadEmployees = async (file: File) => {
+  // 1. Cargar Base de Empleados (Fusión Acumulativa Multi-Empresa: nunca borra los empleados previos)
+  const handleLoadEmployees = async (file: File, empresaOverride?: string) => {
     setIsLoadingEmployees(true);
-    setStatusMessage('Procesando catálogo de empleados...');
+    setStatusMessage('Fusionando catálogo de empleados en el padrón permanente...');
     setStatusType('info');
 
     try {
-      const result = await parseEmployeesFile(file);
-      const withAssignments = mergeAsignaciones(result.empleados, asignaciones);
+      const result = await parseEmployeesFile(file, empresaOverride);
+      const savedLocal = StorageService.loadSavedEmployees()?.empleados || {};
+      const baseCatalog: Record<string, Employee> = {
+        ...savedLocal,
+        ...empleadosDB,
+      };
 
+      const nextAsignaciones = { ...asignaciones };
+      let addedCount = 0;
+      let updatedCount = 0;
+
+      Object.values(result.empleados).forEach(incEmp => {
+        const normId = normalizeEmployeeId(incEmp.id) || incEmp.id;
+        const existing = baseCatalog[normId];
+        if (!existing) {
+          addedCount++;
+        } else {
+          updatedCount++;
+        }
+
+        // Si el empleado ya tenía una lista fijada manualmente en el sistema, protegerla
+        const keepCustomList = Boolean(existing?.listaPersonalizada);
+        const resolvedJefe = keepCustomList
+          ? existing.jefe
+          : incEmp.jefe && incEmp.jefe !== 'GENERAL' && incEmp.jefe !== 'General'
+          ? normalizeSupervisorName(incEmp.jefe)
+          : existing?.jefe || normalizeSupervisorName(incEmp.jefe || 'GENERAL');
+
+        const resolvedHorario =
+          nextAsignaciones[normId] ||
+          incEmp.horario ||
+          existing?.horario ||
+          '';
+
+        if (resolvedHorario && !nextAsignaciones[normId]) {
+          nextAsignaciones[normId] = resolvedHorario;
+        }
+
+        baseCatalog[normId] = {
+          ...(existing || {}),
+          ...incEmp,
+          id: normId,
+          nombre: incEmp.nombre || existing?.nombre || '',
+          jefe: resolvedJefe,
+          listaPersonalizada: keepCustomList,
+          horario: resolvedHorario,
+          empresa: incEmp.empresa || existing?.empresa || result.empresaDetectada,
+          origenArchivo: file.name,
+          actualizadoEn: new Date().toISOString(),
+        };
+      });
+
+      const withAssignments = mergeAsignaciones(baseCatalog, nextAsignaciones);
+      const totalStored = Object.keys(withAssignments).length;
+
+      setAsignaciones(nextAsignaciones);
+      StorageService.saveAsignaciones(nextAsignaciones);
       setEmpleadosDB(withAssignments);
       StorageService.saveEmployees(withAssignments);
       setSavedEmployeesInfo({
-        count: result.count,
-        savedAt: new Date().toISOString()
+        count: totalStored,
+        savedAt: new Date().toISOString(),
       });
 
-      setStatusMessage(`✓ ${result.count} empleados cargados (${result.modo === 'excel_avanzado' ? 'Modo avanzado' : 'Modo estándar'})`);
+      PortalService.pushToServer({
+        empleadosDB: withAssignments,
+        asignaciones: nextAsignaciones,
+      });
+
+      const summaryMsg = `✓ ${result.count} empleados procesados (${addedCount} nuevos, ${updatedCount} actualizados · Empresa: ${result.empresaDetectada}). Padrón total: ${totalStored} colaboradores.`;
+      setStatusMessage(summaryMsg);
       setStatusType('success');
+      showToast(
+        summaryMsg,
+        'success',
+        'Base Fusionada en Padrón Permanente'
+      );
     } catch (err: any) {
       console.error(err);
       setStatusMessage(`✗ Error al cargar empleados: ${err.message || 'Formato no soportado'}`);
@@ -1142,15 +1247,211 @@ export default function App() {
     }
   };
 
+  // Crear o actualizar un empleado individualmente desde el módulo "Empleados y Listas"
+  const handleUpsertEmployee = useCallback(
+    (emp: Employee) => {
+      const normId = normalizeEmployeeId(emp.id) || emp.id;
+      const cleanJefe = normalizeSupervisorName(emp.jefe || 'GENERAL');
+      const cleanSchedule = (emp.horario || asignaciones[normId] || 'ADMO').trim().toUpperCase();
+
+      const nextAsignaciones = {
+        ...asignaciones,
+        [normId]: cleanSchedule,
+      };
+      const updatedEmpRecord: Employee = {
+        ...(empleadosDB[normId] || {}),
+        ...emp,
+        id: normId,
+        jefe: cleanJefe,
+        horario: cleanSchedule,
+        actualizadoEn: new Date().toISOString(),
+      };
+
+      const nextEmpleadosDB = mergeAsignaciones(
+        {
+          ...empleadosDB,
+          [normId]: updatedEmpRecord,
+        },
+        nextAsignaciones
+      );
+
+      setAsignaciones(nextAsignaciones);
+      StorageService.saveAsignaciones(nextAsignaciones);
+      setEmpleadosDB(nextEmpleadosDB);
+      StorageService.saveEmployees(nextEmpleadosDB);
+      setSavedEmployeesInfo({
+        count: Object.keys(nextEmpleadosDB).length,
+        savedAt: new Date().toISOString(),
+      });
+
+      // Actualizar también la lista/horario del empleado en los reportes activos si ya estaban generados
+      if (reportes.length > 0) {
+        setReportes(prev => {
+          const nextRep = prev.map(r => {
+            if (normalizeEmployeeId(r.empleado.id) !== normId) return r;
+            return {
+              ...r,
+              empleado: {
+                ...r.empleado,
+                ...updatedEmpRecord,
+              },
+            };
+          });
+          StorageService.saveReportesState({
+            reportes: nextRep,
+            resumen,
+            selectedWeek,
+          });
+          return nextRep;
+        });
+      }
+
+      PortalService.pushToServer({
+        empleadosDB: nextEmpleadosDB,
+        asignaciones: nextAsignaciones,
+      });
+
+      showToast(
+        `Colaborador #${normId} (${updatedEmpRecord.nombre}) guardado en Lista "${cleanJefe}".`,
+        'success',
+        'Padrón Actualizado'
+      );
+    },
+    [asignaciones, empleadosDB, mergeAsignaciones, reportes.length, resumen, selectedWeek, showToast]
+  );
+
+  // Actualización masiva de Lista, Empresa o Turno desde el módulo "Empleados y Listas"
+  const handleBulkUpdateEmployees = useCallback(
+    (
+      empIds: string[],
+      patch: { jefe?: string; empresa?: string; horario?: string; listaPersonalizada?: boolean }
+    ) => {
+      if (empIds.length === 0) return;
+      const nowISO = new Date().toISOString();
+      const nextAsignaciones = { ...asignaciones };
+      const nextEmpleados = { ...empleadosDB };
+      const idSet = new Set(empIds.map(id => normalizeEmployeeId(id) || id));
+
+      idSet.forEach(normId => {
+        const current = nextEmpleados[normId];
+        if (!current) return;
+        const nextHor = patch.horario ? patch.horario.trim().toUpperCase() : current.horario;
+        if (nextHor) {
+          nextAsignaciones[normId] = nextHor;
+        }
+        nextEmpleados[normId] = {
+          ...current,
+          ...(patch.jefe ? { jefe: normalizeSupervisorName(patch.jefe) } : {}),
+          ...(patch.empresa !== undefined ? { empresa: patch.empresa } : {}),
+          ...(nextHor ? { horario: nextHor } : {}),
+          ...(patch.listaPersonalizada !== undefined
+            ? { listaPersonalizada: patch.listaPersonalizada }
+            : {}),
+          actualizadoEn: nowISO,
+        };
+      });
+
+      const finalEmpleados = mergeAsignaciones(nextEmpleados, nextAsignaciones);
+      setAsignaciones(nextAsignaciones);
+      StorageService.saveAsignaciones(nextAsignaciones);
+      setEmpleadosDB(finalEmpleados);
+      StorageService.saveEmployees(finalEmpleados);
+      setSavedEmployeesInfo({
+        count: Object.keys(finalEmpleados).length,
+        savedAt: nowISO,
+      });
+
+      if (reportes.length > 0) {
+        setReportes(prev =>
+          prev.map(r => {
+            const normId = normalizeEmployeeId(r.empleado.id) || r.empleado.id;
+            if (!idSet.has(normId) || !finalEmpleados[normId]) return r;
+            return {
+              ...r,
+              empleado: {
+                ...r.empleado,
+                ...finalEmpleados[normId],
+              },
+            };
+          })
+        );
+      }
+
+      PortalService.pushToServer({
+        empleadosDB: finalEmpleados,
+        asignaciones: nextAsignaciones,
+      });
+
+      showToast(
+        `Se actualizaron ${idSet.size} colaboradores en el padrón permanente.`,
+        'success',
+        'Actualización Masiva Aplicada'
+      );
+    },
+    [asignaciones, empleadosDB, mergeAsignaciones, reportes.length, showToast]
+  );
+
+  // Eliminar un empleado individualmente del padrón permanente
+  const handleDeleteEmployee = useCallback(
+    (empId: string) => {
+      const normId = normalizeEmployeeId(empId) || empId;
+      const nextEmpleados = { ...empleadosDB };
+      const targetName = nextEmpleados[normId]?.nombre || normId;
+      delete nextEmpleados[normId];
+      delete nextEmpleados[empId];
+
+      setEmpleadosDB(nextEmpleados);
+      StorageService.saveEmployees(nextEmpleados);
+      setSavedEmployeesInfo({
+        count: Object.keys(nextEmpleados).length,
+        savedAt: new Date().toISOString(),
+      });
+
+      PortalService.pushToServer({
+        empleadosDB: nextEmpleados,
+        deletedEmployeeIds: [normId],
+      });
+
+      showToast(
+        `Colaborador #${normId} (${targetName}) eliminado del padrón.`,
+        'info',
+        'Colaborador Eliminado'
+      );
+    },
+    [empleadosDB, showToast]
+  );
+
+  // Renombrar o unificar una lista completa de supervisor
+  const handleRenameSupervisorList = useCallback(
+    (oldListName: string, newListName: string) => {
+      const cleanOld = oldListName.trim().toUpperCase();
+      const cleanNew = normalizeSupervisorName(newListName);
+      if (!cleanOld || !cleanNew || cleanOld === cleanNew) return;
+
+      const matchingIds = Object.values(empleadosDB)
+        .filter(e => (e.jefe || '').trim().toUpperCase() === cleanOld)
+        .map(e => e.id);
+
+      handleBulkUpdateEmployees(matchingIds, {
+        jefe: cleanNew,
+        listaPersonalizada: true,
+      });
+    },
+    [empleadosDB, handleBulkUpdateEmployees]
+  );
+
   // Usar base guardada
   const handleUseSavedEmployees = () => {
     const saved = StorageService.loadSavedEmployees();
     if (!saved || !saved.empleados) return;
 
-    const withAssignments = mergeAsignaciones(saved.empleados, asignaciones);
+    const withAssignments = mergeAsignaciones(
+      { ...saved.empleados, ...empleadosDB },
+      asignaciones
+    );
     setEmpleadosDB(withAssignments);
     const count = Object.keys(withAssignments).length;
-    setStatusMessage(`✓ ${count} empleados cargados desde la base guardada`);
+    setStatusMessage(`✓ ${count} empleados activos desde el padrón permanente`);
     setStatusType('success');
   };
 
@@ -1163,22 +1464,23 @@ export default function App() {
     }
   };
 
-  // 2. Cargar Eventos Biométricos
+  // 2. Cargar Eventos Biométricos (Fusión acumulativa multi-empresa para no perder checadas de la primera empresa)
   const handleLoadEvents = async (file: File) => {
     setIsLoadingEvents(true);
-    setStatusMessage('Procesando checadas y eventos del reloj biométrico...');
+    setStatusMessage('Procesando y fusionando checadas del reloj biométrico...');
     setStatusType('info');
 
     try {
       const result = await parseBiometricEventsFile(file, empleadosDB);
-      const consolidado = consolidarEventosConHorarios(result.eventosDB, empleadosDB, horarios, {
+      const combinedRawEvents = mergeEventsDB(eventosDB, result.eventosDB);
+      const consolidado = consolidarEventosConHorarios(combinedRawEvents, empleadosDB, horarios, {
         modoLectura: config.modoLectura,
         minutosRebote: config.minutosRebote
       });
 
       setEventosDB(consolidado);
 
-      // Detección automática de la semana de nómina a partir de las fechas de las checadas
+      // Detección automática de la semana de nómina a partir de las fechas de las checadas recién subidas
       const allDates: string[] = [];
       Object.values(result.eventosDB).forEach(empDates => {
         Object.keys(empDates).forEach(d => allDates.push(d));
@@ -1191,10 +1493,12 @@ export default function App() {
         }
         setSelectedWeek(autoDetectedWeek.value);
         setStatusMessage(
-          `✓ ${result.totalEventos} checadas procesadas. Semana detectada automáticamente: Semana ${autoDetectedWeek.weekNumber} (${autoDetectedWeek.startISO} al ${autoDetectedWeek.endISO})`
+          `✓ ${result.totalEventos} checadas sumadas (${Object.keys(consolidado).length} empleados con eventos). Semana detectada: Semana ${autoDetectedWeek.weekNumber} (${autoDetectedWeek.startISO} al ${autoDetectedWeek.endISO})`
         );
       } else {
-        setStatusMessage(`✓ ${result.totalEventos} checadas biométricas procesadas (fusión RST activa)`);
+        setStatusMessage(
+          `✓ ${result.totalEventos} checadas biométricas sumadas (${Object.keys(consolidado).length} empleados con eventos en memoria)`
+        );
       }
       setStatusType('success');
 
@@ -1215,7 +1519,7 @@ export default function App() {
 
     try {
       const result = await parseVacationsFile(file);
-      setVacacionesDB(result.vacacionesDB);
+      setVacacionesDB(prev => ({ ...prev, ...result.vacacionesDB }));
       setStatusMessage(`✓ ${result.totalRegistros} incidencias de vacaciones registradas`);
       setStatusType('success');
     } catch (err: any) {
@@ -1227,7 +1531,7 @@ export default function App() {
     }
   };
 
-  // Generar Reporte de Asistencia
+  // Generar Reporte de Asistencia (preservando ediciones previas de supervisores si ya había reportes trabajados)
   const handleGenerateReport = () => {
     if (Object.keys(empleadosDB).length === 0) {
       alert('Debes cargar primero la base de empleados.');
@@ -1277,8 +1581,26 @@ export default function App() {
           }
         );
 
+        // Si ya había días trabajados por supervisores en esta semana, preservarlos al regenerar
+        const preservedCalculados = calculados.map(newRep => {
+          const normId = normalizeEmployeeId(newRep.empleado.id);
+          const prevRep = reportes.find(r => normalizeEmployeeId(r.empleado.id) === normId);
+          if (!prevRep) return newRep;
+          const diasMerged = newRep.dias.map(nd => {
+            const pd = prevRep.dias.find(d => d.isoDate === nd.isoDate);
+            const wasEdited =
+              pd &&
+              (Boolean(pd.modificadoPorSupervisor) ||
+                Boolean(pd.notaSupervisorDia) ||
+                pd.horasExtrasAutorizadas !== undefined ||
+                Boolean(pd.formatoSubidoNombre));
+            return wasEdited ? { ...pd, horarioProgramado: nd.horarioProgramado } : nd;
+          });
+          return { ...newRep, dias: diasMerged };
+        });
+
         const syncedCalculados = sincronizarReportesConHorarios(
-          calculados,
+          preservedCalculados,
           horarios,
           asignaciones,
           empleadosConHorario,
@@ -1308,7 +1630,7 @@ export default function App() {
         });
 
         setStatusMessage(
-          `✓ Reporte generado para Nóminas/RH (${calculados.length} colaboradores). Haz clic en "Dispersar" para enviar las nóminas a cada supervisor.`
+          `✓ Reporte generado para Nóminas/RH (${syncedCalculados.length} colaboradores). Haz clic en "Dispersar" para enviar las nóminas a cada supervisor.`
         );
         setStatusType('success');
       } catch (err: any) {
@@ -3897,6 +4219,23 @@ export default function App() {
                   />
                 )}
 
+              {/* MÓDULO DE PADRÓN PERMANENTE DE EMPLEADOS Y LISTAS (Soporte Multi-Empresa) */}
+              {portalTab === 'empleados' &&
+                (userHasModuleAccess(currentUser, 'empleados') ||
+                  userHasModuleAccess(currentUser, 'nomina')) && (
+                  <EmployeesDirectoryView
+                    empleadosDB={empleadosDB}
+                    horarios={horarios}
+                    portalUsers={portalUsers}
+                    isLoadingEmployees={isLoadingEmployees}
+                    onLoadEmployeesFile={handleLoadEmployees}
+                    onUpsertEmployee={handleUpsertEmployee}
+                    onBulkUpdateEmployees={handleBulkUpdateEmployees}
+                    onDeleteEmployee={handleDeleteEmployee}
+                    onRenameSupervisorList={handleRenameSupervisorList}
+                  />
+                )}
+
               {/* MÓDULO DE DISPERSIÓN Y CÁLCULO DE NÓMINA (Cualquier usuario con el acceso 'nomina' habilitado) */}
               {portalTab === 'nomina' && userHasModuleAccess(currentUser, 'nomina') && (
                 <>
@@ -3965,6 +4304,7 @@ export default function App() {
                           savedEmployeesInfo={savedEmployeesInfo}
                           onUseSavedEmployees={handleUseSavedEmployees}
                           onClearSavedEmployees={handleClearSavedEmployees}
+                          onOpenEmployeesModule={() => setPortalTab('empleados')}
                         />
 
                         {/* Barra de Controles, Búsqueda y Filtros */}

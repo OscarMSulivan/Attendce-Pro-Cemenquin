@@ -12,16 +12,36 @@ export interface ParseEmployeesResult {
   empleados: Record<string, Employee>;
   count: number;
   jefes: string[];
+  empresaDetectada: string;
   modo: 'excel_avanzado' | 'csv_estandar';
+}
+
+function inferCompanyNameFromFilename(fileName: string): string {
+  const base = fileName
+    .replace(/\.(xlsx|xls|csv)$/i, '')
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\b(empleados|catalogo|base|datos|nomina|lista|checador|reporte|202\d)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (base.length >= 2) {
+    return base.toUpperCase();
+  }
+  return fileName.replace(/\.(xlsx|xls|csv)$/i, '').trim().toUpperCase() || 'GENERAL';
 }
 
 /**
  * Parsea el archivo de base de empleados (.xlsx, .xls o .csv)
- * con autodetección inteligente de formato (filas dobles de checador o filas estándar).
+ * con autodetección inteligente de formato (filas dobles de checador o filas estándar)
+ * y etiquetado automático de empresa/origen para soporte multi-empresa.
  */
-export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResult> {
+export async function parseEmployeesFile(
+  file: File,
+  empresaOverride?: string
+): Promise<ParseEmployeesResult> {
   const fileName = file.name.toLowerCase();
   const empleados: Record<string, Employee> = {};
+  const nowISO = new Date().toISOString();
+  let detectedCompany = (empresaOverride || '').trim().toUpperCase();
 
   if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
     const buffer = await file.arrayBuffer();
@@ -29,7 +49,7 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
     const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<any[]>(firstSheet, { header: 1 });
 
-    // 1. Buscar fila de encabezado
+    // 1. Buscar fila de encabezado y posible nombre de empresa en las filas superiores
     let headerRowIdx = -1;
     let headerValues: string[] = [];
     for (let i = 0; i < Math.min(15, rows.length); i++) {
@@ -44,6 +64,28 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
 
     if (headerRowIdx === -1) {
       throw new Error('No se detectaron los encabezados en la hoja de Excel de empleados.');
+    }
+
+    if (!detectedCompany && headerRowIdx > 0) {
+      for (let r = 0; r < headerRowIdx; r++) {
+        const rowCells = (rows[r] || [])
+          .map((c: any) => String(c || '').trim())
+          .filter(Boolean);
+        const candidate = rowCells.find(
+          txt =>
+            txt.length >= 4 &&
+            txt.length <= 60 &&
+            !/reporte|catalogo|listado|fecha|pagina|página|hora|sistema/i.test(txt)
+        );
+        if (candidate) {
+          detectedCompany = candidate.toUpperCase();
+          break;
+        }
+      }
+    }
+
+    if (!detectedCompany) {
+      detectedCompany = inferCompanyNameFromFilename(file.name);
     }
 
     // Comprobar si es el formato de 2 filas por empleado (típico de sistemas de checadas como ZKTeco/Timenet)
@@ -86,7 +128,10 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
             nombre,
             jefe: supervisor,
             horario,
-            tipoHorario
+            tipoHorario,
+            empresa: detectedCompany,
+            origenArchivo: file.name,
+            actualizadoEn: nowISO,
           };
         }
       }
@@ -94,8 +139,9 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
       // Formato estándar de una sola fila
       const colId = headerValues.findIndex(h => h.includes('código') || h.includes('codigo') || h.includes('id'));
       const colNom = headerValues.findIndex(h => h.includes('nombre') || h.includes('empleado'));
-      const colSup = headerValues.findIndex(h => h.includes('supervisor') || h.includes('jefe') || h.includes('area'));
+      const colSup = headerValues.findIndex(h => h.includes('supervisor') || h.includes('jefe') || h.includes('area') || h.includes('lista'));
       const colHor = headerValues.findIndex(h => h.includes('horario') || h.includes('turno'));
+      const colEmp = headerValues.findIndex(h => h.includes('empresa') || h.includes('razon') || h.includes('planta'));
 
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i] || [];
@@ -103,13 +149,17 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
         const nombre = String(row[colNom !== -1 ? colNom : 1] || '').trim();
         const supervisor = normalizeSupervisorName(String(row[colSup !== -1 ? colSup : 2] || '').trim());
         const horario = colHor !== -1 ? String(row[colHor] || '').trim() : '';
+        const rowEmpresa = colEmp !== -1 ? String(row[colEmp] || '').trim().toUpperCase() : '';
 
         if (id && nombre) {
           empleados[id] = {
             id,
             nombre,
-            jefe: supervisor || 'General',
-            horario
+            jefe: supervisor || 'GENERAL',
+            horario,
+            empresa: rowEmpresa || detectedCompany,
+            origenArchivo: file.name,
+            actualizadoEn: nowISO,
           };
         }
       }
@@ -120,10 +170,14 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
       empleados,
       count: Object.keys(empleados).length,
       jefes,
+      empresaDetectada: detectedCompany,
       modo: 'excel_avanzado'
     };
 
   } else {
+    if (!detectedCompany) {
+      detectedCompany = inferCompanyNameFromFilename(file.name);
+    }
     // Modo CSV con PapaParse
     return new Promise((resolve, reject) => {
       Papa.parse<any>(file, {
@@ -142,14 +196,18 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
                 row["id"]
               );
               const nombre = String(row["Text7"] || row["Nombre"] || row["NombreEmpleado"] || "").trim();
-              const jefe = normalizeSupervisorName(String(row["Text9"] || row["Supervisor"] || row["Jefe"] || row["Area"] || "").trim());
+              const jefe = normalizeSupervisorName(String(row["Text9"] || row["Supervisor"] || row["Jefe"] || row["Area"] || row["Lista"] || "").trim());
+              const rowEmpresa = String(row["Empresa"] || row["empresa"] || "").trim().toUpperCase();
 
               if (id && nombre && jefe && !jefe.includes("SEMANAL")) {
                 empleados[id] = {
                   id,
                   nombre,
                   jefe,
-                  horario: ''
+                  horario: '',
+                  empresa: rowEmpresa || detectedCompany,
+                  origenArchivo: file.name,
+                  actualizadoEn: nowISO,
                 };
               }
             });
@@ -159,6 +217,7 @@ export async function parseEmployeesFile(file: File): Promise<ParseEmployeesResu
               empleados,
               count: Object.keys(empleados).length,
               jefes,
+              empresaDetectada: detectedCompany,
               modo: 'csv_estandar'
             });
           } catch (err) {

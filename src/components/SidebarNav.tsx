@@ -121,6 +121,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       show: checkAccess('trabajar_listas'),
     },
     {
+      id: 'empleados',
+      label: 'Empleados y Listas',
+      icon: UserCheck,
+      onClick: () => handleAction(() => onTabChange('empleados')),
+      isActive: activeTab === 'empleados',
+      badge: 0,
+      show: checkAccess('empleados') || checkAccess('nomina'),
+    },
+    {
       id: 'semaforo',
       label: 'Semáforo de Nóminas',
       icon: Activity,

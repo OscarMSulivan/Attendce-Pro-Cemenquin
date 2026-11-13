@@ -327,9 +327,100 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
       })
     : current.dispersals;
 
+  // Fusión permanente de empleadosDB (soporte multi-empresa: subir una segunda base nunca borra la primera)
+  const replaceEmpleadosDB = Boolean((partial as any).replaceEmpleadosDB);
+  const deletedEmployeeIds = Array.isArray((partial as any).deletedEmployeeIds)
+    ? new Set((partial as any).deletedEmployeeIds.map((id: unknown) => normalizeEmpIdServer(id)))
+    : null;
+
+  let mergedEmpleadosDB: Record<string, unknown> | undefined = current.empleadosDB;
+  if (partial.empleadosDB && typeof partial.empleadosDB === 'object') {
+    if (replaceEmpleadosDB) {
+      mergedEmpleadosDB = { ...partial.empleadosDB };
+    } else {
+      const nextEmpDB: Record<string, any> = {};
+      Object.entries(current.empleadosDB || {}).forEach(([k, v]) => {
+        const normId = normalizeEmpIdServer((v as any)?.id || k) || k;
+        if (!deletedEmployeeIds || !deletedEmployeeIds.has(normId)) {
+          nextEmpDB[normId] = { ...(v as any), id: normId };
+        }
+      });
+      Object.entries(partial.empleadosDB).forEach(([k, v]) => {
+        if (!v || typeof v !== 'object') return;
+        const inc = v as any;
+        const normId = normalizeEmpIdServer(inc.id || k) || k;
+        if (deletedEmployeeIds && deletedEmployeeIds.has(normId)) return;
+        const existing = nextEmpDB[normId];
+        if (existing) {
+          const keepCustomList = Boolean(existing.listaPersonalizada && !inc.listaPersonalizada);
+          nextEmpDB[normId] = {
+            ...existing,
+            ...inc,
+            id: normId,
+            nombre: inc.nombre || existing.nombre,
+            jefe: keepCustomList
+              ? existing.jefe
+              : inc.jefe && inc.jefe !== 'GENERAL' && inc.jefe !== 'General'
+              ? inc.jefe
+              : existing.jefe || inc.jefe,
+            listaPersonalizada: keepCustomList ? true : Boolean(inc.listaPersonalizada),
+            horario: inc.horario || existing.horario || '',
+            empresa: inc.empresa || existing.empresa || '',
+            origenArchivo: inc.origenArchivo || existing.origenArchivo || '',
+          };
+        } else {
+          nextEmpDB[normId] = { ...inc, id: normId };
+        }
+      });
+      mergedEmpleadosDB = nextEmpDB;
+    }
+  } else if (deletedEmployeeIds && current.empleadosDB) {
+    const nextEmpDB: Record<string, any> = {};
+    Object.entries(current.empleadosDB).forEach(([k, v]) => {
+      const normId = normalizeEmpIdServer((v as any)?.id || k) || k;
+      if (!deletedEmployeeIds.has(normId)) {
+        nextEmpDB[normId] = v;
+      }
+    });
+    mergedEmpleadosDB = nextEmpDB;
+  }
+
+  // Fusión permanente de asignaciones de horario
+  const mergedAsignaciones: Record<string, string> | undefined =
+    partial.asignaciones && typeof partial.asignaciones === 'object'
+      ? { ...(current.asignaciones || {}), ...partial.asignaciones }
+      : current.asignaciones;
+
+  // Fusión de eventosDB por colaborador y fecha (para conservar checadas de ambas empresas)
+  const replaceEventosDB = Boolean((partial as any).replaceEventosDB);
+  let mergedEventosDB: Record<string, unknown> | undefined = current.eventosDB;
+  if (partial.eventosDB && typeof partial.eventosDB === 'object') {
+    if (replaceEventosDB) {
+      mergedEventosDB = { ...partial.eventosDB };
+    } else {
+      const nextEvt: Record<string, any> = { ...(current.eventosDB || {}) };
+      Object.entries(partial.eventosDB).forEach(([empId, empDates]) => {
+        if (!empDates || typeof empDates !== 'object') return;
+        nextEvt[empId] = {
+          ...(nextEvt[empId] || {}),
+          ...(empDates as Record<string, any>),
+        };
+      });
+      mergedEventosDB = nextEvt;
+    }
+  }
+
+  const cleanPartial: Record<string, unknown> = { ...(partial as Record<string, unknown>) };
+  delete cleanPartial.replaceEmpleadosDB;
+  delete cleanPartial.deletedEmployeeIds;
+  delete cleanPartial.replaceEventosDB;
+
   const updated: ServerPortalDatabase = {
     ...current,
-    ...partial,
+    ...cleanPartial,
+    ...(mergedEmpleadosDB ? { empleadosDB: mergedEmpleadosDB } : {}),
+    ...(mergedAsignaciones ? { asignaciones: mergedAsignaciones } : {}),
+    ...(mergedEventosDB ? { eventosDB: mergedEventosDB } : {}),
     ...(mergedReportes ? { reportes: mergedReportes } : {}),
     ...(mergedDispersals ? { dispersals: mergedDispersals } : {}),
     ...(mergedConfig ? { config: mergedConfig } : {}),
