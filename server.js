@@ -211,9 +211,83 @@ function writeDatabase(partial) {
     }
     return incDisp;
   }) : current.dispersals;
+  const replaceEmpleadosDB = Boolean(partial.replaceEmpleadosDB);
+  const deletedEmployeeIds = Array.isArray(partial.deletedEmployeeIds) ? new Set(partial.deletedEmployeeIds.map((id) => normalizeEmpIdServer(id))) : null;
+  let mergedEmpleadosDB = current.empleadosDB;
+  if (partial.empleadosDB && typeof partial.empleadosDB === "object") {
+    if (replaceEmpleadosDB) {
+      mergedEmpleadosDB = { ...partial.empleadosDB };
+    } else {
+      const nextEmpDB = {};
+      Object.entries(current.empleadosDB || {}).forEach(([k, v]) => {
+        const normId = normalizeEmpIdServer(v?.id || k) || k;
+        if (!deletedEmployeeIds || !deletedEmployeeIds.has(normId)) {
+          nextEmpDB[normId] = { ...v, id: normId };
+        }
+      });
+      Object.entries(partial.empleadosDB).forEach(([k, v]) => {
+        if (!v || typeof v !== "object") return;
+        const inc = v;
+        const normId = normalizeEmpIdServer(inc.id || k) || k;
+        if (deletedEmployeeIds && deletedEmployeeIds.has(normId)) return;
+        const existing = nextEmpDB[normId];
+        if (existing) {
+          const keepCustomList = Boolean(existing.listaPersonalizada && !inc.listaPersonalizada);
+          nextEmpDB[normId] = {
+            ...existing,
+            ...inc,
+            id: normId,
+            nombre: inc.nombre || existing.nombre,
+            jefe: keepCustomList ? existing.jefe : inc.jefe && inc.jefe !== "GENERAL" && inc.jefe !== "General" ? inc.jefe : existing.jefe || inc.jefe,
+            listaPersonalizada: keepCustomList ? true : Boolean(inc.listaPersonalizada),
+            horario: inc.horario || existing.horario || "",
+            empresa: inc.empresa || existing.empresa || "",
+            origenArchivo: inc.origenArchivo || existing.origenArchivo || ""
+          };
+        } else {
+          nextEmpDB[normId] = { ...inc, id: normId };
+        }
+      });
+      mergedEmpleadosDB = nextEmpDB;
+    }
+  } else if (deletedEmployeeIds && current.empleadosDB) {
+    const nextEmpDB = {};
+    Object.entries(current.empleadosDB).forEach(([k, v]) => {
+      const normId = normalizeEmpIdServer(v?.id || k) || k;
+      if (!deletedEmployeeIds.has(normId)) {
+        nextEmpDB[normId] = v;
+      }
+    });
+    mergedEmpleadosDB = nextEmpDB;
+  }
+  const mergedAsignaciones = partial.asignaciones && typeof partial.asignaciones === "object" ? { ...current.asignaciones || {}, ...partial.asignaciones } : current.asignaciones;
+  const replaceEventosDB = Boolean(partial.replaceEventosDB);
+  let mergedEventosDB = current.eventosDB;
+  if (partial.eventosDB && typeof partial.eventosDB === "object") {
+    if (replaceEventosDB) {
+      mergedEventosDB = { ...partial.eventosDB };
+    } else {
+      const nextEvt = { ...current.eventosDB || {} };
+      Object.entries(partial.eventosDB).forEach(([empId, empDates]) => {
+        if (!empDates || typeof empDates !== "object") return;
+        nextEvt[empId] = {
+          ...nextEvt[empId] || {},
+          ...empDates
+        };
+      });
+      mergedEventosDB = nextEvt;
+    }
+  }
+  const cleanPartial = { ...partial };
+  delete cleanPartial.replaceEmpleadosDB;
+  delete cleanPartial.deletedEmployeeIds;
+  delete cleanPartial.replaceEventosDB;
   const updated = {
     ...current,
-    ...partial,
+    ...cleanPartial,
+    ...mergedEmpleadosDB ? { empleadosDB: mergedEmpleadosDB } : {},
+    ...mergedAsignaciones ? { asignaciones: mergedAsignaciones } : {},
+    ...mergedEventosDB ? { eventosDB: mergedEventosDB } : {},
     ...mergedReportes ? { reportes: mergedReportes } : {},
     ...mergedDispersals ? { dispersals: mergedDispersals } : {},
     ...mergedConfig ? { config: mergedConfig } : {},
