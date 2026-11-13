@@ -67,7 +67,7 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
   onMarkAllNotificationsRead,
   statusMessage,
   statusType = 'info',
-  theme = 'dark',
+  theme = 'light',
   onToggleTheme,
   onOpenMobileSidebar,
 }) => {
@@ -219,20 +219,20 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
     switch (role) {
       case 'admin':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-purple-500/15 text-purple-300 border border-purple-500/30">
-            <ShieldCheck className="w-2.5 h-2.5 text-purple-400" /> Admin
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-[#10B981] border border-emerald-500/30">
+            <ShieldCheck className="w-2.5 h-2.5 text-emerald-600 dark:text-[#10B981]" /> Admin
           </span>
         );
       case 'rh':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/30">
-            <Building2 className="w-2.5 h-2.5 text-blue-400" /> RH / Nóminas
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
+            <Building2 className="w-2.5 h-2.5 text-blue-600 dark:text-blue-400" /> RH / Nóminas
           </span>
         );
       case 'supervisor':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide uppercase px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
-            <Briefcase className="w-2.5 h-2.5 text-amber-400" /> Supervisor
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+            <Briefcase className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" /> Supervisor
           </span>
         );
     }
@@ -245,18 +245,18 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
   };
 
   return (
-    <header className="bg-white/95 dark:bg-[#171821]/95 backdrop-blur-md border-b border-slate-200 dark:border-white/[0.06] text-slate-800 dark:text-slate-200 no-print sticky top-0 z-30 transition-colors">
-      <div className="px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+    <header className="bg-white/95 dark:bg-[#171821]/95 backdrop-blur-md border-b border-slate-200 dark:border-white/[0.08] text-slate-800 dark:text-slate-200 no-print sticky top-0 z-30 transition-colors">
+      <div className="px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
         {/* Izquierda: Botón Menú Móvil + Título de Vista Activa + Estado del Sistema */}
         <div className="flex items-center gap-3 min-w-0">
           {onOpenMobileSidebar && (
             <button
               type="button"
               onClick={onOpenMobileSidebar}
-              className="lg:hidden p-2 rounded-xl bg-slate-100 dark:bg-[#21222D] hover:bg-slate-200 dark:hover:bg-[#2B2B36] border border-slate-200 dark:border-white/[0.07] text-teal-700 dark:text-[#A9DFD8] transition-colors cursor-pointer shrink-0"
+              className="lg:hidden p-2 rounded-lg bg-slate-100 dark:bg-[#21222D] hover:bg-slate-200 dark:hover:bg-[#2B2B36] border border-slate-200 dark:border-white/[0.07] text-teal-700 dark:text-[#A9DFD8] transition-colors cursor-pointer shrink-0"
               title="Abrir menú lateral"
             >
-              <MenuIcon className="w-5 h-5" />
+              <MenuIcon className="w-4 h-4" />
             </button>
           )}
 
@@ -266,14 +266,14 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
                 {getActiveViewTitle()}
               </h1>
               {currentUser.delegatedSupervisor && (
-                <span className="hidden xl:inline-flex text-[10px] font-semibold text-amber-800 dark:text-amber-300 items-center gap-1 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-500/20 shrink-0">
+                <span className="hidden xl:inline-flex text-[10px] font-semibold text-amber-800 dark:text-amber-300 items-center gap-1 bg-amber-100 dark:bg-amber-500/10 px-2 py-0.5 rounded border border-amber-300 dark:border-amber-500/20 shrink-0">
                   <RefreshCw className="w-2.5 h-2.5 animate-spin" style={{ animationDuration: '6s' }} />
                   <span>Supliendo a {currentUser.delegatedSupervisor}</span>
                 </span>
               )}
             </div>
             {statusMessage && (
-              <p className={`text-[11px] font-mono truncate max-w-xs sm:max-w-md lg:max-w-xl ${getStatusTextColor()}`}>
+              <p className={`text-[11px] font-mono tabular-nums truncate max-w-xs sm:max-w-md lg:max-w-xl ${getStatusTextColor()}`}>
                 {statusMessage}
               </p>
             )}
@@ -287,23 +287,23 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
             <button
               type="button"
               onClick={() => setIsNotifOpen((prev) => !prev)}
-              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer outline-none ${
+              className={`relative flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer outline-none ${
                 unreadNotifCount > 0
                   ? 'bg-teal-50 dark:bg-[#A9DFD8]/15 border-teal-300 dark:border-[#A9DFD8]/40 text-teal-800 dark:text-[#A9DFD8] hover:bg-teal-100 dark:hover:bg-[#A9DFD8]/25'
-                  : 'bg-slate-100 dark:bg-[#21222D] border-slate-200 dark:border-white/[0.07] text-slate-700 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
+                  : 'bg-slate-100 dark:bg-[#21222D] border-slate-200 dark:border-white/[0.08] text-slate-700 dark:text-[#87888C] hover:text-slate-900 dark:hover:text-white'
               }`}
               title="Notificaciones de dispersión y Bitácora (Logs) de modificaciones de listas"
             >
-              <Bell className={`w-4 h-4 ${unreadNotifCount > 0 ? 'text-teal-600 dark:text-[#A9DFD8] animate-bounce' : ''}`} />
-              <span className="hidden md:inline">Avisos y Logs</span>
+              <Bell className={`w-3.5 h-3.5 ${unreadNotifCount > 0 ? 'text-teal-600 dark:text-[#A9DFD8]' : ''}`} />
+              <span className="hidden md:inline">Avisos y bitácora</span>
               {unreadNotifCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-teal-600 dark:bg-[#A9DFD8] text-white dark:text-[#171821] text-[10px] font-black font-mono">
+                <span className="px-1.5 py-0.2 rounded bg-teal-600 dark:bg-[#A9DFD8] text-white dark:text-[#171821] text-[10px] font-bold font-mono tabular-nums">
                   {unreadNotifCount}
                 </span>
               )}
               {userModificationLogs.length > 0 && (
                 <span
-                  className="hidden sm:inline-block px-1.5 py-0.2 rounded-full bg-purple-100 dark:bg-[#F2C8ED]/15 text-purple-800 dark:text-[#F2C8ED] border border-purple-300 dark:border-[#F2C8ED]/35 text-[10px] font-mono font-bold"
+                  className="hidden sm:inline-block px-1.5 py-0.2 rounded bg-slate-200 dark:bg-[#171821] text-slate-700 dark:text-[#A9DFD8] border border-slate-300 dark:border-white/[0.1] text-[10px] font-mono font-bold tabular-nums"
                   title={`${userModificationLogs.length} modificación(es) registrada(s) en la lista`}
                 >
                   {userModificationLogs.length}
@@ -555,15 +555,29 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
             )}
           </div>
 
-          {/* Botón Tema Claro / Oscuro */}
+          {/* Botón Tema Claro Técnico / Oscuro Carbon Ledger */}
           {onToggleTheme && (
             <button
               type="button"
               onClick={onToggleTheme}
-              className="p-2 rounded-xl bg-[#21222D] hover:bg-[#2B2B36] border border-white/[0.07] text-[#FEB95A] transition-all cursor-pointer"
-              title="Cambiar entre tema oscuro y tema claro"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-[#21222D] hover:bg-slate-200 dark:hover:bg-[#2B2B36] border border-slate-200 dark:border-white/[0.08] text-slate-700 dark:text-[#FEB95A] text-xs font-semibold transition-colors cursor-pointer"
+              title={
+                theme === 'light'
+                  ? 'Cambiar a Modo Oscuro (Carbon Ledger)'
+                  : 'Cambiar a Modo Claro Técnico (Stone & Blueprint)'
+              }
             >
-              {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+              {theme === 'light' ? (
+                <>
+                  <Moon className="w-3.5 h-3.5 text-slate-600" />
+                  <span className="hidden lg:inline text-[11px]">Oscuro</span>
+                </>
+              ) : (
+                <>
+                  <Sun className="w-3.5 h-3.5 text-[#FEB95A]" />
+                  <span className="hidden lg:inline text-[11px]">Claro</span>
+                </>
+              )}
             </button>
           )}
 

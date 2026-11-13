@@ -50,6 +50,7 @@ const STORAGE_KEYS = {
   ASIGNACIONES: 'attendanceProAsignaciones_v2',
   EMPLEADOS_DB: 'attendanceProEmpleadosDB_v2',
   CONFIG: 'attendanceProConfig_v2',
+  THEME_PREF: 'attendanceProThemeExplicit_v3',
   REPORTES_STATE: 'attendanceProReportesState_v2'
 };
 
@@ -63,7 +64,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   minutosRebote: 15,
   horasLimiteLiberacion: 24,
   overtimeRules: { ...DEFAULT_OVERTIME_RULES },
-  theme: 'dark'
+  theme: 'light'
 };
 
 export class StorageService {
@@ -153,12 +154,16 @@ export class StorageService {
 
   static loadConfig(): AppConfig {
     try {
+      const explicitTheme = localStorage.getItem(STORAGE_KEYS.THEME_PREF);
+      const resolvedTheme: 'light' | 'dark' =
+        explicitTheme === 'dark' ? 'dark' : 'light';
       const data = localStorage.getItem(STORAGE_KEYS.CONFIG);
-      if (!data) return DEFAULT_CONFIG;
+      if (!data) return { ...DEFAULT_CONFIG, theme: resolvedTheme };
       const parsed = JSON.parse(data);
       return {
         ...DEFAULT_CONFIG,
         ...parsed,
+        theme: resolvedTheme,
         overtimeRules: {
           ...DEFAULT_OVERTIME_RULES,
           ...(parsed?.overtimeRules || {}),
@@ -171,6 +176,9 @@ export class StorageService {
 
   static saveConfig(config: Partial<AppConfig>): void {
     try {
+      if (config.theme === 'light' || config.theme === 'dark') {
+        localStorage.setItem(STORAGE_KEYS.THEME_PREF, config.theme);
+      }
       const current = this.loadConfig();
       const updated = { ...current, ...config };
       localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(updated));

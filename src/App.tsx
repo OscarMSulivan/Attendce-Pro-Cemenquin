@@ -1044,9 +1044,9 @@ export default function App() {
     };
   }, []);
 
-  // Sincronizar tema dual (dark / light) amigable en mount y al cambiar
+  // Sincronizar tema dual (Modo Claro Técnico predeterminado / Modo Oscuro Carbon Ledger)
   useEffect(() => {
-    const isDark = config.theme !== 'light';
+    const isDark = config.theme === 'dark';
     if (isDark) {
       document.documentElement.classList.add('dark');
       document.body.classList.remove('light-mode');
@@ -1063,7 +1063,9 @@ export default function App() {
     setConfig(updated);
     StorageService.saveConfig(updated);
     showToast(
-      newTheme === 'dark' ? 'Tema Bento Oscuro activado (modo nocturno)' : 'Tema Ejecutivo Claro activado (modo diurno)',
+      newTheme === 'dark'
+        ? 'Modo Oscuro Carbon Ledger activado'
+        : 'Modo Claro Técnico activado',
       'info',
       'Tema Actualizado'
     );

@@ -62,212 +62,228 @@ export const FileDropzoneSection: React.FC<FileDropzoneSectionProps> = ({
   };
 
   return (
-    <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg mb-6">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-3 border-b border-white/[0.06]">
-        <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
-            <Upload className="w-4 h-4 text-[#A9DFD8]" />
-            Carga de Archivos de Nómina
+    <section className="rounded-xl bg-[#21222D] border border-white/[0.08] mb-5 overflow-hidden">
+      {/* Encabezado técnico compacto */}
+      <div className="px-5 py-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-2 bg-[#171821]/40">
+        <div className="flex items-center gap-2.5">
+          <Upload className="w-4 h-4 text-[#A9DFD8]" />
+          <h3 className="text-xs font-bold text-white tracking-tight">
+            Insumos de nómina y reloj biométrico
           </h3>
-          <p className="text-xs text-[#87888C] mt-0.5">
-            Importa tu catálogo de empleados, eventos del reloj biométrico e incidencias (.xlsx, .xls, .csv)
-          </p>
+          <span className="hidden sm:inline-block text-[11px] text-[#87888C]">
+            — Importa catálogo, eventos biométricos e incidencias (.xlsx, .xls, .csv)
+          </span>
+        </div>
+        <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums text-[#87888C]">
+          <span>
+            EMP: <strong className="text-white">{employeesCount}</strong>
+          </span>
+          <span className="opacity-30">|</span>
+          <span>
+            EVT: <strong className="text-white">{eventsCount}</strong>
+          </span>
+          <span className="opacity-30">|</span>
+          <span>
+            INC: <strong className="text-white">{vacationsCount}</strong>
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Paso 1: Base de Empleados */}
-        <div
-          className={`p-4 rounded-xl border transition-all ${
-            employeesCount > 0
-              ? 'border-[#A9DFD8]/40 bg-[#171821]'
-              : 'border-white/[0.05] bg-[#171821] hover:border-white/15'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-2 text-xs font-bold text-white">
-              <span className="w-5 h-5 rounded-md bg-[#FEB95A]/15 text-[#FEB95A] border border-[#FEB95A]/30 flex items-center justify-center text-[11px] font-mono font-bold">
-                01
+      {/* Ledger de 3 columnas con divisores de 1px */}
+      <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-white/[0.08]">
+        {/* Paso 01: Base de Empleados */}
+        <div className="p-4 sm:p-5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="flex items-center gap-2 text-xs font-bold text-white">
+                <span className="px-1.5 py-0.5 rounded bg-[#171821] text-[#87888C] border border-white/[0.08] text-[10px] font-mono font-bold tabular-nums">
+                  01
+                </span>
+                Base de empleados
               </span>
-              Base de Empleados
-            </span>
-            {employeesCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-mono font-semibold text-[#A9DFD8]">
-                <CheckCircle className="w-3.5 h-3.5" />
-                {employeesCount} reg.
-              </span>
-            )}
+              {employeesCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#10B981] tabular-nums">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  {employeesCount} reg.
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono text-[#87888C]">Requerido</span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-[#87888C] mb-3 leading-relaxed">
+              Catálogo maestro de colaboradores con horarios y supervisor asignado.
+            </p>
           </div>
 
-          <p className="text-[11px] text-[#87888C] mb-3">
-            Catálogo de colaboradores con sus horarios y supervisores.
-          </p>
+          <div>
+            <input
+              type="file"
+              ref={fileEmpRef}
+              accept=".csv,.xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) onLoadEmployees(e.target.files[0]);
+              }}
+            />
 
-          <input
-            type="file"
-            ref={fileEmpRef}
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.[0]) onLoadEmployees(e.target.files[0]);
-            }}
-          />
+            <button
+              type="button"
+              onClick={() => fileEmpRef.current?.click()}
+              disabled={isLoadingEmployees}
+              className="w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-[#A9DFD8]" />
+              {isLoadingEmployees
+                ? 'Procesando...'
+                : employeesCount > 0
+                ? 'Reemplazar catálogo'
+                : 'Seleccionar archivo'}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => fileEmpRef.current?.click()}
-            disabled={isLoadingEmployees}
-            className="w-full py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 bg-[#21222D] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-all cursor-pointer disabled:opacity-50"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-[#FEB95A]" />
-            {isLoadingEmployees
-              ? 'Procesando...'
-              : employeesCount > 0
-              ? 'Reemplazar Empleados'
-              : 'Seleccionar Archivo'}
-          </button>
-
-          {/* Banner de base guardada en almacenamiento si existe */}
-          {savedEmployeesInfo && employeesCount === 0 && (
-            <div className="mt-3 p-2.5 rounded-xl bg-[#FEB95A]/10 border border-[#FEB95A]/30 text-[11px]">
-              <div className="flex items-start gap-2 mb-2 text-[#E8E8EA] leading-tight">
-                <Database className="w-4 h-4 text-[#FEB95A] flex-shrink-0 mt-0.5" />
-                <div>
-                  <strong className="text-[#FEB95A] font-semibold block">Base guardada en memoria</strong>
-                  <span className="text-[#87888C]">
-                    {savedEmployeesInfo.count} empleados ({formatFecha(savedEmployeesInfo.savedAt)})
+            {/* Banner de base guardada en almacenamiento si existe */}
+            {savedEmployeesInfo && employeesCount === 0 && (
+              <div className="mt-2.5 pt-2.5 border-t border-white/[0.08] flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-1.5 min-w-0 text-[#87888C]">
+                  <Database className="w-3.5 h-3.5 text-[#FEB95A] shrink-0" />
+                  <span className="truncate" title={`Guardada: ${formatFecha(savedEmployeesInfo.savedAt)}`}>
+                    Memoria: <strong className="text-white font-mono tabular-nums">{savedEmployeesInfo.count}</strong> emp.
                   </span>
                 </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={onUseSavedEmployees}
+                    className="py-1 px-2.5 rounded-md bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    Restaurar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClearSavedEmployees}
+                    className="p-1 rounded-md bg-[#171821] hover:bg-rose-500/15 text-[#87888C] hover:text-rose-500 border border-white/[0.08] transition-colors cursor-pointer"
+                    title="Eliminar base guardada"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={onUseSavedEmployees}
-                  className="flex-1 py-1.5 px-2 rounded-lg bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] font-bold text-[11px] transition-all cursor-pointer"
-                >
-                  Usar Guardada
-                </button>
-                <button
-                  type="button"
-                  onClick={onClearSavedEmployees}
-                  className="p-1.5 rounded-lg bg-[#21222D] hover:bg-rose-900/40 text-[#87888C] hover:text-rose-400 transition-all cursor-pointer"
-                  title="Eliminar base guardada"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Paso 02: Eventos Checador */}
+        <div
+          className={`p-4 sm:p-5 flex flex-col justify-between transition-opacity ${
+            employeesCount === 0 && eventsCount === 0 ? 'opacity-60' : ''
+          }`}
+        >
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="flex items-center gap-2 text-xs font-bold text-white">
+                <span className="px-1.5 py-0.5 rounded bg-[#171821] text-[#87888C] border border-white/[0.08] text-[10px] font-mono font-bold tabular-nums">
+                  02
+                </span>
+                Eventos de checador
+              </span>
+              {eventsCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#10B981] tabular-nums">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  {eventsCount} evts.
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono text-[#87888C]">Requerido</span>
+              )}
             </div>
-          )}
-        </div>
 
-        {/* Paso 2: Eventos Checador */}
-        <div
-          className={`p-4 rounded-xl border transition-all ${
-            eventsCount > 0
-              ? 'border-[#A9DFD8]/40 bg-[#171821]'
-              : employeesCount === 0
-              ? 'border-white/[0.04] bg-[#171821]/60 opacity-60'
-              : 'border-white/[0.05] bg-[#171821] hover:border-white/15'
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-2 text-xs font-bold text-white">
-              <span className="w-5 h-5 rounded-md bg-[#20AEF3]/15 text-[#20AEF3] border border-[#20AEF3]/30 flex items-center justify-center text-[11px] font-mono font-bold">
-                02
-              </span>
-              Eventos Checador
-            </span>
-            {eventsCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-mono font-semibold text-[#A9DFD8]">
-                <CheckCircle className="w-3.5 h-3.5" />
-                {eventsCount} evts.
-              </span>
-            )}
+            <p className="text-[11px] text-[#87888C] mb-3 leading-relaxed">
+              Exportación de reloj biométrico con marcas ENT, ERT, SNT y RST.
+            </p>
           </div>
 
-          <p className="text-[11px] text-[#87888C] mb-3">
-            Archivo Excel con registros biométricos (ENT, ERT, SNT, RST).
-          </p>
+          <div>
+            <input
+              type="file"
+              ref={fileEvtRef}
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) onLoadEvents(e.target.files[0]);
+              }}
+            />
 
-          <input
-            type="file"
-            ref={fileEvtRef}
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.[0]) onLoadEvents(e.target.files[0]);
-            }}
-          />
-
-          <button
-            type="button"
-            onClick={() => fileEvtRef.current?.click()}
-            disabled={employeesCount === 0 || isLoadingEvents}
-            className="w-full py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 bg-[#21222D] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Clock className="w-4 h-4 text-[#20AEF3]" />
-            {isLoadingEvents
-              ? 'Procesando...'
-              : eventsCount > 0
-              ? 'Reemplazar Eventos'
-              : 'Cargar Checador'}
-          </button>
+            <button
+              type="button"
+              onClick={() => fileEvtRef.current?.click()}
+              disabled={employeesCount === 0 || isLoadingEvents}
+              className="w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Clock className="w-3.5 h-3.5 text-[#20AEF3]" />
+              {isLoadingEvents
+                ? 'Procesando...'
+                : eventsCount > 0
+                ? 'Reemplazar eventos'
+                : 'Cargar checador'}
+            </button>
+          </div>
         </div>
 
-        {/* Paso 3: Vacaciones / FINJ */}
+        {/* Paso 03: Vacaciones / Incidencias */}
         <div
-          className={`p-4 rounded-xl border transition-all ${
-            vacationsCount > 0
-              ? 'border-[#A9DFD8]/40 bg-[#171821]'
-              : eventsCount === 0
-              ? 'border-white/[0.04] bg-[#171821]/60 opacity-60'
-              : 'border-white/[0.05] bg-[#171821] hover:border-white/15'
+          className={`p-4 sm:p-5 flex flex-col justify-between transition-opacity ${
+            eventsCount === 0 && vacationsCount === 0 ? 'opacity-60' : ''
           }`}
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-2 text-xs font-bold text-white">
-              <span className="w-5 h-5 rounded-md bg-[#F2C8ED]/15 text-[#F2C8ED] border border-[#F2C8ED]/30 flex items-center justify-center text-[11px] font-mono font-bold">
-                03
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="flex items-center gap-2 text-xs font-bold text-white">
+                <span className="px-1.5 py-0.5 rounded bg-[#171821] text-[#87888C] border border-white/[0.08] text-[10px] font-mono font-bold tabular-nums">
+                  03
+                </span>
+                Vacaciones e incidencias
               </span>
-              Vacaciones / Incidencias
-            </span>
-            {vacationsCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-mono font-semibold text-[#A9DFD8]">
-                <CheckCircle className="w-3.5 h-3.5" />
-                {vacationsCount} inc.
-              </span>
-            )}
+              {vacationsCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#10B981] tabular-nums">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  {vacationsCount} inc.
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono text-[#87888C]">Opcional</span>
+              )}
+            </div>
+
+            <p className="text-[11px] text-[#87888C] mb-3 leading-relaxed">
+              Permisos autorizados, incapacidades IMSS y periodos de vacaciones.
+            </p>
           </div>
 
-          <p className="text-[11px] text-[#87888C] mb-3">
-            Archivo opcional con permisos, incapacidades y vacaciones.
-          </p>
+          <div>
+            <input
+              type="file"
+              ref={fileVacRef}
+              accept=".csv,.xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) onLoadVacations(e.target.files[0]);
+              }}
+            />
 
-          <input
-            type="file"
-            ref={fileVacRef}
-            accept=".csv,.xlsx,.xls"
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.[0]) onLoadVacations(e.target.files[0]);
-            }}
-          />
-
-          <button
-            type="button"
-            onClick={() => fileVacRef.current?.click()}
-            disabled={eventsCount === 0 || isLoadingVacations}
-            className="w-full py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 bg-[#21222D] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Calendar className="w-4 h-4 text-[#F2C8ED]" />
-            {isLoadingVacations
-              ? 'Procesando...'
-              : vacationsCount > 0
-              ? 'Reemplazar Incidencias'
-              : 'Cargar Vacaciones'}
-          </button>
+            <button
+              type="button"
+              onClick={() => fileVacRef.current?.click()}
+              disabled={eventsCount === 0 || isLoadingVacations}
+              className="w-full py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Calendar className="w-3.5 h-3.5 text-[#FEB95A]" />
+              {isLoadingVacations
+                ? 'Procesando...'
+                : vacationsCount > 0
+                ? 'Reemplazar incidencias'
+                : 'Cargar incidencias'}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 };

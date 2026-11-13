@@ -144,22 +144,22 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   }, [supervisors]);
 
   return (
-    <div className="rounded-2xl p-5 sm:p-6 bg-[#21222D] border border-white/[0.06] shadow-lg mb-6 no-print animate-fade-up">
+    <section className="rounded-xl p-4 sm:p-5 bg-[#21222D] border border-white/[0.08] mb-5 no-print animate-fade-up">
       {/* Fila 1: Selectores de Periodo, Modo de Lectura, Supervisor y Búsqueda */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         {/* Periodo de Nómina + Selector Multi-Año */}
         <div className="relative">
           {onSelectYear && (
-            <div className="absolute right-0 top-0 z-10 flex items-center gap-1">
+            <div className="absolute right-0 top-0 z-10 flex items-center gap-1 font-mono tabular-nums">
               {[2025, 2026, 2027, 2028].map((yr) => (
                 <button
                   key={yr}
                   type="button"
                   onClick={() => onSelectYear(yr)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors cursor-pointer ${
                     selectedYear === yr
-                      ? 'bg-[#FEB95A]/20 text-[#FEB95A] border border-[#FEB95A]/40'
-                      : 'text-[#87888C] hover:text-white bg-white/[0.03]'
+                      ? 'bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/40'
+                      : 'text-[#87888C] hover:text-white bg-[#171821] border border-white/[0.06]'
                   }`}
                   title={`Cambiar calendario fiscal a ${yr}`}
                 >
@@ -169,7 +169,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             </div>
           )}
           <HeadlessSelect
-            label="Periodo de Nómina"
+            label="Periodo de nómina"
             icon={<CalendarDays className="w-3.5 h-3.5 text-[#FEB95A]" />}
             value={selectedWeek}
             onChange={onSelectWeek}
@@ -180,7 +180,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
 
         {/* Modo de Lectura (Checadas vs Eventos) */}
         <HeadlessSelect
-          label="Modo de Lectura Biométrica"
+          label="Modo de lectura biométrica"
           icon={<Cpu className="w-3.5 h-3.5 text-[#A9DFD8]" />}
           value={readingMode}
           onChange={(val) => onReadingModeChange(val as ReadingMode)}
@@ -189,7 +189,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
 
         {/* Filtrar por Supervisor */}
         <HeadlessSelect
-          label="Filtrar por Supervisor"
+          label="Filtrar por supervisor"
           icon={<UserCheck className="w-3.5 h-3.5 text-[#20AEF3]" />}
           value={selectedSupervisor}
           onChange={onSelectSupervisor}
@@ -199,17 +199,17 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
 
         {/* Búsqueda rápida */}
         <div>
-          <label className="text-xs font-semibold text-[#87888C] block mb-1.5 flex items-center gap-1.5">
-            <Search className="w-3.5 h-3.5 text-[#F2C8ED]" />
-            Búsqueda Rápida
+          <label className="text-xs font-semibold text-[#87888C] mb-1.5 flex items-center gap-1.5">
+            <Search className="w-3.5 h-3.5 text-[#A9DFD8]" />
+            Búsqueda rápida
           </label>
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Ej: 00615, 00979, Óscar, Eudis..."
-              className="w-full rounded-xl pl-8 pr-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] outline-none focus:border-[#A9DFD8] transition-all font-mono"
+              placeholder="ID o nombre: 00615, Óscar..."
+              className="w-full rounded-lg pl-8 pr-3 py-2 text-xs bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] outline-none focus:border-[#A9DFD8] transition-colors font-mono tabular-nums"
             />
             <Search className="w-3.5 h-3.5 text-[#87888C] absolute left-2.5 top-1/2 -translate-y-1/2" />
             {searchQuery && (
@@ -226,32 +226,32 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
       </div>
 
       {/* Fila 2: Correo y Botones de Acción */}
-      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-4 border-t border-white/[0.06]">
+      <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 pt-3.5 border-t border-white/[0.08]">
         <div className="flex items-center gap-2 flex-1 max-w-md">
           <label className="text-xs font-semibold text-[#87888C] whitespace-nowrap flex items-center gap-1.5">
-            <Mail className="w-3.5 h-3.5 text-[#FEB95A]" />
-            Correo:
+            <Mail className="w-3.5 h-3.5 text-[#87888C]" />
+            Destinatario:
           </label>
           <input
             type="email"
             value={emailDestino}
             onChange={(e) => onEmailChange(e.target.value)}
-            placeholder="nomina@empresa.com"
-            className="w-full rounded-xl px-3 py-1.5 text-xs bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] outline-none focus:border-[#A9DFD8] transition-all font-mono"
+            placeholder="nomina@cemenquin.com"
+            className="w-full rounded-lg px-3 py-1.5 text-xs bg-[#171821] border border-white/[0.08] text-white placeholder-[#87888C] outline-none focus:border-[#A9DFD8] transition-colors font-mono"
           />
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Paso 1: Botón Generar Reporte en Mint Teal (#A9DFD8) */}
+          {/* Paso 1: Botón Primario Generar Reporte */}
           <button
             type="button"
             onClick={onGenerateReport}
             disabled={!canGenerate || isGenerating}
             title="Genera el reporte de asistencia únicamente para revisión interna de Nóminas / RH"
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] shadow-md shadow-[#A9DFD8]/15 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            {isGenerating ? 'Generando...' : 'Generar Reporte'}
+            {isGenerating ? 'Calculando...' : 'Generar reporte'}
           </button>
 
           {/* Botón para abrir Configuración de Tiempo Extra directamente desde Nómina */}
@@ -259,20 +259,21 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             <button
               type="button"
               onClick={onOpenOvertimeConfig}
-              title="Configurar a partir de cuántos minutos cuenta el Tiempo Extra y bloquear llegadas anticipadas (ej. 10 min antes)"
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 dark:bg-[#FEB95A]/15 hover:bg-amber-100 dark:hover:bg-[#FEB95A]/25 text-amber-800 dark:text-[#FEB95A] border border-amber-300 dark:border-[#FEB95A]/40 transition-all cursor-pointer whitespace-nowrap"
+              title="Configurar a partir de cuántos minutos cuenta el Tiempo Extra y bloquear llegadas anticipadas"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#171821] hover:bg-[#2B2B36] text-[#FEB95A] border border-[#FEB95A]/35 transition-colors cursor-pointer whitespace-nowrap font-mono tabular-nums"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>
-                Config. Tiempo Extra{' '}
+                Regla TE{' '}
                 {overtimeRules
                   ? `(≥${overtimeRules.minutosMinimosParaExtra}m${
-                      overtimeRules.ignorarEntradaAnticipada ? ' · Sin llegada ant.' : ''
+                      overtimeRules.ignorarEntradaAnticipada ? ' · s/ant.' : ''
                     })`
                   : ''}
               </span>
             </button>
           )}
+
           {!isSupervisor && onDisperseActiveList && (
             <button
               type="button"
@@ -281,9 +282,9 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
               title={
                 !canDisperse
                   ? 'Primero genera el reporte para poder dispersar la lista'
-                  : `Dispersar directamente en 1 clic la lista actual (${activeListSupervisorLabel || 'Lista en pantalla'}) sin abrir ventana emergente`
+                  : `Dispersar directamente en 1 clic la lista actual (${activeListSupervisorLabel || 'Lista en pantalla'})`
               }
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap ${
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap ${
                 isActiveListDispersed
                   ? 'bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/40 hover:bg-[#A9DFD8]/25'
                   : 'bg-[#20AEF3] hover:bg-[#1b9bd9] text-[#171821]'
@@ -293,14 +294,14 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#A9DFD8]" />
                   <span>
-                    Lista Dispersada {activeListSupervisorLabel ? `(${activeListSupervisorLabel})` : ''} ✓
+                    Dispersada {activeListSupervisorLabel ? `(${activeListSupervisorLabel})` : ''} ✓
                   </span>
                 </>
               ) : (
                 <>
                   <ListChecks className="w-3.5 h-3.5" />
                   <span>
-                    Dispersar Lista {activeListSupervisorLabel ? `(${activeListSupervisorLabel})` : 'Actual'}
+                    Dispersar {activeListSupervisorLabel ? `(${activeListSupervisorLabel})` : 'lista actual'}
                   </span>
                 </>
               )}
@@ -316,23 +317,30 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
               title={
                 !canDisperse
                   ? 'Primero genera el reporte de nómina para poder dispersar todas las listas'
-                  : 'Dispersar todas las listas de nómina en un solo botón y enviar notificación en sistema y por correo empresarial a todos los supervisores'
+                  : 'Dispersar todas las listas de nómina en un solo botón y enviar notificación a todos los supervisores'
               }
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap ${
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap ${
                 isWeekDispersed && dispersedSupervisorsCount >= supervisors.length
                   ? 'bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/40 hover:bg-[#A9DFD8]/25'
-                  : 'bg-[#171821] hover:bg-[#2B2B36] text-[#F2C8ED] border border-[#F2C8ED]/35'
+                  : 'bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08]'
               }`}
             >
               {isWeekDispersed && dispersedSupervisorsCount >= supervisors.length ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-[#A9DFD8]" />
-                  <span>Todas Dispersadas ({dispersedSupervisorsCount}/{supervisors.length}) ✓</span>
+                  <span className="font-mono tabular-nums">
+                    Todas dispersadas ({dispersedSupervisorsCount}/{supervisors.length}) ✓
+                  </span>
                 </>
               ) : (
                 <>
-                  <Send className="w-3.5 h-3.5 text-[#F2C8ED]" />
-                  <span>Dispersar Todas ({dispersedSupervisorsCount}/{supervisors.length})</span>
+                  <Send className="w-3.5 h-3.5 text-[#A9DFD8]" />
+                  <span>
+                    Dispersar todas{' '}
+                    <span className="font-mono tabular-nums">
+                      ({dispersedSupervisorsCount}/{supervisors.length})
+                    </span>
+                  </span>
                 </>
               )}
             </button>
@@ -343,7 +351,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             type="button"
             onClick={onExportExcel}
             disabled={!canExport || isExporting || isExportingAll}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#A9DFD8] border border-[#A9DFD8]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#171821] hover:bg-[#2B2B36] text-[#A9DFD8] border border-[#A9DFD8]/35 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
             title={
               !canExport
                 ? 'Primero genera el reporte de asistencia para descargar la lista en Excel'
@@ -351,27 +359,31 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             }
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-[#A9DFD8]" />
-            <span>{isExporting ? 'Exportando...' : 'Descargar Excel'}</span>
+            <span>{isExporting ? 'Exportando...' : 'Excel actual'}</span>
           </button>
 
-          {/* Botón Excel 2 (Secundario: Descargar Todas las Listas de Golpe — Solo activo después de generar el reporte) */}
+          {/* Botón Excel 2 (Descargar Todas las Listas de Golpe) */}
           {onExportAllExcel && (
             <button
               type="button"
               onClick={onExportAllExcel}
               disabled={!canExportAll || isExporting || isExportingAll}
-              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#20AEF3] border border-[#20AEF3]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#171821] hover:bg-[#2B2B36] text-[#20AEF3] border border-[#20AEF3]/35 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
               title={
                 !canExportAll
-                  ? 'Disponible únicamente después de haber generado las listas con el botón "Generar Reporte"'
+                  ? 'Disponible únicamente después de haber generado las listas con el botón "Generar reporte"'
                   : `Descargar de golpe todas las listas individuales en archivos Excel separados (${supervisors.length} supervisores)`
               }
             >
               <FolderDown className="w-3.5 h-3.5 text-[#20AEF3]" />
               <span>
-                {isExportingAll
-                  ? 'Descargando Listas...'
-                  : `Descargar Todas las Listas (${supervisors.length})`}
+                {isExportingAll ? (
+                  'Descargando...'
+                ) : (
+                  <>
+                    Excel lote <span className="font-mono tabular-nums">({supervisors.length})</span>
+                  </>
+                )}
               </span>
             </button>
           )}
@@ -382,7 +394,7 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
               type="button"
               onClick={onReleasePayroll}
               disabled={!canExport}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap ${
                 isPayrollReleased
                   ? 'bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/40'
                   : 'bg-[#A9DFD8] hover:bg-[#95d2ca] text-[#171821]'
@@ -403,20 +415,20 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             </button>
           )}
 
-          {/* Botón Enviar por Correo (Abre ventana pop-up configurable) */}
+          {/* Botón Enviar por Correo */}
           <button
             type="button"
             onClick={onSendEmail}
             disabled={!canExport}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#FEB95A] border border-[#FEB95A]/35 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#171821] hover:bg-[#2B2B36] text-white border border-white/[0.08] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
             title={
               !canExport
                 ? 'Primero genera el reporte para poder enviarlo por correo'
-                : 'Abrir ventana para configurar el mensaje y enviar la nómina al correo del supervisor o a un correo personalizado'
+                : 'Abrir ventana para configurar el mensaje y enviar la nómina por correo'
             }
           >
             <Mail className="w-3.5 h-3.5 text-[#FEB95A]" />
-            <span>Enviar por Correo</span>
+            <span>Correo</span>
           </button>
 
           {/* Botón Imprimir */}
@@ -424,13 +436,13 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             type="button"
             onClick={onPrint}
             disabled={!canExport}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#171821] hover:bg-[#2B2B36] text-[#87888C] hover:text-white border border-white/[0.08] transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#171821] hover:bg-[#2B2B36] text-[#87888C] hover:text-white border border-white/[0.08] transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
           >
             <Printer className="w-3.5 h-3.5" />
             Imprimir
           </button>
         </div>
       </div>
-    </div>
+    </section>
   );
 };
