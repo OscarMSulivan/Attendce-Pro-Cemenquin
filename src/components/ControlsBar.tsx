@@ -18,6 +18,7 @@ import {
   ListChecks,
   Clock,
   FolderDown,
+  Building2,
 } from 'lucide-react';
 import { PayrollWeekOption } from '../utils/calendarUtils';
 import { OvertimeRulesConfig, ReadingMode } from '../types/attendance';
@@ -29,6 +30,10 @@ interface ControlsBarProps {
   onSelectWeek: (val: string) => void;
   selectedYear?: number;
   onSelectYear?: (year: number) => void;
+  companies?: string[];
+  selectedCompany?: string;
+  onSelectCompany?: (val: string) => void;
+  employeesWithEventsCount?: number;
   supervisors: string[];
   selectedSupervisor: string;
   onSelectSupervisor: (val: string) => void;
@@ -71,6 +76,10 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
   onSelectWeek,
   selectedYear = 2026,
   onSelectYear,
+  companies = [],
+  selectedCompany = '',
+  onSelectCompany,
+  employeesWithEventsCount = 0,
   supervisors,
   selectedSupervisor,
   onSelectSupervisor,
@@ -129,6 +138,29 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
     []
   );
 
+  const companyOptions: SelectOption[] = useMemo(() => {
+    const base: SelectOption[] = [
+      {
+        value: '',
+        label: `Todas las empresas (${companies.length || 1})`,
+        sublabel: 'Padrón consolidado multi-empresa',
+      },
+      {
+        value: '__CON_CHECADAS__',
+        label: `Solo con checadas en semana${employeesWithEventsCount > 0 ? ` (${employeesWithEventsCount})` : ''}`,
+        sublabel: 'Oculta empleados de otra empresa sin reloj cargado',
+      },
+    ];
+    companies.forEach((comp) => {
+      base.push({
+        value: comp,
+        label: comp,
+        sublabel: 'Filtrar razón social / base',
+      });
+    });
+    return base;
+  }, [companies, employeesWithEventsCount]);
+
   const supervisorOptions: SelectOption[] = useMemo(() => {
     return [
       {
@@ -145,8 +177,12 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
 
   return (
     <section className="rounded-xl p-4 sm:p-5 bg-[#21222D] border border-white/[0.08] mb-5 no-print animate-fade-up">
-      {/* Fila 1: Selectores de Periodo, Modo de Lectura, Supervisor y Búsqueda */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+      {/* Fila 1: Selectores de Periodo, Empresa, Modo de Lectura, Supervisor y Búsqueda */}
+      <div
+        className={`grid grid-cols-1 sm:grid-cols-2 ${
+          onSelectCompany ? 'lg:grid-cols-5' : 'lg:grid-cols-4'
+        } gap-4 mb-4`}
+      >
         {/* Periodo de Nómina + Selector Multi-Año */}
         <div className="relative">
           {onSelectYear && (
@@ -177,6 +213,17 @@ export const ControlsBar: React.FC<ControlsBarProps> = ({
             searchable={payrollWeeks.length > 6}
           />
         </div>
+
+        {/* Filtrar por Empresa / Razón Social */}
+        {onSelectCompany && (
+          <HeadlessSelect
+            label="Empresa / Base activa"
+            icon={<Building2 className="w-3.5 h-3.5 text-[#10B981]" />}
+            value={selectedCompany}
+            onChange={onSelectCompany}
+            options={companyOptions}
+          />
+        )}
 
         {/* Modo de Lectura (Checadas vs Eventos) */}
         <HeadlessSelect

@@ -88,8 +88,35 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
   const [showDispersalDialog, setShowDispersalDialog] = useState(false);
   const [dispersalDialogMode, setDispersalDialogMode] = useState<'all' | 'by_list'>('all');
   const [sendEmailOnDisperse, setSendEmailOnDisperse] = useState(true);
+  const [filterCompany, setFilterCompany] = useState<string>('');
   const [filterSupervisor, setFilterSupervisor] = useState<string>('');
   const [filterStatus, setFilterStatus] = useState<'todos' | 'liberado' | 'pendiente'>('todos');
+
+  const availableCompanies = useMemo(() => {
+    const set = new Set<string>();
+    empleados.forEach((e) => {
+      if (e.empresa && e.empresa.trim()) {
+        set.add(e.empresa.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [empleados]);
+
+  const companyFilteredEmpleados = useMemo(() => {
+    if (!filterCompany) return empleados;
+    if (filterCompany === '__CON_CHECADAS__') {
+      return empleados.filter((e) =>
+        e.dias.some(
+          (d) =>
+            (d.entrada && d.entrada !== '--:--') ||
+            (d.salida && d.salida !== '--:--') ||
+            Boolean(d.modificadoPorSupervisor) ||
+            (d.registrosCrudosDia && d.registrosCrudosDia.length > 0)
+        )
+      );
+    }
+    return empleados.filter((e) => (e.empresa || 'Empresa 1').trim() === filterCompany);
+  }, [empleados, filterCompany]);
 
   // Estado del Temporizador Configurable (inicializado con el límite por horas configurado por el Administrador)
   const [timerHoursPreset, setTimerHoursPreset] = useState<string>(() => String(defaultHorasLimite || 24));
@@ -135,8 +162,13 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
 
   // Calcular métricas por supervisor en tiempo real a partir de los datos procesados
   const supervisorStats = useMemo(() => {
-    return supervisors.map((supName) => {
-      const supEmployees = empleados.filter((e) => e.supervisor === supName);
+    const activeSupervisors = filterCompany
+      ? supervisors.filter((supName) =>
+          companyFilteredEmpleados.some((e) => e.supervisor === supName)
+        )
+      : supervisors;
+    return activeSupervisors.map((supName) => {
+      const supEmployees = companyFilteredEmpleados.filter((e) => e.supervisor === supName);
       const releaseKey = `${semanaNumero}_${supName}`;
       const release = releases[releaseKey];
       const matchedUser = users.find(
@@ -240,7 +272,8 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
     });
   }, [
     supervisors,
-    empleados,
+    companyFilteredEmpleados,
+    filterCompany,
     semanaNumero,
     releases,
     users,
@@ -270,6 +303,15 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
   const overdueCount = supervisorStats.filter((s) => s.isOverdue).length;
   const porcentajeLiberacion =
     totalSupervisores > 0 ? Math.round((liberadosCount / totalSupervisores) * 100) : 0;
+
+  const companyFilterOptions: SelectOption[] = useMemo(
+    () => [
+      { value: '', label: `Todas las Empresas`, badge: `${availableCompanies.length || 1}` },
+      { value: '__CON_CHECADAS__', label: 'Solo con checadas en semana' },
+      ...availableCompanies.map((c) => ({ value: c, label: c })),
+    ],
+    [availableCompanies]
+  );
 
   const supervisorFilterOptions: SelectOption[] = useMemo(
     () => [
@@ -529,6 +571,17 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Dropdown para filtrar por Empresa / Razón Social */}
+            <div className="w-52">
+              <HeadlessSelect
+                icon={<Building2 className="w-3.5 h-3.5 text-[#10B981]" />}
+                value={filterCompany}
+                onChange={setFilterCompany}
+                options={companyFilterOptions}
+                placeholder="Todas las empresas"
+              />
+            </div>
+
             {/* Dropdown accesible para filtrar por Supervisor */}
             <div className="w-56">
               <HeadlessSelect

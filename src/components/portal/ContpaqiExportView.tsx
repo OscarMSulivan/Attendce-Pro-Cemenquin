@@ -21,7 +21,8 @@ import {
   Clock,
   AlertTriangle,
   Zap,
-  Calculator
+  Calculator,
+  Building2,
 } from 'lucide-react';
 import { EmployeeReport } from '../../types/attendance';
 import { PayrollRelease } from '../../types/portal';
@@ -43,6 +44,9 @@ interface ContpaqiExportViewProps {
   supervisors: string[];
   weekNumber: number;
   weekPeriod: string;
+  companies?: string[];
+  selectedCompany?: string;
+  onSelectCompany?: (val: string) => void;
 }
 
 export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
@@ -51,15 +55,37 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
   supervisors,
   weekNumber,
   weekPeriod,
+  companies: externalCompanies,
+  selectedCompany: externalSelectedCompany,
+  onSelectCompany: externalOnSelectCompany,
 }) => {
   const [cfg, setCfg] = useState<ContpaqiConfig>(() => loadContpaqiConfig());
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
   const [activeSubTab, setActiveSubTab] = useState<'formato_oficial' | 'tdd'>('formato_oficial');
+  const [localSelectedCompany, setLocalSelectedCompany] = useState<string>('');
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
   const [selectedConcepto, setSelectedConcepto] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+
+  const activeCompany =
+    externalSelectedCompany !== undefined ? externalSelectedCompany : localSelectedCompany;
+  const handleCompanyChange = (val: string) => {
+    if (externalOnSelectCompany) externalOnSelectCompany(val);
+    setLocalSelectedCompany(val);
+  };
+
+  const availableCompanies = useMemo(() => {
+    if (externalCompanies && externalCompanies.length > 0) return externalCompanies;
+    const set = new Set<string>();
+    reports.forEach(r => {
+      if (r.empleado.empresa && r.empleado.empresa.trim()) {
+        set.add(r.empleado.empresa.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [externalCompanies, reports]);
 
   const handleUpdateConfig = (partial: Partial<ContpaqiConfig>) => {
     const updated = { ...cfg, ...partial };
@@ -108,11 +134,26 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     setFeedbackMsg('✓ Conceptos restaurados a los 4 esenciales (FINJ, Retardo, Horas Extras Dobles y Triples)');
   };
 
-  // Reportes filtrados por supervisor seleccionado
+  // Reportes filtrados por empresa y supervisor seleccionado
   const baseReports = useMemo(() => {
-    if (!selectedSupervisor) return reports;
-    return reports.filter(r => r.empleado.jefe === selectedSupervisor);
-  }, [reports, selectedSupervisor]);
+    return reports.filter(r => {
+      if (activeCompany === '__CON_CHECADAS__') {
+        const hasActivity = r.dias.some(
+          d =>
+            (d.entrada && d.entrada !== '--:--') ||
+            (d.salida && d.salida !== '--:--') ||
+            Boolean(d.modificadoPorSupervisor) ||
+            (d.registrosCrudosDia && d.registrosCrudosDia.length > 0)
+        );
+        if (!hasActivity) return false;
+      } else if (activeCompany) {
+        const empComp = (r.empleado.empresa || 'Empresa 1').trim();
+        if (empComp !== activeCompany) return false;
+      }
+      if (selectedSupervisor && r.empleado.jefe !== selectedSupervisor) return false;
+      return true;
+    });
+  }, [reports, activeCompany, selectedSupervisor]);
 
   // Construcción en tiempo real de las filas del formato solicitado y los movimientos TDD
   const { formatRows, movements, datesInPeriod } = useMemo(() => {
@@ -125,6 +166,15 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
     formatRows.forEach(r => set.add(r.conceptoColC));
     return Array.from(set);
   }, [formatRows]);
+
+  const companySelectOptions: SelectOption[] = useMemo(
+    () => [
+      { value: '', label: `Todas las Empresas`, badge: `${availableCompanies.length || 1}` },
+      { value: '__CON_CHECADAS__', label: 'Solo con checadas en semana' },
+      ...availableCompanies.map(c => ({ value: c, label: c })),
+    ],
+    [availableCompanies]
+  );
 
   const supervisorSelectOptions: SelectOption[] = useMemo(() => [
     { value: '', label: `Todas las Listas`, badge: `${supervisors.length}` },
@@ -446,6 +496,17 @@ export const ContpaqiExportView: React.FC<ContpaqiExportViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
+              {/* Filtro por Empresa / Razón Social */}
+              <div className="w-52">
+                <HeadlessSelect
+                  icon={<Building2 className="w-3.5 h-3.5 text-[#10B981]" />}
+                  value={activeCompany}
+                  onChange={handleCompanyChange}
+                  options={companySelectOptions}
+                  placeholder="Todas las empresas"
+                />
+              </div>
+
               {/* Filtro por Supervisor */}
               <div className="w-52">
                 <HeadlessSelect

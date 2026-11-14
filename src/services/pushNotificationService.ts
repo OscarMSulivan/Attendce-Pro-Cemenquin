@@ -43,6 +43,8 @@ export interface RealtimePortalPayload {
     reportes?: any[];
     resumen?: any;
     selectedWeek?: string;
+    empleadosDB?: Record<string, any>;
+    asignaciones?: Record<string, string>;
   };
   notification?: PortalNotification;
 }

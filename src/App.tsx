@@ -37,6 +37,11 @@ import {
   normalizeEmployeeId,
   normalizeSupervisorName
 } from './utils/calendarUtils';
+import {
+  mergeAsignacionesToEmployees,
+  recomputeSummaryFromReports as recomputePayrollSummary,
+  employeeReportHasActivityInWeek,
+} from './utils/reportSummaryUtils';
 
 import { 
   HORARIOS_POR_DEFECTO,
@@ -59,17 +64,11 @@ import {
 } from './services/excelExportService';
 import saveAs from 'file-saver';
 
-// Importaciones del Portal RH y Supervisores
+// Importaciones del Portal RH y Supervisores (Code-Splitting con React.lazy para carga rápida)
 import { UserSessionBar } from './components/portal/UserSessionBar';
-import { RHPayrollMonitorView } from './components/portal/RHPayrollMonitorView';
-import { SupervisorWorkspaceView } from './components/portal/SupervisorWorkspaceView';
-import { IncidentsManagementView } from './components/portal/IncidentsManagementView';
-import { AdminUsersView } from './components/portal/AdminUsersView';
-import { EmployeesDirectoryView } from './components/portal/EmployeesDirectoryView';
 import { NewIncidentModal } from './components/portal/NewIncidentModal';
 import { SupervisorReleaseModal } from './components/portal/SupervisorReleaseModal';
 import { SendPayrollEmailModal } from './components/portal/SendPayrollEmailModal';
-import { ContpaqiExportView } from './components/portal/ContpaqiExportView';
 import { LoginView } from './components/portal/LoginView';
 import { DisperseByListModal } from './components/portal/DisperseByListModal';
 import {
@@ -82,6 +81,25 @@ import {
   DispersionModeSelector,
   DispersionWorkspaceMode,
 } from './components/portal/DispersionModeSelector';
+
+const RHPayrollMonitorView = React.lazy(() =>
+  import('./components/portal/RHPayrollMonitorView').then(m => ({ default: m.RHPayrollMonitorView }))
+);
+const SupervisorWorkspaceView = React.lazy(() =>
+  import('./components/portal/SupervisorWorkspaceView').then(m => ({ default: m.SupervisorWorkspaceView }))
+);
+const IncidentsManagementView = React.lazy(() =>
+  import('./components/portal/IncidentsManagementView').then(m => ({ default: m.IncidentsManagementView }))
+);
+const AdminUsersView = React.lazy(() =>
+  import('./components/portal/AdminUsersView').then(m => ({ default: m.AdminUsersView }))
+);
+const EmployeesDirectoryView = React.lazy(() =>
+  import('./components/portal/EmployeesDirectoryView').then(m => ({ default: m.EmployeesDirectoryView }))
+);
+const ContpaqiExportView = React.lazy(() =>
+  import('./components/portal/ContpaqiExportView').then(m => ({ default: m.ContpaqiExportView }))
+);
 import { PortalService } from './services/portalService';
 import { PushNotificationService } from './services/pushNotificationService';
 import {
@@ -157,6 +175,7 @@ export default function App() {
     [payrollWeeks, selectedWeek]
   );
   const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
+  const [selectedCompany, setSelectedCompany] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [emailDestino, setEmailDestino] = useState<string>(config.emailDestino || '');
 
@@ -581,24 +600,67 @@ export default function App() {
     }
   }, [reportes, resumen, selectedWeek]);
 
-  // Guardar automáticamente en el servidor cualquier cambio en empleados, reportes trabajados o configuración
+  // Referencias para sincronización incremental (Delta Sync) hacia el servidor
+  const lastSyncedRefs = useRef<{
+    empleadosDB?: Record<string, Employee>;
+    vacacionesDB?: Record<string, Record<string, string>>;
+    reportes?: EmployeeReport[];
+    resumen?: PayrollSummary | null;
+    selectedWeek?: string;
+    horarios?: Record<string, ScheduleConfig>;
+    asignaciones?: Record<string, string>;
+    config?: AppConfig;
+    emailConfig?: EmailServerConfig;
+  }>({});
+
+  // Guardar automáticamente en el servidor únicamente las llaves que cambiaron (Delta Sync)
   useEffect(() => {
     if (!isServerHydrated) return;
     const timer = setTimeout(() => {
-      PortalService.pushToServer({
-        empleadosDB,
-        vacacionesDB,
-        reportes,
-        resumen,
-        selectedWeek,
-        horarios,
-        asignaciones,
-        config: {
+      const prev = lastSyncedRefs.current;
+      const deltaPayload: Record<string, unknown> = {};
+
+      if (prev.empleadosDB !== empleadosDB) {
+        deltaPayload.empleadosDB = empleadosDB;
+        prev.empleadosDB = empleadosDB;
+      }
+      if (prev.vacacionesDB !== vacacionesDB) {
+        deltaPayload.vacacionesDB = vacacionesDB;
+        prev.vacacionesDB = vacacionesDB;
+      }
+      if (prev.reportes !== reportes) {
+        deltaPayload.reportes = reportes;
+        prev.reportes = reportes;
+      }
+      if (prev.resumen !== resumen) {
+        deltaPayload.resumen = resumen;
+        prev.resumen = resumen;
+      }
+      if (prev.selectedWeek !== selectedWeek) {
+        deltaPayload.selectedWeek = selectedWeek;
+        prev.selectedWeek = selectedWeek;
+      }
+      if (prev.horarios !== horarios) {
+        deltaPayload.horarios = horarios;
+        prev.horarios = horarios;
+      }
+      if (prev.asignaciones !== asignaciones) {
+        deltaPayload.asignaciones = asignaciones;
+        prev.asignaciones = asignaciones;
+      }
+      if (prev.config !== config || prev.emailConfig !== emailConfig) {
+        deltaPayload.config = {
           ...config,
           emailServer: emailConfig,
-        },
-        emailConfig,
-      });
+        };
+        deltaPayload.emailConfig = emailConfig;
+        prev.config = config;
+        prev.emailConfig = emailConfig;
+      }
+
+      if (Object.keys(deltaPayload).length > 0) {
+        PortalService.pushToServer(deltaPayload);
+      }
     }, 250);
     return () => clearTimeout(timer);
   }, [
@@ -931,6 +993,19 @@ export default function App() {
           setResumen(incomingState.resumen);
         }
       }
+
+      // 7. Sincronizar padrón de empleados si cambió en otra sesión (altas, bajas o cambios de lista)
+      if (incomingState.empleadosDB && typeof incomingState.empleadosDB === 'object') {
+        const incEmps = incomingState.empleadosDB as Record<string, Employee>;
+        if (Object.keys(incEmps).length > 0) {
+          setEmpleadosDB(incEmps);
+          StorageService.saveEmployees(incEmps);
+          setSavedEmployeesInfo({
+            count: Object.keys(incEmps).length,
+            savedAt: new Date().toISOString(),
+          });
+        }
+      }
     });
 
     return () => {
@@ -955,6 +1030,24 @@ export default function App() {
     const list = [...new Set(Object.values(empleadosDB).map(e => e.jefe).filter(Boolean))].sort();
     return list;
   }, [empleadosDB]);
+
+  // Lista de empresas registradas en el padrón permanente o en los reportes activos
+  const companiesList = useMemo(() => {
+    const set = new Set<string>();
+    Object.values(empleadosDB).forEach(e => {
+      if (e.empresa && e.empresa.trim()) set.add(e.empresa.trim());
+    });
+    reportes.forEach(r => {
+      if (r.empleado.empresa && r.empleado.empresa.trim()) set.add(r.empleado.empresa.trim());
+    });
+    return Array.from(set).sort();
+  }, [empleadosDB, reportes]);
+
+  // Conteo de colaboradores que tienen al menos una checada biométrica o ajuste en la semana seleccionada
+  const employeesWithEventsInWeekCount = useMemo(() => {
+    if (reportes.length === 0) return 0;
+    return reportes.filter(r => employeeReportHasActivityInWeek(r, eventosDB)).length;
+  }, [reportes, eventosDB]);
 
   // Supervisores / Listas permitidas para el Módulo "Trabajar Listas" según las listas asignadas al usuario
   const workListSupervisors = useMemo(() => {
@@ -1020,70 +1113,18 @@ export default function App() {
     return counts;
   }, [asignaciones]);
 
-  // Aplicar horarios asignados a empleados (normalizando IDs para coincidencia exacta ej. 64 -> 00064)
-  const mergeAsignaciones = useCallback((base: Record<string, Employee>, asig: Record<string, string>) => {
-    const updated: Record<string, Employee> = {};
-    Object.values(base).forEach(emp => {
-      const normId = normalizeEmployeeId(emp.id) || emp.id;
-      const assignedCode = asig[normId] ?? asig[emp.id] ?? emp.horario ?? '';
-      updated[normId] = {
-        ...emp,
-        id: normId,
-        horario: assignedCode,
-      };
-    });
-    return updated;
-  }, []);
+  // Aplicar horarios asignados a empleados (delegado a reportSummaryUtils)
+  const mergeAsignaciones = useCallback(
+    (base: Record<string, Employee>, asig: Record<string, string>) =>
+      mergeAsignacionesToEmployees(base, asig),
+    []
+  );
 
-  // Recalcular resumen ejecutivo a partir de la lista actual de reportes
-  const recomputeSummaryFromReports = useCallback((listaReportes: EmployeeReport[]): PayrollSummary => {
-    let totalHoras = 0;
-    let totalHorasExtra = 0;
-    let totalF = 0;
-    let totalV = 0;
-    let totalR = 0;
-    let totalRE = 0;
-    let perfectas = 0;
-    const conteoInc: Record<string, number> = {};
-    let totalDiasAuditoria = 0;
-
-    listaReportes.forEach(rep => {
-      totalHoras += rep.totalNormal;
-      totalHorasExtra += rep.totalExtra;
-      totalF += rep.faltas;
-      totalR += rep.retardos;
-      if (rep.asistenciaPerfecta) perfectas++;
-
-      rep.dias.forEach(d => {
-        totalDiasAuditoria++;
-        if (d.incidencia) {
-          conteoInc[d.incidencia] = (conteoInc[d.incidencia] || 0) + 1;
-          const up = d.incidencia.toUpperCase();
-          if (up.includes('VAC')) totalV++;
-          if (up.includes('EXCESIVO')) totalRE++;
-        }
-      });
-    });
-
-    const numEmp = listaReportes.length;
-    const promedioHoras = numEmp > 0 ? Number((totalHoras / numEmp).toFixed(2)) : 0;
-    const tasaFaltas = (totalF / Math.max(1, totalDiasAuditoria)) * 100;
-    const tasaCumplimiento = Number(Math.max(0, 100 - tasaFaltas).toFixed(1));
-
-    return {
-      totalHoras,
-      totalHorasExtra,
-      totalFaltas: totalF,
-      totalVac: totalV,
-      totalRetardos: totalR,
-      totalRetardosExcesivos: totalRE,
-      totalEmpleados: numEmp,
-      tasaCumplimiento,
-      promedioHoras,
-      asistenciasPerfectas: perfectas,
-      incidenciasConteo: conteoInc
-    };
-  }, []);
+  // Recalcular resumen ejecutivo a partir de la lista actual de reportes (delegado a reportSummaryUtils)
+  const recomputeSummaryFromReports = useCallback(
+    (listaReportes: EmployeeReport[]): PayrollSummary => recomputePayrollSummary(listaReportes),
+    []
+  );
 
   // Sincronizar tema dual (Modo Claro Técnico predeterminado / Modo Oscuro Carbon Ledger)
   useEffect(() => {
@@ -1407,18 +1448,35 @@ export default function App() {
         savedAt: new Date().toISOString(),
       });
 
+      // También eliminar de los reportes activos si ya estaban calculados
+      if (reportes.length > 0) {
+        setReportes(prev => {
+          const nextRep = prev.filter(
+            r => normalizeEmployeeId(r.empleado.id) !== normId && r.empleado.id !== empId
+          );
+          const nextRes = recomputeSummaryFromReports(nextRep);
+          setResumen(nextRes);
+          StorageService.saveReportesState({
+            reportes: nextRep,
+            resumen: nextRes,
+            selectedWeek,
+          });
+          return nextRep;
+        });
+      }
+
       PortalService.pushToServer({
         empleadosDB: nextEmpleados,
         deletedEmployeeIds: [normId],
       });
 
       showToast(
-        `Colaborador #${normId} (${targetName}) eliminado del padrón.`,
+        `Colaborador #${normId} (${targetName}) eliminado del padrón permanente.`,
         'info',
         'Colaborador Eliminado'
       );
     },
-    [empleadosDB, showToast]
+    [empleadosDB, recomputeSummaryFromReports, reportes.length, selectedWeek, showToast]
   );
 
   // Renombrar o unificar una lista completa de supervisor
@@ -1464,7 +1522,7 @@ export default function App() {
     }
   };
 
-  // 2. Cargar Eventos Biométricos (Fusión acumulativa multi-empresa para no perder checadas de la primera empresa)
+  // 2. Cargar Eventos Biométricos (Fusión acumulativa multi-empresa + auto-detección de empresa activa)
   const handleLoadEvents = async (file: File) => {
     setIsLoadingEvents(true);
     setStatusMessage('Procesando y fusionando checadas del reloj biométrico...');
@@ -1479,6 +1537,31 @@ export default function App() {
       });
 
       setEventosDB(consolidado);
+
+      // Si existen múltiples empresas en el padrón y las checadas corresponden a una empresa específica,
+      // activar el filtro de esa empresa o "Solo con checadas en semana" para evitar falsas faltas en la otra empresa
+      if (companiesList.length > 1) {
+        const matchedCompanies = new Set<string>();
+        Object.keys(consolidado).forEach(empId => {
+          const normId = normalizeEmployeeId(empId) || empId;
+          const empComp = empleadosDB[normId]?.empresa || empleadosDB[empId]?.empresa;
+          if (empComp) matchedCompanies.add(empComp);
+        });
+        if (matchedCompanies.size === 1) {
+          const singleComp = Array.from(matchedCompanies)[0];
+          setSelectedCompany(singleComp);
+          showToast(
+            `Se detectaron checadas de "${singleComp}". El filtro de empresa se ajustó automáticamente para no mostrar falsas faltas de otras empresas.`,
+            'info',
+            `Empresa Activa: ${singleComp}`
+          );
+        } else if (
+          Object.keys(consolidado).length > 0 &&
+          Object.keys(consolidado).length < Object.keys(empleadosDB).length
+        ) {
+          setSelectedCompany('__CON_CHECADAS__');
+        }
+      }
 
       // Detección automática de la semana de nómina a partir de las fechas de las checadas recién subidas
       const allDates: string[] = [];
@@ -2420,9 +2503,18 @@ export default function App() {
     setStatusType('success');
   };
 
-  // Filtrado reactivo en memoria para la tabla (búsqueda y supervisor con aislamiento de rol)
+  // Filtrado reactivo en memoria para la tabla (empresa, búsqueda y supervisor con aislamiento de rol)
   const filteredReports = useMemo(() => {
     let result = reportes;
+    if (selectedCompany === '__CON_CHECADAS__') {
+      result = result.filter(r => employeeReportHasActivityInWeek(r, eventosDB));
+    } else if (selectedCompany) {
+      result = result.filter(r => {
+        const normId = normalizeEmployeeId(r.empleado.id) || r.empleado.id;
+        const comp = r.empleado.empresa || empleadosDB[normId]?.empresa || '';
+        return comp === selectedCompany;
+      });
+    }
     if (currentUser.role === 'supervisor') {
       const allowed = allowedSupervisors;
       if (selectedSupervisor && allowed.includes(selectedSupervisor)) {
@@ -2445,7 +2537,7 @@ export default function App() {
       );
     }
     return result;
-  }, [reportes, currentUser.role, allowedSupervisors, selectedSupervisor, searchQuery]);
+  }, [reportes, selectedCompany, eventosDB, empleadosDB, currentUser.role, allowedSupervisors, selectedSupervisor, searchQuery]);
 
   // Resumen reactivo para los empleados actualmente filtrados (por supervisor o búsqueda)
   const activeSummary = useMemo(() => {
@@ -4142,8 +4234,18 @@ export default function App() {
           onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)}
         />
 
-        {/* Contenido principal con transición animada entre módulos del portal */}
+        {/* Contenido principal con transición animada entre módulos del portal + Suspense Code-Splitting */}
         <main className="flex-1 max-w-[1600px] mx-auto w-full px-3 sm:px-5 lg:px-6 py-5 sm:py-6 overflow-x-hidden">
+          <React.Suspense
+            fallback={
+              <div className="flex items-center justify-center py-20">
+                <div className="flex items-center gap-3 px-5 py-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-300 text-sm font-semibold">
+                  <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                  Cargando módulo...
+                </div>
+              </div>
+            }
+          >
           <AnimatePresence mode="wait">
             <motion.div
               key={portalTab}
@@ -4317,6 +4419,10 @@ export default function App() {
                           supervisors={allowedSupervisors}
                           selectedSupervisor={selectedSupervisor}
                           onSelectSupervisor={setSelectedSupervisor}
+                          companies={companiesList}
+                          selectedCompany={selectedCompany}
+                          onSelectCompany={setSelectedCompany}
+                          employeesWithEventsCount={employeesWithEventsInWeekCount}
                           readingMode={config.modoLectura}
                           onReadingModeChange={handleReadingModeChange}
                           searchQuery={searchQuery}
@@ -4376,19 +4482,23 @@ export default function App() {
                   users={portalUsers}
                   releases={releases}
                   dispersals={dispersals}
-                  empleados={reportes.map(r => ({
-                    id: r.empleado.id,
-                    nombre: r.empleado.nombre,
-                    supervisor: r.empleado.jefe,
-                    totalHorasNormales: r.totalNormal,
-                    totalHorasExtras: r.totalExtra,
-                    asistencias: r.asistencias,
-                    faltas: r.faltas,
-                    retardos: r.retardos,
-                    checadasHuerfanas: r.dias.filter(d => d.huerfana).length,
-                    alertas: r.dias.filter(d => d.advertencia).map(d => d.advertencia || ''),
-                    dias: r.dias
-                  }))}
+                  empleados={reportes.map(r => {
+                    const normId = normalizeEmployeeId(r.empleado.id) || r.empleado.id;
+                    return {
+                      id: r.empleado.id,
+                      nombre: r.empleado.nombre,
+                      supervisor: r.empleado.jefe,
+                      empresa: r.empleado.empresa || empleadosDB[normId]?.empresa,
+                      totalHorasNormales: r.totalNormal,
+                      totalHorasExtras: r.totalExtra,
+                      asistencias: r.asistencias,
+                      faltas: r.faltas,
+                      retardos: r.retardos,
+                      checadasHuerfanas: r.dias.filter(d => d.huerfana).length,
+                      alertas: r.dias.filter(d => d.advertencia).map(d => d.advertencia || ''),
+                      dias: r.dias
+                    };
+                  })}
                   semanaPeriodo={selectedWeek}
                   semanaNumero={currentWeekNumber}
                   currentUser={currentUser}
@@ -4413,6 +4523,9 @@ export default function App() {
                   supervisors={supervisorsList}
                   weekNumber={currentWeekNumber}
                   weekPeriod={selectedWeek}
+                  companies={companiesList}
+                  selectedCompany={selectedCompany}
+                  onSelectCompany={setSelectedCompany}
                 />
               )}
 
@@ -4447,6 +4560,7 @@ export default function App() {
               )}
             </motion.div>
           </AnimatePresence>
+          </React.Suspense>
         </main>
       </div>
 

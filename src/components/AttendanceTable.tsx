@@ -323,6 +323,9 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [onlyWithAnomalies, setOnlyWithAnomalies] = useState<boolean>(false);
+  const [quickFilter, setQuickFilter] = useState<
+    'todos' | 'faltas' | 'retardos' | 'tiempo_extra' | 'incompletas' | 'modificados' | 'perfecta'
+  >('todos');
 
   // Resumen global de inconsistencias en los reportes actuales
   const anomalyStats = useMemo(() => {
@@ -381,10 +384,72 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
     };
   }, [reports, horarios]);
 
+  // Estadísticas rápidas por categoría de incidencia para filtrado en 1 clic
+  const quickFilterStats = useMemo(() => {
+    let withFaltas = 0;
+    let withRetardos = 0;
+    let withExtra = 0;
+    let withIncomplete = 0;
+    let withModified = 0;
+    let withPerfect = 0;
+
+    for (const rep of reports) {
+      if (rep.faltas > 0) withFaltas++;
+      if (rep.retardos > 0) withRetardos++;
+      if (rep.dias.some((d) => d.hExtra > 0)) withExtra++;
+      if (
+        rep.dias.some((d) => {
+          const isFestivo = Boolean(FESTIVOS_OFICIALES[d.isoDate]);
+          const isScheduled = Boolean(d.horarioProgramado) && !isFestivo;
+          const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
+          const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+          return isScheduled && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor;
+        })
+      ) {
+        withIncomplete++;
+      }
+      if (rep.dias.some((d) => Boolean(d.modificadoPorSupervisor))) withModified++;
+      if (rep.asistenciaPerfecta) withPerfect++;
+    }
+
+    return {
+      withFaltas,
+      withRetardos,
+      withExtra,
+      withIncomplete,
+      withModified,
+      withPerfect,
+    };
+  }, [reports]);
+
   const displayedReports = useMemo(() => {
-    if (!onlyWithAnomalies) return reports;
-    return reports.filter((r) => (anomalyStats.byEmployeeId[r.empleado.id]?.count || 0) > 0);
-  }, [reports, onlyWithAnomalies, anomalyStats]);
+    let list = reports;
+    if (onlyWithAnomalies) {
+      list = list.filter((r) => (anomalyStats.byEmployeeId[r.empleado.id]?.count || 0) > 0);
+    }
+    if (quickFilter === 'faltas') {
+      list = list.filter((r) => r.faltas > 0);
+    } else if (quickFilter === 'retardos') {
+      list = list.filter((r) => r.retardos > 0);
+    } else if (quickFilter === 'tiempo_extra') {
+      list = list.filter((r) => r.dias.some((d) => d.hExtra > 0));
+    } else if (quickFilter === 'incompletas') {
+      list = list.filter((r) =>
+        r.dias.some((d) => {
+          const isFestivo = Boolean(FESTIVOS_OFICIALES[d.isoDate]);
+          const isScheduled = Boolean(d.horarioProgramado) && !isFestivo;
+          const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
+          const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+          return isScheduled && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor;
+        })
+      );
+    } else if (quickFilter === 'modificados') {
+      list = list.filter((r) => r.dias.some((d) => Boolean(d.modificadoPorSupervisor)));
+    } else if (quickFilter === 'perfecta') {
+      list = list.filter((r) => r.asistenciaPerfecta);
+    }
+    return list;
+  }, [reports, onlyWithAnomalies, anomalyStats, quickFilter]);
 
   if (reports.length === 0) {
     return (
@@ -482,6 +547,47 @@ export const AttendanceTable: React.FC<AttendanceTableProps> = ({
           </div>
         </div>
       )}
+
+      {/* Barra de Chips de Filtro Rápido por Tipo de Incidencia */}
+      <div className="rounded-xl p-2.5 bg-slate-900/80 border border-slate-800/80 flex flex-wrap items-center gap-1.5 no-print">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 px-2 flex items-center gap-1">
+          <Filter className="w-3.5 h-3.5 text-teal-400" />
+          Filtro rápido:
+        </span>
+        {(
+          [
+            { id: 'todos', label: 'Todos', count: reports.length, activeClass: 'bg-teal-500/20 text-teal-300 border-teal-500/40' },
+            { id: 'faltas', label: 'Con Faltas', count: quickFilterStats.withFaltas, activeClass: 'bg-rose-500/20 text-rose-300 border-rose-500/40' },
+            { id: 'incompletas', label: 'Checada Incompleta', count: quickFilterStats.withIncomplete, activeClass: 'bg-amber-500/20 text-amber-300 border-amber-500/40' },
+            { id: 'retardos', label: 'Con Retardos', count: quickFilterStats.withRetardos, activeClass: 'bg-orange-500/20 text-orange-300 border-orange-500/40' },
+            { id: 'tiempo_extra', label: 'Con Horas Extra', count: quickFilterStats.withExtra, activeClass: 'bg-sky-500/20 text-sky-300 border-sky-500/40' },
+            { id: 'modificados', label: 'Editados Supervisor', count: quickFilterStats.withModified, activeClass: 'bg-purple-500/20 text-purple-300 border-purple-500/40' },
+            { id: 'perfecta', label: 'Asistencia Perfecta', count: quickFilterStats.withPerfect, activeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' },
+          ] as const
+        ).map((chip) => {
+          const isActive = quickFilter === chip.id;
+          return (
+            <button
+              key={chip.id}
+              type="button"
+              onClick={() => {
+                setQuickFilter(chip.id);
+                setCurrentPage(1);
+              }}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                isActive
+                  ? chip.activeClass
+                  : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+              }`}
+            >
+              <span>{chip.label}</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-black/25">
+                {chip.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
       {/* Barra de paginación superior */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-2 text-xs text-slate-400 no-print">
@@ -670,6 +776,11 @@ const EmployeeCard: React.FC<EmployeeCardProps> = ({
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
                 #{empleado.id}
               </span>
+              {empleado.empresa && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-teal-500/10 text-teal-300 border border-teal-500/25">
+                  {empleado.empresa}
+                </span>
+              )}
 
               {/* Si es RH/Admin permite editar horario; si es Supervisor solo muestra el horario asignado y de qué hora a qué hora es */}
               {!isSupervisorMode && horarios && onAssignSchedule ? (

@@ -99,18 +99,28 @@ function transformBase64FieldsDeep(node, mode) {
   }
   return out;
 }
+var cachedMemoryDb = null;
+var cachedDiskMtimeMs = 0;
 function readDatabase() {
   try {
     ensureDataDir();
     if (!fs.existsSync(DB_FILE)) {
-      return {};
+      cachedMemoryDb = {};
+      cachedDiskMtimeMs = 0;
+      return cachedMemoryDb;
+    }
+    const stat = fs.statSync(DB_FILE);
+    if (cachedMemoryDb && stat.mtimeMs === cachedDiskMtimeMs) {
+      return cachedMemoryDb;
     }
     const raw = fs.readFileSync(DB_FILE, "utf-8");
     const parsed = JSON.parse(raw);
-    return transformBase64FieldsDeep(parsed, "hydrate");
+    cachedMemoryDb = transformBase64FieldsDeep(parsed, "hydrate");
+    cachedDiskMtimeMs = stat.mtimeMs;
+    return cachedMemoryDb;
   } catch (err) {
     console.warn("Error leyendo base de datos local:", err);
-    return {};
+    return cachedMemoryDb || {};
   }
 }
 function normalizeEmpIdServer(id) {
@@ -187,7 +197,11 @@ function writeDatabase(partial) {
   const currentEmailTime = current.emailConfig?.updatedAt ? new Date(current.emailConfig.updatedAt).getTime() : 0;
   const incomingEmailTime = partial.emailConfig?.updatedAt ? new Date(partial.emailConfig.updatedAt).getTime() : 0;
   const isIncomingEmailOlder = currentEmailTime > 0 && incomingEmailTime > 0 && incomingEmailTime < currentEmailTime;
-  const mergedEmailConfig = partial.emailConfig && typeof partial.emailConfig === "object" ? isIncomingEmailOlder ? { ...partial.emailConfig, ...current.emailConfig || {} } : { ...current.emailConfig || {}, ...partial.emailConfig } : current.emailConfig;
+  const cleanIncomingEmail = partial.emailConfig && typeof partial.emailConfig === "object" ? {
+    ...partial.emailConfig,
+    smtpPass: partial.emailConfig.smtpPass === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ? current.emailConfig?.smtpPass || "" : partial.emailConfig.smtpPass
+  } : void 0;
+  const mergedEmailConfig = cleanIncomingEmail ? isIncomingEmailOlder ? { ...cleanIncomingEmail, ...current.emailConfig || {} } : { ...current.emailConfig || {}, ...cleanIncomingEmail } : current.emailConfig;
   const mergedConfig = partial.config && typeof partial.config === "object" ? {
     ...current.config || {},
     ...partial.config,
@@ -298,12 +312,22 @@ function writeDatabase(partial) {
   const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmpFile, JSON.stringify(diskSnapshot, null, 2), "utf-8");
   fs.renameSync(tmpFile, DB_FILE);
+  try {
+    cachedMemoryDb = updated;
+    cachedDiskMtimeMs = fs.statSync(DB_FILE).mtimeMs;
+  } catch {
+    cachedMemoryDb = updated;
+  }
   return updated;
 }
 function resolveEmailConfig(override) {
   const db = readDatabase();
   const fromConfig = db.config?.emailServer || {};
   const fromRoot = db.emailConfig || {};
+  const cleanOverride = override && typeof override === "object" ? {
+    ...override,
+    ...override.smtpPass === "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" ? { smtpPass: fromRoot.smtpPass || fromConfig.smtpPass || "" } : {}
+  } : {};
   return {
     textoBotonCorreo: "Ir al Sistema a Revisar y Liberar N\xF3mina",
     asuntoDispersion: "[CemenQtime] N\xF3mina Semana {semana} Lista para Validaci\xF3n \u2014 {supervisor}",
@@ -314,7 +338,7 @@ function resolveEmailConfig(override) {
     mensajePorVencer: "Hola {nombre},\n\nTe recordamos que tienes la N\xF3mina de la Semana {semana} ({periodo}) pendiente de liberar y el tiempo asignado est\xE1 a punto de finalizar (restan aprox. {tiempo_restante}).\n\nFecha y hora l\xEDmite: {fecha_limite}.\nPor favor ingresa de inmediato al portal para concluir la revisi\xF3n y liberar tu lista.",
     ...fromConfig,
     ...fromRoot,
-    ...override || {}
+    ...cleanOverride
   };
 }
 function createSmtpTransporter(emailConfig, timeoutMs = 8e3) {
@@ -649,7 +673,10 @@ async function startServer() {
         ...Array.isArray(body.dispersals) ? { dispersals: body.dispersals } : {},
         ...Array.isArray(body.notifications) ? { notifications: body.notifications } : {},
         ...body.empleadosDB && typeof body.empleadosDB === "object" ? { empleadosDB: body.empleadosDB } : {},
+        ...Array.isArray(body.deletedEmployeeIds) ? { deletedEmployeeIds: body.deletedEmployeeIds } : {},
+        ...body.replaceEmpleadosDB ? { replaceEmpleadosDB: true } : {},
         ...body.eventosDB && typeof body.eventosDB === "object" ? { eventosDB: body.eventosDB } : {},
+        ...body.replaceEventosDB ? { replaceEventosDB: true } : {},
         ...body.vacacionesDB && typeof body.vacacionesDB === "object" ? { vacacionesDB: body.vacacionesDB } : {},
         ...Array.isArray(body.reportes) ? { reportes: body.reportes } : {},
         ...body.resumen !== void 0 ? { resumen: body.resumen } : {},
@@ -659,7 +686,8 @@ async function startServer() {
         ...body.config && typeof body.config === "object" ? { config: body.config } : {},
         ...body.emailConfig && typeof body.emailConfig === "object" ? { emailConfig: body.emailConfig } : emailServerFromConfig ? { emailConfig: emailServerFromConfig } : {}
       });
-      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || Array.isArray(body.reportes) || Array.isArray(body.users);
+      const hasEmployeeChanges = body.empleadosDB && typeof body.empleadosDB === "object" || Array.isArray(body.deletedEmployeeIds);
+      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || Array.isArray(body.reportes) || Array.isArray(body.users) || hasEmployeeChanges;
       if (hasRealtimeRelevantChanges) {
         broadcastRealtimeEvent({
           type: "portal_sync",
@@ -670,6 +698,10 @@ async function startServer() {
             ...body.releases && typeof body.releases === "object" ? { releases: updated.releases } : {},
             ...Array.isArray(body.dispersals) ? { dispersals: updated.dispersals } : {},
             ...Array.isArray(body.notifications) ? { notifications: updated.notifications } : {},
+            ...hasEmployeeChanges ? {
+              empleadosDB: updated.empleadosDB,
+              asignaciones: updated.asignaciones
+            } : {},
             ...Array.isArray(body.reportes) ? {
               reportes: updated.reportes,
               resumen: updated.resumen,
@@ -679,6 +711,40 @@ async function startServer() {
         });
       }
       res.json({ ok: true, updatedAt: updated.updatedAt });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post("/api/auth/login", (req, res) => {
+    try {
+      const { identifier, password } = req.body || {};
+      const cleanId = String(identifier || "").trim().toLowerCase();
+      const cleanPass = String(password || "").trim();
+      if (!cleanId || !cleanPass) {
+        return res.status(400).json({ ok: false, error: "Credenciales incompletas." });
+      }
+      const db = readDatabase();
+      const usersList = Array.isArray(db.users) ? db.users : [];
+      const paddedId = /^\d+$/.test(cleanId) ? cleanId.padStart(5, "0") : cleanId;
+      const paddedPass = /^\d+$/.test(cleanPass) ? cleanPass.padStart(5, "0") : cleanPass;
+      const matched = usersList.find((u) => {
+        if (!u || !u.active) return false;
+        const uName = String(u.username || "").trim().toLowerCase();
+        const uEmail = String(u.email || "").trim().toLowerCase();
+        const uEmpId = String(u.employeeId || "").trim().toLowerCase();
+        const emailPrefix = uEmail.split("@")[0];
+        const matchesIdentity = uName === cleanId || uName === paddedId || uEmail === cleanId || emailPrefix === cleanId || uEmpId && (uEmpId === cleanId || uEmpId === paddedId);
+        if (!matchesIdentity) return false;
+        const expectedPass = String(u.password || u.employeeId || "12345");
+        return expectedPass === cleanPass || expectedPass === paddedPass;
+      });
+      if (!matched) {
+        return res.status(401).json({
+          ok: false,
+          error: "Usuario, n\xFAmero de empleado o contrase\xF1a incorrectos."
+        });
+      }
+      res.json({ ok: true, user: matched });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

@@ -102,7 +102,9 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   const [activeModule, setActiveModule] = useState<'nominas' | 'equipo' | 'solicitudes'>('nominas');
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
   const [listSearchQuery, setListSearchQuery] = useState('');
-  const [listFilterMode, setListFilterMode] = useState<'all' | 'missing_punches' | 'modified'>('all');
+  const [listFilterMode, setListFilterMode] = useState<
+    'all' | 'missing_punches' | 'modified' | 'pending_overtime'
+  >('all');
   const [showLogsPanel, setShowLogsPanel] = useState(false);
 
   // Estado para el asistente de Formato de Checada / Permiso / Falta
@@ -325,6 +327,8 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       list = list.filter(r => r.dias.some(d => isDayMissingPunchesUnresolved(d)));
     } else if (listFilterMode === 'modified') {
       list = list.filter(r => r.dias.some(d => d.modificadoPorSupervisor));
+    } else if (listFilterMode === 'pending_overtime') {
+      list = list.filter(r => r.dias.some(d => d.hExtra > 0 && d.horasExtrasAutorizadas === undefined));
     }
 
     if (listSearchQuery.trim()) {
@@ -936,6 +940,18 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
                     <span>Días Laborales sin las 2 Checadas ({stats.missingPunchDaysCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setListFilterMode('pending_overtime')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      listFilterMode === 'pending_overtime'
+                        ? 'bg-sky-500 text-slate-950 shadow'
+                        : 'bg-slate-950 text-sky-300 hover:bg-sky-950/30 border border-sky-500/30'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Horas Extra por Validar ({stats.pendingOvertimeItems.length})</span>
                   </button>
                   <button
                     type="button"

@@ -160,6 +160,7 @@ export interface EmpleadoProcesado {
   id: string;
   nombre: string;
   supervisor: string;
+  empresa?: string;
   totalHorasNormales: number;
   totalHorasExtras: number;
   asistencias: number;
