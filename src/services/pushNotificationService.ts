@@ -4,11 +4,14 @@
  */
 
 import {
+  AdminDirectPing,
   IncidentRequest,
+  LiveActivityLogEntry,
   PayrollDispersal,
   PayrollRelease,
   PortalNotification,
   PortalUser,
+  UserLivePresence,
   getUserAllowedLists,
 } from '../types/portal';
 
@@ -26,7 +29,9 @@ export interface RealtimePortalPayload {
     | 'notification_dispatched'
     | 'dispersal_cancelled'
     | 'expiring_reminder'
-    | 'custom_push';
+    | 'custom_push'
+    | 'presence_update'
+    | 'admin_ping';
   timestamp: string;
   actorId?: string;
   actorName?: string;
@@ -46,6 +51,9 @@ export interface RealtimePortalPayload {
     empleadosDB?: Record<string, any>;
     asignaciones?: Record<string, string>;
   };
+  presence?: Record<string, UserLivePresence>;
+  activityFeed?: LiveActivityLogEntry[];
+  ping?: AdminDirectPing;
   notification?: PortalNotification;
 }
 

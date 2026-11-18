@@ -25,6 +25,7 @@ import {
   Calendar,
   Send,
   ListChecks,
+  Radio,
   X,
 } from 'lucide-react';
 import { UserRole, PortalUser, PortalModule, userHasModuleAccess, userHasAnyAdminPanelAccess } from '../types/portal';
@@ -36,6 +37,7 @@ interface SidebarNavProps {
   currentUser?: PortalUser;
   pendingIncidentsCount: number;
   pendingReleasesCount: number;
+  onlineUsersCount?: number;
   onOpenSchedules: () => void;
   onOpenAssign: () => void;
   onOpenRawPunches: () => void;
@@ -58,6 +60,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   currentUser,
   pendingIncidentsCount,
   pendingReleasesCount,
+  onlineUsersCount = 0,
   onOpenSchedules,
   onOpenAssign,
   onOpenRawPunches,
@@ -75,6 +78,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   const [collapsed, setCollapsed] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const isSupervisor = userRole === 'supervisor';
+  const isAdminOnly = userRole === 'admin' || currentUser?.id === 'user_admin';
   const isLocalFile = typeof window !== 'undefined' && window.location.protocol === 'file:';
 
   const handleAction = (fn: () => void) => {
@@ -101,6 +105,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       isActive: activeTab === 'inicio',
       badge: 0,
       show: true,
+    },
+    {
+      id: 'oficina_live',
+      label: 'The Office (En Vivo)',
+      icon: Radio,
+      onClick: () => handleAction(() => onTabChange('oficina_live')),
+      isActive: activeTab === 'oficina_live',
+      badge: onlineUsersCount,
+      show: isAdminOnly,
     },
     {
       id: 'nomina',

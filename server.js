@@ -749,6 +749,181 @@ async function startServer() {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
+  const livePresenceMap = /* @__PURE__ */ new Map();
+  const liveGlobalActivityFeed = [];
+  function buildFullPresenceSnapshot() {
+    const db = readDatabase();
+    const users = Array.isArray(db.users) ? db.users : [];
+    const nowMs = Date.now();
+    const result = {};
+    users.forEach((u) => {
+      if (!u || !u.id) return;
+      const uid = String(u.id);
+      const existing = livePresenceMap.get(uid);
+      const role = u.role === "admin" || u.role === "rh" ? u.role : "supervisor";
+      const supList = u.supervisorName || (Array.isArray(u.assignedLists) && u.assignedLists.length > 0 ? u.assignedLists[0] : void 0);
+      if (!existing) {
+        result[uid] = {
+          userId: uid,
+          userName: String(u.name || "Usuario"),
+          userRole: role,
+          email: u.email,
+          employeeId: u.employeeId,
+          supervisorList: supList,
+          status: "offline",
+          activeTab: "offline",
+          currentAction: "Desconectado del portal",
+          lastActionAt: "",
+          lastHeartbeatAt: "",
+          recentActions: []
+        };
+        return;
+      }
+      const lastHbMs = existing.lastHeartbeatAt ? new Date(existing.lastHeartbeatAt).getTime() : 0;
+      const lastActMs = existing.lastActionAt ? new Date(existing.lastActionAt).getTime() : lastHbMs;
+      const elapsedHbSec = lastHbMs > 0 ? (nowMs - lastHbMs) / 1e3 : 999999;
+      const elapsedActSec = lastActMs > 0 ? (nowMs - lastActMs) / 1e3 : 999999;
+      let effectiveStatus = existing.status;
+      if (existing.status === "offline" || elapsedHbSec > 110) {
+        effectiveStatus = "offline";
+      } else if (existing.status === "idle" || elapsedActSec > 90) {
+        effectiveStatus = "idle";
+      } else {
+        effectiveStatus = "working";
+      }
+      result[uid] = {
+        ...existing,
+        userName: String(u.name || existing.userName || "Usuario"),
+        userRole: role,
+        email: u.email || existing.email,
+        employeeId: u.employeeId || existing.employeeId,
+        supervisorList: existing.supervisorList || supList,
+        status: effectiveStatus,
+        currentAction: effectiveStatus === "offline" ? "Desconectado del portal" : effectiveStatus === "idle" ? "En la cafeter\xEDa / Sin actividad reciente" : existing.currentAction || "Trabajando en el portal"
+      };
+    });
+    return result;
+  }
+  app.get("/api/portal/presence", (_req, res) => {
+    try {
+      const snapshot = buildFullPresenceSnapshot();
+      res.json({
+        ok: true,
+        presence: snapshot,
+        activityFeed: liveGlobalActivityFeed.slice(0, 60)
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post("/api/portal/presence", (req, res) => {
+    try {
+      const body = req.body || {};
+      const userId = String(body.userId || "").trim();
+      if (!userId) {
+        return res.status(400).json({ ok: false, error: "userId requerido" });
+      }
+      const nowISO = (/* @__PURE__ */ new Date()).toISOString();
+      const prev = livePresenceMap.get(userId);
+      const incomingStatus = body.status === "offline" || body.status === "idle" || body.status === "working" ? body.status : "working";
+      const activeTab = String(body.activeTab || prev?.activeTab || "inicio");
+      const currentAction = String(
+        body.currentAction || prev?.currentAction || "Trabajando en el sistema"
+      );
+      const userName = String(body.userName || prev?.userName || "Usuario");
+      const userRole = body.userRole === "admin" || body.userRole === "rh" ? body.userRole : "supervisor";
+      const supervisorList = body.supervisorList ? String(body.supervisorList) : prev?.supervisorList;
+      const isActionChange = Boolean(body.recordAction) || !prev || prev.status !== incomingStatus || prev.activeTab !== activeTab || body.currentAction && body.currentAction !== prev.currentAction;
+      const recentActions = prev ? [...prev.recentActions] : [];
+      if (isActionChange && incomingStatus !== "offline") {
+        const entry = {
+          id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          userId,
+          userName,
+          userRole,
+          action: currentAction,
+          tab: activeTab,
+          supervisorList,
+          timestamp: nowISO
+        };
+        recentActions.unshift(entry);
+        if (recentActions.length > 18) recentActions.length = 18;
+        liveGlobalActivityFeed.unshift(entry);
+        if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
+      }
+      const updatedUserPresence = {
+        userId,
+        userName,
+        userRole,
+        email: body.email || prev?.email,
+        employeeId: body.employeeId || prev?.employeeId,
+        supervisorList,
+        status: incomingStatus,
+        activeTab,
+        currentAction,
+        lastActionAt: incomingStatus === "working" && (body.recordAction || !prev) ? nowISO : prev?.lastActionAt || nowISO,
+        lastHeartbeatAt: nowISO,
+        connectedSince: incomingStatus === "offline" ? void 0 : prev?.connectedSince && prev.status !== "offline" ? prev.connectedSince : nowISO,
+        recentActions
+      };
+      livePresenceMap.set(userId, updatedUserPresence);
+      const fullSnapshot = buildFullPresenceSnapshot();
+      broadcastRealtimeEvent({
+        type: "presence_update",
+        actorId: userId,
+        actorName: userName,
+        presence: fullSnapshot,
+        activityFeed: liveGlobalActivityFeed.slice(0, 60)
+      });
+      res.json({ ok: true, presence: fullSnapshot });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  app.post("/api/portal/presence/ping", (req, res) => {
+    try {
+      const body = req.body || {};
+      const targetUserId = String(body.targetUserId || "").trim();
+      const targetUserName = String(body.targetUserName || "Usuario").trim();
+      const fromAdminName = String(body.fromAdminName || "Administrador General").trim();
+      const message = String(
+        body.message || "\xA1Hola! Direcci\xF3n est\xE1 revisando el avance de n\xF3mina en vivo."
+      ).trim();
+      const kind = body.kind === "recordatorio" || body.kind === "urgente" || body.kind === "felicitacion" ? body.kind : "saludo";
+      if (!targetUserId) {
+        return res.status(400).json({ ok: false, error: "targetUserId requerido" });
+      }
+      const nowISO = (/* @__PURE__ */ new Date()).toISOString();
+      const pingPayload = {
+        id: `ping_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        targetUserId,
+        targetUserName,
+        fromAdminName,
+        message,
+        kind,
+        timestamp: nowISO
+      };
+      const feedEntry = {
+        id: pingPayload.id,
+        userId: "user_admin",
+        userName: fromAdminName,
+        userRole: "admin",
+        action: `\u{1F4E2} Envi\xF3 toque en vivo a ${targetUserName}: "${message}"`,
+        tab: "oficina_live",
+        timestamp: nowISO
+      };
+      liveGlobalActivityFeed.unshift(feedEntry);
+      if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
+      broadcastRealtimeEvent({
+        type: "admin_ping",
+        ping: pingPayload,
+        activityFeed: liveGlobalActivityFeed.slice(0, 60)
+      });
+      res.json({ ok: true, ping: pingPayload });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   app.post("/api/notifications/test-smtp", async (req, res) => {
     try {
       const activeEmailConfig = resolveEmailConfig(req.body || {});

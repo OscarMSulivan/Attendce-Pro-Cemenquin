@@ -100,6 +100,9 @@ const EmployeesDirectoryView = React.lazy(() =>
 const ContpaqiExportView = React.lazy(() =>
   import('./components/portal/ContpaqiExportView').then(m => ({ default: m.ContpaqiExportView }))
 );
+const PixelOfficeMonitorView = React.lazy(() =>
+  import('./components/portal/PixelOfficeMonitorView').then(m => ({ default: m.PixelOfficeMonitorView }))
+);
 import { PortalService } from './services/portalService';
 import { PushNotificationService } from './services/pushNotificationService';
 import {
@@ -111,6 +114,8 @@ import {
   PayrollModificationLog,
   IncidentType,
   EmailServerConfig,
+  UserLivePresence,
+  LiveActivityLogEntry,
   getUserAllowedLists,
   userHasModuleAccess,
   userHasAnyAdminPanelAccess,
@@ -784,6 +789,42 @@ export default function App() {
     });
 
     const unsubStream = PushNotificationService.subscribe(payload => {
+      // Eventos de Monitoreo en Vivo (The Office Pixel Art)
+      if (payload.type === 'presence_update') {
+        if (payload.presence && typeof payload.presence === 'object') {
+          setLivePresence(payload.presence);
+        }
+        if (Array.isArray(payload.activityFeed)) {
+          setLiveActivityFeed(payload.activityFeed);
+        }
+        return;
+      }
+
+      if (payload.type === 'admin_ping' && payload.ping) {
+        if (Array.isArray(payload.activityFeed)) {
+          setLiveActivityFeed(payload.activityFeed);
+        }
+        if (isAuthenticated && currentUser && payload.ping.targetUserId === currentUser.id) {
+          const isUrgent = payload.ping.kind === 'urgente' || payload.ping.kind === 'recordatorio';
+          const pingTitle = `📢 Mensaje de ${payload.ping.fromAdminName}`;
+          showToast(
+            payload.ping.message,
+            isUrgent ? 'warning' : 'info',
+            pingTitle,
+            8500
+          );
+          PushNotificationService.showNativeNotification({
+            title: pingTitle,
+            body: payload.ping.message,
+            tag: payload.ping.id,
+            requireInteraction: isUrgent,
+            targetTab: currentUser.role === 'supervisor' ? 'trabajar_listas' : 'inicio',
+            soundKind: isUrgent ? 'warning' : 'info',
+          });
+        }
+        return;
+      }
+
       const incomingState = payload.state;
       if (!incomingState) return;
 
@@ -1013,6 +1054,169 @@ export default function App() {
       unsubStream();
     };
   }, [isAuthenticated, currentUser, showToast]);
+
+  // ---------------------------------------------------------------------------
+  // ESTADO Y REPORTERO EN VIVO PARA "THE OFFICE" PIXEL ART MONITOR
+  // ---------------------------------------------------------------------------
+  const [livePresence, setLivePresence] = useState<Record<string, UserLivePresence>>({});
+  const [liveActivityFeed, setLiveActivityFeed] = useState<LiveActivityLogEntry[]>([]);
+  const lastUserInteractionAtRef = useRef<number>(Date.now());
+  const currentPresenceActionRef = useRef<string>('Trabajando en el portal');
+
+  const fetchLivePresence = useCallback(() => {
+    if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
+    fetch('/api/portal/presence')
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data && data.ok) {
+          if (data.presence) setLivePresence(data.presence);
+          if (Array.isArray(data.activityFeed)) setLiveActivityFeed(data.activityFeed);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const reportUserPresence = useCallback(
+    (
+      statusOverride?: 'working' | 'idle' | 'offline',
+      customAction?: string,
+      recordAction = false
+    ) => {
+      if (
+        !isAuthenticated ||
+        !currentUser ||
+        typeof window === 'undefined' ||
+        window.location.protocol === 'file:'
+      ) {
+        return;
+      }
+      if (customAction) {
+        currentPresenceActionRef.current = customAction;
+      }
+      const idleSec = (Date.now() - lastUserInteractionAtRef.current) / 1000;
+      const effectiveStatus =
+        statusOverride || (idleSec > 90 ? 'idle' : 'working');
+      const supList =
+        selectedSupervisor ||
+        currentUser.supervisorName ||
+        currentUser.assignedLists?.[0] ||
+        undefined;
+
+      fetch('/api/portal/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          userName: currentUser.name,
+          userRole: currentUser.role,
+          email: currentUser.email,
+          employeeId: currentUser.employeeId,
+          supervisorList: supList,
+          status: effectiveStatus,
+          activeTab: portalTab,
+          currentAction:
+            effectiveStatus === 'idle'
+              ? 'En la cafetería / Sin actividad reciente'
+              : currentPresenceActionRef.current,
+          recordAction,
+        }),
+      })
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data && data.ok && data.presence) {
+            setLivePresence(data.presence);
+          }
+        })
+        .catch(() => {});
+    },
+    [isAuthenticated, currentUser, selectedSupervisor, portalTab]
+  );
+
+  // Detectar actividad de mouse/teclado y enviar pulso de presencia cada 25 segundos
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) return;
+    fetchLivePresence();
+
+    const tabLabelMap: Record<string, string> = {
+      inicio: 'En el Panel de Bienvenida',
+      oficina_live: 'Supervisando cámaras de The Office en vivo',
+      nomina: 'En Dispersión y Cálculo de Nómina',
+      trabajar_listas: `Trabajando lista ${selectedSupervisor || currentUser.supervisorName || 'asignada'}`,
+      empleados: 'Consultando Padrón Multi-Empresa y Listas',
+      semaforo: 'Auditando Semáforo de Liberación RH',
+      incidencias: 'Revisando Bandeja de Incidencias',
+      contpaqi: 'Preparando exportación CONTPAQi',
+      usuarios: 'En Configuración de Usuarios y Accesos',
+    };
+    const actionLabel = tabLabelMap[portalTab] || `En módulo ${portalTab}`;
+    reportUserPresence('working', actionLabel, true);
+
+    const onUserInteract = () => {
+      const wasIdle = Date.now() - lastUserInteractionAtRef.current > 90000;
+      lastUserInteractionAtRef.current = Date.now();
+      if (wasIdle) {
+        reportUserPresence('working', actionLabel, true);
+      }
+    };
+
+    window.addEventListener('mousemove', onUserInteract, { passive: true });
+    window.addEventListener('keydown', onUserInteract, { passive: true });
+    window.addEventListener('click', onUserInteract, { passive: true });
+
+    const interval = setInterval(() => {
+      reportUserPresence();
+    }, 25000);
+
+    return () => {
+      window.removeEventListener('mousemove', onUserInteract);
+      window.removeEventListener('keydown', onUserInteract);
+      window.removeEventListener('click', onUserInteract);
+      clearInterval(interval);
+    };
+  }, [isAuthenticated, currentUser, portalTab, selectedSupervisor, fetchLivePresence, reportUserPresence]);
+
+  const handleSendAdminPing = useCallback(
+    async (
+      targetUserId: string,
+      targetUserName: string,
+      message: string,
+      kind: 'saludo' | 'recordatorio' | 'urgente' | 'felicitacion'
+    ): Promise<boolean> => {
+      try {
+        const res = await fetch('/api/portal/presence/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            targetUserId,
+            targetUserName,
+            fromAdminName: currentUser?.name || 'Administrador General',
+            message,
+            kind,
+          }),
+        });
+        const data = await res.json();
+        if (data && data.ok) {
+          showToast(
+            `Toque enviado en tiempo real a la pantalla de ${targetUserName}.`,
+            'success',
+            '📢 Ping Enviado desde The Office'
+          );
+          return true;
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      return false;
+    },
+    [currentUser?.name, showToast]
+  );
+
+  // Conteo de usuarios conectados actualmente (working + idle) para el badge del menú lateral
+  const onlineUsersCount = useMemo(() => {
+    return Object.values(livePresence).filter(
+      p => p.status === 'working' || p.status === 'idle'
+    ).length;
+  }, [livePresence]);
 
   // Cargar estado inicial de empleados guardados
   useEffect(() => {
@@ -1950,6 +2154,11 @@ export default function App() {
       `✓ Incidencia "${newIncidence || 'Sin incidencia'}" guardada y almacenada para colaborador #${normTargetId} (${isoDate})`
     );
     setStatusType('success');
+    reportUserPresence(
+      'working',
+      `Registró "${newIncidence || 'Asistencia'}" en #${normTargetId} (${isoDate})`,
+      true
+    );
   };
 
   // Actualización en tiempo real cuando el usuario corrige o intercambia Entrada / Salida manualmente en la tabla
@@ -2068,6 +2277,11 @@ export default function App() {
 
     setStatusMessage('🟣 Checada modificada en la lista. Si el trabajador no tenía ni Entrada ni Salida, recuerda subir el archivo de respaldo obligatorio.');
     setStatusType('info');
+    reportUserPresence(
+      'working',
+      `Editó checada de #${normTargetId} (${newEntrada} - ${newSalida})`,
+      true
+    );
   };
 
   // Actualizar nota o comentario del supervisor en un día específico y preservarlo
@@ -2146,6 +2360,11 @@ export default function App() {
         : `✕ Tiempo extra marcado como NO AUTORIZADO para #${normTargetId}. No se computa en el total ni en CONTPAQi.`
     );
     setStatusType(autorizada ? 'success' : 'info');
+    reportUserPresence(
+      'working',
+      `${autorizada ? 'Autorizó' : 'Rechazó'} tiempo extra de #${normTargetId} (${isoDate})`,
+      true
+    );
   };
 
   // Confirmar rápidamente que el trabajador NO vino ese día laboral ("Es Falta")
@@ -3212,6 +3431,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    reportUserPresence('offline', 'Cerró sesión en el portal', true);
     PortalService.setSessionAuthenticated(false);
     setIsAuthenticated(false);
     setStatusMessage('Sesión cerrada correctamente');
@@ -4197,6 +4417,7 @@ export default function App() {
         onTabChange={handleNavigatePortalTab}
         pendingIncidentsCount={pendingIncidentsCount}
         pendingReleasesCount={pendingReleasesCount}
+        onlineUsersCount={onlineUsersCount}
         onOpenSchedules={() => setIsSchedulesOpen(true)}
         onOpenAssign={() => setIsAssignOpen(true)}
         onOpenRawPunches={() => setIsRawPunchesOpen(true)}
@@ -4281,6 +4502,19 @@ export default function App() {
                   horasLimiteLiberacion={config.horasLimiteLiberacion}
                 />
               )}
+
+              {/* MÓDULO THE OFFICE — MONITOREO PIXEL ART EN VIVO (EXCLUSIVO ADMINISTRADOR GENERAL) */}
+              {portalTab === 'oficina_live' &&
+                (currentUser.role === 'admin' || currentUser.id === 'user_admin') && (
+                  <PixelOfficeMonitorView
+                    currentUser={currentUser}
+                    users={portalUsers}
+                    livePresence={livePresence}
+                    activityFeed={liveActivityFeed}
+                    onRefreshPresence={fetchLivePresence}
+                    onSendAdminPing={handleSendAdminPing}
+                  />
+                )}
 
               {/* MÓDULO PARA TRABAJAR LISTAS (Cualquier usuario con el acceso 'trabajar_listas' habilitado) */}
               {portalTab === 'trabajar_listas' &&

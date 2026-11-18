@@ -185,10 +185,14 @@ export const UserSessionBar: React.FC<UserSessionBarProps> = ({
     switch (activeTab) {
       case 'inicio':
         return 'Panel de Inicio y Bienvenida';
+      case 'oficina_live':
+        return 'The Office — Monitoreo Pixel Art en Vivo (Exclusivo Admin)';
       case 'nomina':
         return 'Módulo de Dispersión y Cálculo de Nómina';
       case 'trabajar_listas':
         return 'Módulo para Trabajar y Liberar Listas';
+      case 'empleados':
+        return 'Padrón Permanente de Empleados y Listas';
       case 'semaforo':
         return 'Semáforo de Liberación de Nóminas';
       case 'incidencias':

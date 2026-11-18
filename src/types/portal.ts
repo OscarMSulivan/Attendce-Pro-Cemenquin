@@ -440,4 +440,41 @@ export interface PayrollModificationLog {
   attachmentName?: string;
 }
 
+export type LivePresenceStatus = 'working' | 'idle' | 'offline';
 
+export interface LiveActivityLogEntry {
+  id: string;
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  action: string;
+  tab: string;
+  supervisorList?: string;
+  timestamp: string;
+}
+
+export interface UserLivePresence {
+  userId: string;
+  userName: string;
+  userRole: UserRole;
+  email?: string;
+  employeeId?: string;
+  supervisorList?: string;
+  status: LivePresenceStatus;
+  activeTab: string;
+  currentAction: string;
+  lastActionAt: string;
+  lastHeartbeatAt: string;
+  connectedSince?: string;
+  recentActions: LiveActivityLogEntry[];
+}
+
+export interface AdminDirectPing {
+  id: string;
+  targetUserId: string;
+  targetUserName: string;
+  fromAdminName: string;
+  message: string;
+  kind: 'saludo' | 'recordatorio' | 'urgente' | 'felicitacion';
+  timestamp: string;
+}
