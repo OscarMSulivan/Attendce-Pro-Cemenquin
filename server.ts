@@ -1041,53 +1041,6 @@ async function startServer() {
   const livePresenceMap = new Map<string, ServerUserPresence>();
   const liveGlobalActivityFeed: ServerActivityEntry[] = [];
 
-  function syncPresenceFromDisk(): ServerPortalDatabase {
-    const db = readDatabase();
-    if (db.livePresence && typeof db.livePresence === 'object') {
-      Object.entries(db.livePresence).forEach(([uid, record]) => {
-        if (!record || typeof record !== 'object') return;
-        const inc = record as ServerUserPresence;
-        const cur = livePresenceMap.get(uid);
-        const incHb = inc.lastHeartbeatAt ? new Date(inc.lastHeartbeatAt).getTime() : 0;
-        const curHb = cur?.lastHeartbeatAt ? new Date(cur.lastHeartbeatAt).getTime() : 0;
-        if (!cur || incHb >= curHb) {
-          livePresenceMap.set(uid, inc);
-        }
-      });
-    }
-    if (Array.isArray(db.liveActivityFeed) && db.liveActivityFeed.length > 0) {
-      const seenIds = new Set(liveGlobalActivityFeed.map((e) => e.id));
-      for (const item of db.liveActivityFeed as ServerActivityEntry[]) {
-        if (item && item.id && !seenIds.has(item.id)) {
-          liveGlobalActivityFeed.push(item);
-          seenIds.add(item.id);
-        }
-      }
-      liveGlobalActivityFeed.sort(
-        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-      if (liveGlobalActivityFeed.length > 80) {
-        liveGlobalActivityFeed.length = 80;
-      }
-    }
-    return db;
-  }
-
-  function persistPresenceToDisk(): void {
-    try {
-      const serializedMap: Record<string, ServerUserPresence> = {};
-      for (const [k, v] of livePresenceMap.entries()) {
-        serializedMap[k] = v;
-      }
-      writeDatabase({
-        livePresence: serializedMap,
-        liveActivityFeed: liveGlobalActivityFeed.slice(0, 80),
-      });
-    } catch (err) {
-      console.warn('No se pudo persistir presencia en portal_db.json:', err);
-    }
-  }
-
   function computeEffectivePresenceRecord(
     existing: ServerUserPresence,
     nowMs: number,
@@ -1146,7 +1099,7 @@ async function startServer() {
   }
 
   function buildFullPresenceSnapshot(): Record<string, ServerUserPresence> {
-    const db = syncPresenceFromDisk();
+    const db = cachedMemoryDb || readDatabase();
     const users = (Array.isArray(db.users) ? db.users : []) as Array<Record<string, any>>;
     const nowMs = Date.now();
     const result: Record<string, ServerUserPresence> = {};
@@ -1215,7 +1168,7 @@ async function startServer() {
       res.json({
         ok: true,
         presence: snapshot,
-        activityFeed: liveGlobalActivityFeed.slice(0, 60),
+        activityFeed: liveGlobalActivityFeed.slice(0, 50),
       });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
@@ -1224,7 +1177,6 @@ async function startServer() {
 
   app.post('/api/portal/presence', (req, res) => {
     try {
-      syncPresenceFromDisk();
       const body = req.body || {};
       const userId = String(body.userId || '').trim();
       if (!userId) {
@@ -1254,6 +1206,7 @@ async function startServer() {
         !prev ||
         prev.status !== incomingStatus ||
         prev.activeTab !== activeTab ||
+        prev.supervisorList !== supervisorList ||
         (body.currentAction && body.currentAction !== prev.currentAction);
 
       const recentActions = prev && Array.isArray(prev.recentActions) ? [...prev.recentActions] : [];
@@ -1270,9 +1223,9 @@ async function startServer() {
           timestamp: nowISO,
         };
         recentActions.unshift(entry);
-        if (recentActions.length > 18) recentActions.length = 18;
+        if (recentActions.length > 15) recentActions.length = 15;
         liveGlobalActivityFeed.unshift(entry);
-        if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
+        if (liveGlobalActivityFeed.length > 60) liveGlobalActivityFeed.length = 60;
       }
 
       const updatedUserPresence: ServerUserPresence = {
@@ -1300,20 +1253,24 @@ async function startServer() {
       };
 
       livePresenceMap.set(userId, updatedUserPresence);
-      persistPresenceToDisk();
 
       const fullSnapshot = buildFullPresenceSnapshot();
-      const feedSnapshot = liveGlobalActivityFeed.slice(0, 60);
-      broadcastRealtimeEvent({
-        type: 'presence_update',
-        actorId: userId,
-        actorName: userName,
-        presence: fullSnapshot,
-        activityFeed: feedSnapshot,
-      });
+      const feedSnapshot = liveGlobalActivityFeed.slice(0, 50);
+
+      // Solo emitir evento SSE cuando hubo un cambio real de estado/acción/pestaña (evita tráfico innecesario en heartbeats silenciosos)
+      if (isActionChange) {
+        broadcastRealtimeEvent({
+          type: 'presence_update',
+          actorId: userId,
+          actorName: userName,
+          presence: fullSnapshot,
+          activityFeed: feedSnapshot,
+        });
+      }
 
       res.json({
         ok: true,
+        changed: isActionChange,
         presence: fullSnapshot,
         activityFeed: feedSnapshot,
       });
@@ -1324,7 +1281,6 @@ async function startServer() {
 
   app.post('/api/portal/presence/ping', (req, res) => {
     try {
-      syncPresenceFromDisk();
       const body = req.body || {};
       const targetUserId = String(body.targetUserId || '').trim();
       const targetUserName = String(body.targetUserName || 'Usuario').trim();
@@ -1362,13 +1318,12 @@ async function startServer() {
         timestamp: nowISO,
       };
       liveGlobalActivityFeed.unshift(feedEntry);
-      if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
-      persistPresenceToDisk();
+      if (liveGlobalActivityFeed.length > 60) liveGlobalActivityFeed.length = 60;
 
       broadcastRealtimeEvent({
         type: 'admin_ping',
         ping: pingPayload,
-        activityFeed: liveGlobalActivityFeed.slice(0, 60),
+        activityFeed: liveGlobalActivityFeed.slice(0, 50),
       });
 
       res.json({ ok: true, ping: pingPayload });

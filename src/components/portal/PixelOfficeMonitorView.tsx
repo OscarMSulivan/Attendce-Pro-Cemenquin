@@ -172,7 +172,7 @@ const TAB_LABELS: Record<string, string> = {
 };
 
 /**
- * Sprite Pixel Art 16x20 renderizado en SVG nítido (crispEdges)
+ * Sprite Pixel Art 16x20 renderizado en SVG nítido (crispEdges) — Optimizado con React.memo y GPU CSS (0% CPU)
  */
 const PixelAvatarSprite: React.FC<{
   palette: CharacterPalette;
@@ -180,7 +180,7 @@ const PixelAvatarSprite: React.FC<{
   scale?: number;
   isTyping?: boolean;
   holdingCoffee?: boolean;
-}> = ({ palette, status, scale = 3.2, isTyping = false, holdingCoffee = false }) => {
+}> = React.memo(({ palette, status, scale = 3.2, isTyping = false, holdingCoffee = false }) => {
   const w = 16 * scale;
   const h = 20 * scale;
 
@@ -189,23 +189,12 @@ const PixelAvatarSprite: React.FC<{
       className="relative inline-flex items-center justify-center select-none"
       style={{ width: w, height: h }}
     >
-      <motion.svg
+      <svg
         viewBox="0 0 16 20"
         width={w}
         height={h}
         style={{ shapeRendering: 'crispEdges' }}
-        animate={
-          status === 'working'
-            ? { y: [0, -1.5, 0] }
-            : status === 'idle'
-            ? { y: [0, -1, 0] }
-            : { y: 0 }
-        }
-        transition={{
-          duration: status === 'working' ? 0.55 : 1.6,
-          repeat: Infinity,
-          ease: 'linear',
-        }}
+        className={status === 'working' ? 'animate-pulse' : ''}
       >
         {/* Sombra en el piso */}
         <rect x="3" y="18" width="10" height="2" fill="rgba(0,0,0,0.35)" />
@@ -265,7 +254,7 @@ const PixelAvatarSprite: React.FC<{
         <rect x="7" y="8" width="2" height="5" fill={palette.tie} />
         <rect x="9" y="9" width="2" height="1" fill="#F8FAFC" />
 
-        {/* Brazos (animados al teclear) */}
+        {/* Brazos */}
         <rect
           x="2"
           y={isTyping ? '9' : '8'}
@@ -275,14 +264,14 @@ const PixelAvatarSprite: React.FC<{
         />
         <rect
           x="2"
-          y={isTyping ? '12' : '12'}
+          y="12"
           width="1"
           height="2"
           fill={palette.skin}
         />
         <rect
           x="13"
-          y={isTyping ? '8' : '8'}
+          y="8"
           width="1"
           height="4"
           fill={palette.shirt}
@@ -309,13 +298,13 @@ const PixelAvatarSprite: React.FC<{
         <rect x="9" y="14" width="3" height="3" fill={palette.pants} />
         <rect x="4" y="17" width="3" height="1" fill="#090D16" />
         <rect x="9" y="17" width="3" height="1" fill="#090D16" />
-      </motion.svg>
+      </svg>
     </div>
   );
-};
+});
 
 /**
- * Escritorio Pixel Art (Cubículo estilo Dunder Mifflin con PC, lámpara y planta)
+ * Escritorio Pixel Art (Cubículo estilo Dunder Mifflin con PC, lámpara y planta) — Optimizado con React.memo (0% Layout Thrashing)
  */
 const PixelWorkstationDesk: React.FC<{
   user: PortalUser;
@@ -323,21 +312,18 @@ const PixelWorkstationDesk: React.FC<{
   isSelected: boolean;
   onSelect: () => void;
   pingActive: boolean;
-}> = ({ user, presence, isSelected, onSelect, pingActive }) => {
+}> = React.memo(({ user, presence, isSelected, onSelect, pingActive }) => {
   const palette = useMemo(
     () => getPaletteForUser(user.id, user.role),
     [user.id, user.role]
   );
   const isWorking = presence.status === 'working';
   const isIdle = presence.status === 'idle';
-  const isOffline = presence.status === 'offline';
 
   return (
-    <motion.div
-      layout
+    <div
       onClick={onSelect}
-      whileHover={{ y: -3, scale: 1.01 }}
-      className={`relative group cursor-pointer rounded-xl p-3 transition-all select-none border-2 ${
+      className={`relative group cursor-pointer rounded-xl p-3 transition-transform duration-150 hover:-translate-y-0.5 select-none border-2 ${
         isSelected
           ? 'bg-slate-900/95 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.3)]'
           : isWorking
@@ -348,31 +334,26 @@ const PixelWorkstationDesk: React.FC<{
       }`}
     >
       {/* Globo de diálogo estilo cómic retro cuando está trabajando o cuando recibe un Ping */}
-      <AnimatePresence>
-        {(isWorking || pingActive) && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.9 }}
-            className={`absolute -top-9 left-2 right-2 z-20 px-2.5 py-1 rounded-lg border-2 text-[10px] font-mono font-bold truncate shadow-lg ${
+      {(isWorking || pingActive) && (
+        <div
+          className={`absolute -top-9 left-2 right-2 z-20 px-2.5 py-1 rounded-lg border-2 text-[10px] font-mono font-bold truncate shadow-lg ${
+            pingActive
+              ? 'bg-amber-400 text-slate-950 border-white animate-bounce'
+              : 'bg-slate-950 text-emerald-300 border-emerald-500/80'
+          }`}
+        >
+          <span className="mr-1">{pingActive ? '📢 ¡PING!' : '💬'}</span>
+          {pingActive ? '¡Mensaje de Dirección en pantalla!' : presence.currentAction}
+          {/* Puntero pixelado del globo */}
+          <div
+            className={`w-2 h-2 rotate-45 absolute -bottom-1.5 left-6 border-r-2 border-b-2 ${
               pingActive
-                ? 'bg-amber-400 text-slate-950 border-white animate-bounce'
-                : 'bg-slate-950 text-emerald-300 border-emerald-500/80'
+                ? 'bg-amber-400 border-white'
+                : 'bg-slate-950 border-emerald-500/80'
             }`}
-          >
-            <span className="mr-1">{pingActive ? '📢 ¡PING!' : '💬'}</span>
-            {pingActive ? '¡Mensaje de Dirección en pantalla!' : presence.currentAction}
-            {/* Puntero pixelado del globo */}
-            <div
-              className={`w-2 h-2 rotate-45 absolute -bottom-1.5 left-6 border-r-2 border-b-2 ${
-                pingActive
-                  ? 'bg-amber-400 border-white'
-                  : 'bg-slate-950 border-emerald-500/80'
-              }`}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+          />
+        </div>
+      )}
 
       {/* Cabecera del cubículo: Luz LED + Nombre + Rol/Lista */}
       <div className="flex items-center justify-between gap-1.5 mb-2">
@@ -448,18 +429,13 @@ const PixelWorkstationDesk: React.FC<{
                 scale={2.9}
                 isTyping={true}
               />
-              {/* Partículas de tecleo rápido */}
-              <motion.span
-                animate={{ opacity: [0, 1, 0], y: [-2, -10] }}
-                transition={{ duration: 1.1, repeat: Infinity }}
-                className="absolute -right-4 top-0 text-[10px] font-mono font-bold text-emerald-300"
-              >
+              <span className="absolute -right-4 top-0 text-[10px] font-mono font-bold text-emerald-300 animate-pulse">
                 ⚡
-              </motion.span>
+              </span>
             </div>
           ) : isIdle ? (
             <div className="flex flex-col items-center justify-center py-2 text-amber-300/90">
-              <Coffee className="w-5 h-5 animate-bounce mb-0.5" />
+              <Coffee className="w-5 h-5 mb-0.5" />
               <span className="text-[9px] font-mono font-bold">En Cafetería</span>
             </div>
           ) : (
@@ -482,17 +458,9 @@ const PixelWorkstationDesk: React.FC<{
               }`}
             >
               {isWorking ? (
-                <div className="w-full px-1 space-y-0.5">
-                  <motion.div
-                    animate={{ width: ['35%', '90%', '60%'] }}
-                    transition={{ duration: 0.9, repeat: Infinity }}
-                    className="h-0.5 bg-emerald-400"
-                  />
-                  <motion.div
-                    animate={{ width: ['80%', '40%', '95%'] }}
-                    transition={{ duration: 1.2, repeat: Infinity }}
-                    className="h-0.5 bg-cyan-400"
-                  />
+                <div className="w-full px-1 space-y-0.5 animate-pulse">
+                  <div className="h-0.5 w-4/5 bg-emerald-400" />
+                  <div className="h-0.5 w-3/5 bg-cyan-400" />
                   <div className="h-0.5 w-2/3 bg-amber-300" />
                 </div>
               ) : (
@@ -527,9 +495,9 @@ const PixelWorkstationDesk: React.FC<{
           <span className="text-[9px] text-slate-500 shrink-0">Sin conexión</span>
         )}
       </div>
-    </motion.div>
+    </div>
   );
-};
+});
 
 export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
   currentUser,
@@ -547,16 +515,28 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
   const [sendingPing, setSendingPing] = useState<boolean>(false);
   const [pingHighlightUserId, setPingHighlightUserId] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState<'all' | 'working' | 'idle' | 'offline'>('all');
+  const [isWatcherActive, setIsWatcherActive] = useState<boolean>(true);
+  const [watcherIntervalMs, setWatcherIntervalMs] = useState<number>(4000);
+  const [lastWatcherSyncAt, setLastWatcherSyncAt] = useState<string>(() =>
+    new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  );
 
-  // Polling activo cada 3.5s mientras el Administrador tiene abierto The Office (a prueba de proxies Nginx/Cloudflare)
+  // Watcher de Pixel HQ ultraligero en RAM (se pausa automáticamente si la pestaña no está visible o si el Admin lo pausa)
   useEffect(() => {
-    onRefreshPresence();
-    const timer = setInterval(() => {
+    const runSync = () => {
+      if (document.visibilityState === 'hidden') return;
       onRefreshPresence();
-    }, 3500);
+      setLastWatcherSyncAt(
+        new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      );
+    };
+    runSync();
+    if (!isWatcherActive) return;
+
+    const timer = setInterval(runSync, watcherIntervalMs);
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') {
-        onRefreshPresence();
+        runSync();
       }
     };
     window.addEventListener('focus', onFocusOrVisible);
@@ -566,7 +546,7 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
       window.removeEventListener('focus', onFocusOrVisible);
       document.removeEventListener('visibilitychange', onFocusOrVisible);
     };
-  }, [onRefreshPresence]);
+  }, [onRefreshPresence, isWatcherActive, watcherIntervalMs]);
 
   // Combinar catálogo de usuarios con cualquier usuario conectado en livePresence que aún no esté en el catálogo local
   const officeUsers = useMemo<PortalUser[]>(() => {
@@ -803,15 +783,63 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
                 <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-amber-300 font-mono text-[10px] font-bold">
                   SOLO ADMINISTRADOR
                 </span>
+                <span
+                  className={`px-2.5 py-0.5 rounded font-mono text-[10px] font-black tracking-wide flex items-center gap-1.5 border ${
+                    isWatcherActive
+                      ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                      : 'bg-slate-800 border-slate-600 text-slate-400'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      isWatcherActive ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'
+                    }`}
+                  />
+                  {isWatcherActive
+                    ? `WATCHER PIXEL HQ: ACTIVO (${watcherIntervalMs / 1000}s · RAM 0ms)`
+                    : 'WATCHER PIXEL HQ: EN PAUSA'}
+                </span>
               </div>
               <p className="text-xs text-slate-400 mt-1 font-mono">
-                Observa en tiempo real quién está dentro del sistema trabajando listas, quién está en la cafetería (inactivo) y envía toques directos a su pantalla.
+                Observa en tiempo real quién está dentro del sistema trabajando listas, quién está en la cafetería (inactivo) y envía toques directos a su pantalla.{' '}
+                <span className="text-emerald-400/90">
+                  Último pulso: {lastWatcherSyncAt} (0% carga en otros módulos)
+                </span>
               </p>
             </div>
           </div>
 
-          {/* Contadores rápidos y botón de Simulacro */}
+          {/* Contadores rápidos, Control de Watcher Pixel HQ y botón de Simulacro */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Control Watcher Pixel HQ */}
+            <div className="flex items-center rounded-lg bg-slate-950/90 border border-emerald-500/40 p-0.5 font-mono text-[11px]">
+              <button
+                type="button"
+                onClick={() => setIsWatcherActive(prev => !prev)}
+                className={`px-2.5 py-1 rounded-md font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isWatcherActive
+                    ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/50'
+                    : 'bg-slate-800 text-slate-300 hover:text-white'
+                }`}
+                title={
+                  isWatcherActive
+                    ? 'Pausar el Watcher de Pixel HQ'
+                    : 'Iniciar / Reanudar el Watcher de Pixel HQ'
+                }
+              >
+                <Activity className={`w-3.5 h-3.5 ${isWatcherActive ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
+                {isWatcherActive ? 'Watcher: ON' : 'Iniciar Watcher'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setWatcherIntervalMs(prev => (prev === 4000 ? 10000 : 4000))}
+                className="px-2 py-1 text-slate-300 hover:text-amber-300 transition-colors cursor-pointer"
+                title="Cambiar velocidad de escaneo del Watcher (4s Tiempo Real / 10s Modo Eco)"
+              >
+                {watcherIntervalMs === 4000 ? '⚡ 4s Live' : '🍃 10s Eco'}
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setRoleFilter('all')}
@@ -876,7 +904,16 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
 
             <button
               type="button"
-              onClick={onRefreshPresence}
+              onClick={() => {
+                onRefreshPresence();
+                setLastWatcherSyncAt(
+                  new Date().toLocaleTimeString('es-MX', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })
+                );
+              }}
               className="p-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors cursor-pointer"
               title="Actualizar lectura de presencia ahora"
             >

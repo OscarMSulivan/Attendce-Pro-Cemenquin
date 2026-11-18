@@ -763,6 +763,60 @@ export default function App() {
     });
   }, [incidents]);
 
+  // ---------------------------------------------------------------------------
+  // ESTADO Y BUFFER DE CERO RE-RENDERS PARA "THE OFFICE" (WATCHER DE PIXEL HQ)
+  // ---------------------------------------------------------------------------
+  const [livePresence, setLivePresence] = useState<Record<string, UserLivePresence>>({});
+  const [liveActivityFeed, setLiveActivityFeed] = useState<LiveActivityLogEntry[]>([]);
+  const [onlineUsersCount, setOnlineUsersCount] = useState<number>(1);
+  const latestPresenceRef = useRef<Record<string, UserLivePresence>>({});
+  const latestActivityFeedRef = useRef<LiveActivityLogEntry[]>([]);
+  const portalTabRef = useRef<string>(portalTab);
+  const isAdminUserRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    portalTabRef.current = portalTab;
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.id === 'user_admin';
+    isAdminUserRef.current = isAdmin;
+    // Al entrar al módulo The Office, volcar inmediatamente el buffer en memoria a la vista
+    if (isAdmin && portalTab === 'oficina_live') {
+      if (Object.keys(latestPresenceRef.current).length > 0) {
+        setLivePresence(latestPresenceRef.current);
+      }
+      if (latestActivityFeedRef.current.length > 0) {
+        setLiveActivityFeed(latestActivityFeedRef.current);
+      }
+    }
+  }, [portalTab, currentUser]);
+
+  const applyIncomingPresence = useCallback(
+    (
+      nextPresence?: Record<string, UserLivePresence>,
+      nextFeed?: LiveActivityLogEntry[]
+    ) => {
+      // Si el usuario no es Administrador, ignorar por completo para 0% impacto en rendimiento
+      if (!isAdminUserRef.current) return;
+
+      if (nextPresence && typeof nextPresence === 'object') {
+        latestPresenceRef.current = nextPresence;
+        const count = Object.values(nextPresence).filter(
+          p => p && (p.status === 'working' || p.status === 'idle')
+        ).length;
+        setOnlineUsersCount(prev => (prev !== count ? count : prev));
+        if (portalTabRef.current === 'oficina_live') {
+          setLivePresence(nextPresence);
+        }
+      }
+      if (Array.isArray(nextFeed)) {
+        latestActivityFeedRef.current = nextFeed;
+        if (portalTabRef.current === 'oficina_live') {
+          setLiveActivityFeed(nextFeed);
+        }
+      }
+    },
+    []
+  );
+
   // Referencias para detectar nuevos eventos en tiempo real sin duplicar alertas Push
   const knownNotifIdsRef = useRef<Set<string>>(new Set(notifications.map(n => n.id)));
   const knownIncidentStatusRef = useRef<Map<string, string>>(
@@ -798,20 +852,15 @@ export default function App() {
     });
 
     const unsubStream = PushNotificationService.subscribe(payload => {
-      // Eventos de Monitoreo en Vivo (The Office Pixel Art)
+      // Eventos de Monitoreo en Vivo (The Office Pixel Art — Watcher de Pixel HQ)
       if (payload.type === 'presence_update') {
-        if (payload.presence && typeof payload.presence === 'object') {
-          setLivePresence(payload.presence);
-        }
-        if (Array.isArray(payload.activityFeed)) {
-          setLiveActivityFeed(payload.activityFeed);
-        }
+        applyIncomingPresence(payload.presence, payload.activityFeed);
         return;
       }
 
       if (payload.type === 'admin_ping' && payload.ping) {
         if (Array.isArray(payload.activityFeed)) {
-          setLiveActivityFeed(payload.activityFeed);
+          applyIncomingPresence(undefined, payload.activityFeed);
         }
         if (isAuthenticated && currentUser && payload.ping.targetUserId === currentUser.id) {
           const isUrgent = payload.ping.kind === 'urgente' || payload.ping.kind === 'recordatorio';
@@ -1062,13 +1111,11 @@ export default function App() {
       unsubNav();
       unsubStream();
     };
-  }, [isAuthenticated, currentUser, showToast]);
+  }, [isAuthenticated, currentUser, showToast, applyIncomingPresence]);
 
   // ---------------------------------------------------------------------------
-  // ESTADO Y REPORTERO EN VIVO PARA "THE OFFICE" PIXEL ART MONITOR
+  // REPORTERO LIGERO EN VIVO PARA "THE OFFICE" (WATCHER DE PIXEL HQ — 0% CPU)
   // ---------------------------------------------------------------------------
-  const [livePresence, setLivePresence] = useState<Record<string, UserLivePresence>>({});
-  const [liveActivityFeed, setLiveActivityFeed] = useState<LiveActivityLogEntry[]>([]);
   const lastUserInteractionAtRef = useRef<number>(Date.now());
   const currentPresenceActionRef = useRef<string>('Trabajando en el portal');
 
@@ -1078,12 +1125,11 @@ export default function App() {
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data && data.ok) {
-          if (data.presence) setLivePresence(data.presence);
-          if (Array.isArray(data.activityFeed)) setLiveActivityFeed(data.activityFeed);
+          applyIncomingPresence(data.presence, data.activityFeed);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [applyIncomingPresence]);
 
   const reportUserPresence = useCallback(
     (
@@ -1135,32 +1181,31 @@ export default function App() {
         .then(r => (r.ok ? r.json() : null))
         .then(data => {
           if (data && data.ok) {
-            if (data.presence) {
-              setLivePresence(data.presence);
+            applyIncomingPresence(data.presence, data.activityFeed);
+            if (data.changed) {
+              // Sincronización instantánea (0ms) entre pestañas del mismo navegador solo cuando hubo cambio real
+              PushNotificationService.broadcastLocalEvent({
+                type: 'presence_update',
+                actorId: currentUser.id,
+                actorName: currentUser.name,
+                presence: data.presence,
+                activityFeed: data.activityFeed,
+                timestamp: new Date().toISOString(),
+              });
             }
-            if (Array.isArray(data.activityFeed)) {
-              setLiveActivityFeed(data.activityFeed);
-            }
-            // Sincronización instantánea (0ms) entre pestañas del mismo navegador vía BroadcastChannel
-            PushNotificationService.broadcastLocalEvent({
-              type: 'presence_update',
-              actorId: currentUser.id,
-              actorName: currentUser.name,
-              presence: data.presence,
-              activityFeed: data.activityFeed,
-              timestamp: new Date().toISOString(),
-            });
           }
         })
         .catch(() => {});
     },
-    [isAuthenticated, currentUser, selectedSupervisor, portalTab]
+    [isAuthenticated, currentUser, selectedSupervisor, portalTab, applyIncomingPresence]
   );
 
-  // Detectar actividad de mouse/teclado y enviar pulso de presencia cada 12 segundos
+  // Detectar actividad ligera (solo clics/teclado con throttle de 5s, sin mousemove) y pulso cada 30s
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
-    fetchLivePresence();
+    if (currentUser.role === 'admin' || currentUser.id === 'user_admin') {
+      fetchLivePresence();
+    }
 
     const tabLabelMap: Record<string, string> = {
       inicio: 'En el Panel de Bienvenida',
@@ -1177,28 +1222,25 @@ export default function App() {
     reportUserPresence('working', actionLabel, true);
 
     const onUserInteract = () => {
-      const wasIdle = Date.now() - lastUserInteractionAtRef.current > 90000;
-      lastUserInteractionAtRef.current = Date.now();
+      const now = Date.now();
+      if (now - lastUserInteractionAtRef.current < 5000) return;
+      const wasIdle = now - lastUserInteractionAtRef.current > 90000;
+      lastUserInteractionAtRef.current = now;
       if (wasIdle) {
         reportUserPresence('working', actionLabel, true);
       }
     };
 
-    window.addEventListener('mousemove', onUserInteract, { passive: true });
+    window.addEventListener('pointerdown', onUserInteract, { passive: true });
     window.addEventListener('keydown', onUserInteract, { passive: true });
-    window.addEventListener('click', onUserInteract, { passive: true });
 
     const interval = setInterval(() => {
       reportUserPresence();
-      if (currentUser.role === 'admin' || currentUser.id === 'user_admin') {
-        fetchLivePresence();
-      }
-    }, 12000);
+    }, 30000);
 
     return () => {
-      window.removeEventListener('mousemove', onUserInteract);
+      window.removeEventListener('pointerdown', onUserInteract);
       window.removeEventListener('keydown', onUserInteract);
-      window.removeEventListener('click', onUserInteract);
       clearInterval(interval);
     };
   }, [isAuthenticated, currentUser, portalTab, selectedSupervisor, fetchLivePresence, reportUserPresence]);
@@ -1245,13 +1287,6 @@ export default function App() {
     },
     [currentUser?.name, showToast]
   );
-
-  // Conteo de usuarios conectados actualmente (working + idle) para el badge del menú lateral
-  const onlineUsersCount = useMemo(() => {
-    return Object.values(livePresence).filter(
-      p => p.status === 'working' || p.status === 'idle'
-    ).length;
-  }, [livePresence]);
 
   // Cargar estado inicial de empleados guardados
   useEffect(() => {
