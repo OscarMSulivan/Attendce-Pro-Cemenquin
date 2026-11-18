@@ -400,7 +400,14 @@ export class PortalService {
 
   static isSessionAuthenticated(): boolean {
     try {
-      return localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) === 'true';
+      const tabSession = sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
+      if (tabSession === 'true') return true;
+      if (tabSession === 'false') return false;
+      const globalSession = localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) === 'true';
+      if (globalSession) {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, 'true');
+      }
+      return globalSession;
     } catch {
       return false;
     }
@@ -409,11 +416,14 @@ export class PortalService {
   static setSessionAuthenticated(isAuth: boolean, userId?: string): void {
     try {
       if (isAuth) {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, 'true');
         localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, 'true');
         if (userId) {
           this.saveActiveUserId(userId);
         }
       } else {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, 'false');
+        sessionStorage.removeItem(STORAGE_KEYS.ACTIVE_USER_ID);
         localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
       }
     } catch (e) {
@@ -422,13 +432,23 @@ export class PortalService {
   }
 
   static loadActiveUserId(): string {
-    const id = localStorage.getItem(STORAGE_KEYS.ACTIVE_USER_ID) || 'user_admin';
-    if (id === 'user_sup_omar') return 'user_sup_eudis';
-    return id;
+    try {
+      const tabUserId = sessionStorage.getItem(STORAGE_KEYS.ACTIVE_USER_ID);
+      if (tabUserId) {
+        return tabUserId === 'user_sup_omar' ? 'user_sup_eudis' : tabUserId;
+      }
+      const id = localStorage.getItem(STORAGE_KEYS.ACTIVE_USER_ID) || 'user_admin';
+      const resolved = id === 'user_sup_omar' ? 'user_sup_eudis' : id;
+      sessionStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, resolved);
+      return resolved;
+    } catch {
+      return 'user_admin';
+    }
   }
 
   static saveActiveUserId(userId: string): void {
     try {
+      sessionStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, userId);
       localStorage.setItem(STORAGE_KEYS.ACTIVE_USER_ID, userId);
     } catch {
       // ignore

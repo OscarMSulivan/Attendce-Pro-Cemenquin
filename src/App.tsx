@@ -265,6 +265,15 @@ export default function App() {
         if (serverData) {
           if (serverData.users && serverData.users.length > 0) {
             setPortalUsers(serverData.users.map(u => PortalService.normalizeUserRecord(u)));
+          } else {
+            const initialUsers = PortalService.loadUsers();
+            PortalService.saveUsers(initialUsers);
+          }
+          if ((serverData as any).livePresence && typeof (serverData as any).livePresence === 'object') {
+            setLivePresence((serverData as any).livePresence);
+          }
+          if (Array.isArray((serverData as any).liveActivityFeed)) {
+            setLiveActivityFeed((serverData as any).liveActivityFeed);
           }
           if (serverData.incidents) {
             setIncidents(serverData.incidents);
@@ -1065,7 +1074,7 @@ export default function App() {
 
   const fetchLivePresence = useCallback(() => {
     if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
-    fetch('/api/portal/presence')
+    fetch('/api/portal/presence', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data && data.ok) {
@@ -1080,7 +1089,8 @@ export default function App() {
     (
       statusOverride?: 'working' | 'idle' | 'offline',
       customAction?: string,
-      recordAction = false
+      recordAction = false,
+      supervisorListOverride?: string
     ) => {
       if (
         !isAuthenticated ||
@@ -1097,6 +1107,7 @@ export default function App() {
       const effectiveStatus =
         statusOverride || (idleSec > 90 ? 'idle' : 'working');
       const supList =
+        supervisorListOverride ||
         selectedSupervisor ||
         currentUser.supervisorName ||
         currentUser.assignedLists?.[0] ||
@@ -1123,8 +1134,22 @@ export default function App() {
       })
         .then(r => (r.ok ? r.json() : null))
         .then(data => {
-          if (data && data.ok && data.presence) {
-            setLivePresence(data.presence);
+          if (data && data.ok) {
+            if (data.presence) {
+              setLivePresence(data.presence);
+            }
+            if (Array.isArray(data.activityFeed)) {
+              setLiveActivityFeed(data.activityFeed);
+            }
+            // Sincronización instantánea (0ms) entre pestañas del mismo navegador vía BroadcastChannel
+            PushNotificationService.broadcastLocalEvent({
+              type: 'presence_update',
+              actorId: currentUser.id,
+              actorName: currentUser.name,
+              presence: data.presence,
+              activityFeed: data.activityFeed,
+              timestamp: new Date().toISOString(),
+            });
           }
         })
         .catch(() => {});
@@ -1132,7 +1157,7 @@ export default function App() {
     [isAuthenticated, currentUser, selectedSupervisor, portalTab]
   );
 
-  // Detectar actividad de mouse/teclado y enviar pulso de presencia cada 25 segundos
+  // Detectar actividad de mouse/teclado y enviar pulso de presencia cada 12 segundos
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
     fetchLivePresence();
@@ -1165,7 +1190,10 @@ export default function App() {
 
     const interval = setInterval(() => {
       reportUserPresence();
-    }, 25000);
+      if (currentUser.role === 'admin' || currentUser.id === 'user_admin') {
+        fetchLivePresence();
+      }
+    }, 12000);
 
     return () => {
       window.removeEventListener('mousemove', onUserInteract);
@@ -1196,6 +1224,13 @@ export default function App() {
         });
         const data = await res.json();
         if (data && data.ok) {
+          if (data.ping) {
+            PushNotificationService.broadcastLocalEvent({
+              type: 'admin_ping',
+              ping: data.ping,
+              timestamp: new Date().toISOString(),
+            });
+          }
           showToast(
             `Toque enviado en tiempo real a la pantalla de ${targetUserName}.`,
             'success',
@@ -2440,6 +2475,7 @@ export default function App() {
 
     setStatusMessage('🚫 Día marcado como FALTA CONFIRMADA (el trabajador no se presentó ese día laboral).');
     setStatusType('info');
+    reportUserPresence('working', `Confirmó falta de #${normTargetId} (${isoDate})`, true);
   };
 
   // Resolver un día laboral sin las 2 checadas desde el asistente "¿Quieres hacer un formato?"
@@ -2720,6 +2756,16 @@ export default function App() {
         : `🟣 Checada agregada por supervisor y formato registrado para ${empName} (${payload.isoDate})`
     );
     setStatusType('success');
+    reportUserPresence(
+      'working',
+      payload.mode === 'falta'
+        ? `Confirmó falta de ${empName} (${payload.isoDate})`
+        : payload.mode === 'permiso'
+        ? `Subió formato de ${payload.tipoIncidencia} para ${empName}`
+        : `Registró checada sin gafete de ${empName} (${payload.entrada}-${payload.salida})`,
+      true,
+      supName
+    );
   };
 
   // Filtrado reactivo en memoria para la tabla (empresa, búsqueda y supervisor con aislamiento de rol)
@@ -3687,6 +3733,11 @@ export default function App() {
     setStatusMessage('✓ Incidencia aprobada e integrada a los cálculos de nómina');
     setStatusType('success');
     showToast('La incidencia fue aprobada e integrada a los cálculos de nómina.', 'success', 'Incidencia Aprobada');
+    reportUserPresence(
+      'working',
+      `Aprobó incidencia (${targetInc?.tipo || 'Solicitud'}) de ${targetInc?.empleadoNombre || incidentId}`,
+      true
+    );
   };
 
   const handleRejectIncident = (incidentId: string, notes?: string) => {
@@ -3732,6 +3783,11 @@ export default function App() {
     setStatusMessage('Incidencia marcada como rechazada');
     setStatusType('info');
     showToast('La solicitud de incidencia fue rechazada.', 'info', 'Incidencia Rechazada');
+    reportUserPresence(
+      'working',
+      `Rechazó incidencia (${targetInc?.tipo || 'Solicitud'}) de ${targetInc?.empleadoNombre || incidentId}`,
+      true
+    );
   };
 
   const handleResetUserPassword = (userId: string, newPassword: string) => {
@@ -3803,6 +3859,12 @@ export default function App() {
       setStatusType('success');
       showToast('Solicitud de incidencia registrada en la lista y enviada a Recursos Humanos / Nóminas.', 'success', 'Incidencia Registrada');
     }
+    reportUserPresence(
+      'working',
+      `Registró ${newIncident.tipo} para ${newIncident.empleadoNombre} (#${newIncident.empleadoId})`,
+      true,
+      newIncident.supervisorNombre
+    );
   };
 
   // Liberar nómina formalmente a RH (Supervisor)
@@ -3832,6 +3894,12 @@ export default function App() {
     setStatusMessage(`✓ Nómina de ${currentSupervisorForRelease} liberada formalmente a RH`);
     setStatusType('success');
     showToast(`La nómina de ${currentSupervisorForRelease} (Semana ${currentWeekNumber}) fue liberada a RH.`, 'success', 'Nómina Liberada');
+    reportUserPresence(
+      'working',
+      `🟢 Liberó nómina Semana ${currentWeekNumber} de lista ${currentSupervisorForRelease}`,
+      true,
+      currentSupervisorForRelease
+    );
   };
 
   // Verificar si la semana actual ya fue dispersada (total o parcialmente) por Nóminas/RH
@@ -4051,6 +4119,13 @@ export default function App() {
       'success',
       'Nómina Dispersada'
     );
+    reportUserPresence(
+      'working',
+      targets.length === 1
+        ? `Dispersó nómina Semana ${semanaNum} a lista ${targets[0]}`
+        : `Dispersó nómina Semana ${semanaNum} (${targets.length} listas)`,
+      true
+    );
   };
 
   // Cancelar nóminas dispersadas (por supervisor o global)
@@ -4170,6 +4245,12 @@ export default function App() {
 
     setStatusMessage(`✓ Nómina de ${supervisorName} liberada y enviada a Recursos Humanos`);
     setStatusType('success');
+    reportUserPresence(
+      'working',
+      `🟢 Liberó nómina Semana ${semanaNum} de lista ${supervisorName}`,
+      true,
+      supervisorName
+    );
   };
 
   // Abrir modal de incidencias con colaborador preseleccionado
@@ -4552,6 +4633,9 @@ export default function App() {
                     onResolveMissingPunchDay={handleResolveMissingPunchDay}
                     onQuickConfirmFalta={handleQuickConfirmFalta}
                     onToggleOvertimeApproval={handleToggleOvertimeApproval}
+                    onReportLiveAction={(action, supList) =>
+                      reportUserPresence('working', action, true, supList)
+                    }
                   />
                 )}
 

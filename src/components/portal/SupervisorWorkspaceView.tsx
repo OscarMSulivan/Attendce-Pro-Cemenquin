@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   FileSpreadsheet, 
@@ -73,6 +73,7 @@ interface SupervisorWorkspaceViewProps {
   onToggleOvertimeApproval?: (employeeId: string, isoDate: string, autorizada: boolean) => void;
   horasLimiteLiberacion?: number;
   availableSupervisorLists?: string[];
+  onReportLiveAction?: (action: string, supervisorList?: string) => void;
 }
 
 export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = ({
@@ -98,6 +99,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   onToggleOvertimeApproval,
   horasLimiteLiberacion = 24,
   availableSupervisorLists = [],
+  onReportLiveAction,
 }) => {
   const [activeModule, setActiveModule] = useState<'nominas' | 'equipo' | 'solicitudes'>('nominas');
   const [searchEmployeeQuery, setSearchEmployeeQuery] = useState('');
@@ -151,6 +153,64 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   const [releaseComments, setReleaseComments] = useState('');
   const [workedFile, setWorkedFile] = useState<{ nombre: string; base64: string } | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const onReportLiveActionRef = useRef(onReportLiveAction);
+  useEffect(() => {
+    onReportLiveActionRef.current = onReportLiveAction;
+  }, [onReportLiveAction]);
+
+  // Reportar en tiempo real al módulo The Office qué sub-módulo, lista o acción está ejecutando el supervisor
+  useEffect(() => {
+    const reportFn = onReportLiveActionRef.current;
+    if (!reportFn) return;
+    if (formatModalTarget) {
+      const modeLabel =
+        formatModalTarget.mode === 'falta'
+          ? 'Confirmando Falta'
+          : formatModalTarget.mode === 'permiso'
+          ? 'Subiendo Formato de Permiso'
+          : 'Registrando Checada sin Gafete';
+      reportFn(
+        `${modeLabel} de #${formatModalTarget.employee.id} (${formatModalTarget.day.isoDate})`,
+        targetSupervisor
+      );
+      return;
+    }
+    if (isWorkingOnRelease) {
+      reportFn(
+        `Preparando Liberación de Nómina Sem. ${currentWeekNumber} (${targetSupervisor})`,
+        targetSupervisor
+      );
+      return;
+    }
+    if (activeModule === 'equipo') {
+      reportFn(`Consultando Mi Equipo y Vacaciones (${targetSupervisor})`, targetSupervisor);
+      return;
+    }
+    if (activeModule === 'solicitudes') {
+      reportFn(`En Mis Solicitudes / Formatos (${targetSupervisor})`, targetSupervisor);
+      return;
+    }
+    const filterDesc =
+      listFilterMode === 'missing_punches'
+        ? ' [Filtro: Días sin checada]'
+        : listFilterMode === 'pending_overtime'
+        ? ' [Filtro: Extras por decidir]'
+        : listFilterMode === 'modified'
+        ? ' [Filtro: Modificados]'
+        : '';
+    reportFn(
+      `Revisando Nómina Sem. ${currentWeekNumber} · Lista ${targetSupervisor}${filterDesc}`,
+      targetSupervisor
+    );
+  }, [
+    activeModule,
+    targetSupervisor,
+    listFilterMode,
+    formatModalTarget,
+    isWorkingOnRelease,
+    currentWeekNumber,
+  ]);
 
   // Obtener estado de liberación de la semana actual
   const currentReleaseKey = `${currentWeekNumber}_${targetSupervisor}`;

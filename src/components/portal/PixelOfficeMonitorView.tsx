@@ -548,6 +548,55 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
   const [pingHighlightUserId, setPingHighlightUserId] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState<'all' | 'working' | 'idle' | 'offline'>('all');
 
+  // Polling activo cada 3.5s mientras el Administrador tiene abierto The Office (a prueba de proxies Nginx/Cloudflare)
+  useEffect(() => {
+    onRefreshPresence();
+    const timer = setInterval(() => {
+      onRefreshPresence();
+    }, 3500);
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        onRefreshPresence();
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+    };
+  }, [onRefreshPresence]);
+
+  // Combinar catálogo de usuarios con cualquier usuario conectado en livePresence que aún no esté en el catálogo local
+  const officeUsers = useMemo<PortalUser[]>(() => {
+    const list = [...users];
+    const normNum = (val?: string) => (val || '').trim().replace(/^0+/, '');
+    Object.values(livePresence).forEach(pres => {
+      if (!pres || !pres.userId) return;
+      const alreadyExists = list.some(
+        u =>
+          u.id === pres.userId ||
+          (u.employeeId && pres.employeeId && normNum(u.employeeId) === normNum(pres.employeeId)) ||
+          (u.email && pres.email && u.email.trim().toLowerCase() === pres.email.trim().toLowerCase()) ||
+          (u.name && pres.userName && u.name.trim().toUpperCase() === pres.userName.trim().toUpperCase())
+      );
+      if (!alreadyExists) {
+        list.push({
+          id: pres.userId,
+          name: pres.userName || 'Usuario Conectado',
+          email: pres.email || '',
+          role: pres.userRole || 'supervisor',
+          employeeId: pres.employeeId,
+          supervisorName: pres.supervisorList,
+          assignedLists: pres.supervisorList ? [pres.supervisorList] : [],
+          active: true,
+        });
+      }
+    });
+    return list;
+  }, [users, livePresence]);
+
   // Defensa estricta: solo el Administrador General puede ver este módulo
   if (currentUser.role !== 'admin' && currentUser.id !== 'user_admin') {
     return (
@@ -564,6 +613,8 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
   // Si el Administrador activa el "Modo Simulacro Hora Pico", animar todos los escritorios con acciones realistas
   const effectivePresenceMap = useMemo<Record<string, UserLivePresence>>(() => {
     const base: Record<string, UserLivePresence> = {};
+    const normNum = (val?: string) => (val || '').trim().replace(/^0+/, '');
+    const allLiveEntries = Object.values(livePresence);
     const demoActions = [
       'Revisando checadas de su lista en Sem. 46',
       'Autorizando +2.5h de Tiempo Extra',
@@ -574,26 +625,43 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
       'Auditando asistencias perfectas del equipo',
     ];
 
-    users.forEach((u, idx) => {
-      const real = livePresence[u.id];
+    officeUsers.forEach((u, idx) => {
+      const real =
+        livePresence[u.id] ||
+        allLiveEntries.find(
+          p =>
+            p &&
+            (p.userId === u.id ||
+              (u.employeeId && p.employeeId && normNum(u.employeeId) === normNum(p.employeeId)) ||
+              (u.email && p.email && u.email.trim().toLowerCase() === p.email.trim().toLowerCase()) ||
+              (u.name && p.userName && u.name.trim().toUpperCase() === p.userName.trim().toUpperCase()))
+        );
       if (!isDemoMode) {
-        base[u.id] = real || {
-          userId: u.id,
-          userName: u.name,
-          userRole: u.role,
-          email: u.email,
-          employeeId: u.employeeId,
-          supervisorList: u.supervisorName || u.assignedLists?.[0],
-          status: u.id === currentUser.id ? 'working' : 'offline',
-          activeTab: u.id === currentUser.id ? 'oficina_live' : 'offline',
-          currentAction:
-            u.id === currentUser.id
-              ? 'Monitoreando cámaras de The Office en vivo'
-              : 'Desconectado del portal',
-          lastActionAt: '',
-          lastHeartbeatAt: '',
-          recentActions: [],
-        };
+        base[u.id] = real
+          ? {
+              ...real,
+              userId: u.id,
+              userName: u.name || real.userName,
+              userRole: u.role,
+              supervisorList: real.supervisorList || u.supervisorName || u.assignedLists?.[0],
+            }
+          : {
+              userId: u.id,
+              userName: u.name,
+              userRole: u.role,
+              email: u.email,
+              employeeId: u.employeeId,
+              supervisorList: u.supervisorName || u.assignedLists?.[0],
+              status: u.id === currentUser.id ? 'working' : 'offline',
+              activeTab: u.id === currentUser.id ? 'oficina_live' : 'offline',
+              currentAction:
+                u.id === currentUser.id
+                  ? 'Monitoreando cámaras de The Office en vivo'
+                  : 'Desconectado del portal',
+              lastActionAt: '',
+              lastHeartbeatAt: '',
+              recentActions: [],
+            };
       } else {
         // En modo simulacro, la mayoría trabaja en sus cubículos y 2 están en la cafetería tomando café
         const simStatus: LivePresenceStatus =
@@ -638,45 +706,45 @@ export const PixelOfficeMonitorView: React.FC<PixelOfficeMonitorViewProps> = ({
       }
     });
     return base;
-  }, [users, livePresence, isDemoMode, currentUser.id]);
+  }, [officeUsers, livePresence, isDemoMode, currentUser.id]);
 
   // Estadísticas globales en vivo
   const counts = useMemo(() => {
     let working = 0;
     let idle = 0;
     let offline = 0;
-    users.forEach(u => {
+    officeUsers.forEach(u => {
       const st = effectivePresenceMap[u.id]?.status || 'offline';
       if (st === 'working') working++;
       else if (st === 'idle') idle++;
       else offline++;
     });
-    return { working, idle, offline, total: users.length };
-  }, [users, effectivePresenceMap]);
+    return { working, idle, offline, total: officeUsers.length };
+  }, [officeUsers, effectivePresenceMap]);
 
   // Separar usuarios por zona arquitectónica de la oficina
   const adminUsers = useMemo(
-    () => users.filter(u => u.role === 'admin'),
-    [users]
+    () => officeUsers.filter(u => u.role === 'admin'),
+    [officeUsers]
   );
   const rhUsers = useMemo(
-    () => users.filter(u => u.role === 'rh'),
-    [users]
+    () => officeUsers.filter(u => u.role === 'rh'),
+    [officeUsers]
   );
   const supervisorUsers = useMemo(() => {
-    const list = users.filter(u => u.role === 'supervisor');
+    const list = officeUsers.filter(u => u.role === 'supervisor');
     if (roleFilter === 'all') return list;
     return list.filter(u => (effectivePresenceMap[u.id]?.status || 'offline') === roleFilter);
-  }, [users, roleFilter, effectivePresenceMap]);
+  }, [officeUsers, roleFilter, effectivePresenceMap]);
 
   const idleUsersInBreakroom = useMemo(
-    () => users.filter(u => effectivePresenceMap[u.id]?.status === 'idle'),
-    [users, effectivePresenceMap]
+    () => officeUsers.filter(u => effectivePresenceMap[u.id]?.status === 'idle'),
+    [officeUsers, effectivePresenceMap]
   );
 
   const selectedUser = useMemo(
-    () => users.find(u => u.id === selectedUserId) || users[0],
-    [users, selectedUserId]
+    () => officeUsers.find(u => u.id === selectedUserId) || officeUsers[0],
+    [officeUsers, selectedUserId]
   );
   const selectedPresence = selectedUser
     ? effectivePresenceMap[selectedUser.id]

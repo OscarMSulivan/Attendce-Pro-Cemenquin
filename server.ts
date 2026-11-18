@@ -72,6 +72,8 @@ interface ServerPortalDatabase {
   asignaciones?: Record<string, string>;
   config?: Record<string, unknown>;
   emailConfig?: ServerEmailConfig;
+  livePresence?: Record<string, any>;
+  liveActivityFeed?: any[];
   updatedAt?: string;
 }
 
@@ -1039,16 +1041,124 @@ async function startServer() {
   const livePresenceMap = new Map<string, ServerUserPresence>();
   const liveGlobalActivityFeed: ServerActivityEntry[] = [];
 
-  function buildFullPresenceSnapshot(): Record<string, ServerUserPresence> {
+  function syncPresenceFromDisk(): ServerPortalDatabase {
     const db = readDatabase();
+    if (db.livePresence && typeof db.livePresence === 'object') {
+      Object.entries(db.livePresence).forEach(([uid, record]) => {
+        if (!record || typeof record !== 'object') return;
+        const inc = record as ServerUserPresence;
+        const cur = livePresenceMap.get(uid);
+        const incHb = inc.lastHeartbeatAt ? new Date(inc.lastHeartbeatAt).getTime() : 0;
+        const curHb = cur?.lastHeartbeatAt ? new Date(cur.lastHeartbeatAt).getTime() : 0;
+        if (!cur || incHb >= curHb) {
+          livePresenceMap.set(uid, inc);
+        }
+      });
+    }
+    if (Array.isArray(db.liveActivityFeed) && db.liveActivityFeed.length > 0) {
+      const seenIds = new Set(liveGlobalActivityFeed.map((e) => e.id));
+      for (const item of db.liveActivityFeed as ServerActivityEntry[]) {
+        if (item && item.id && !seenIds.has(item.id)) {
+          liveGlobalActivityFeed.push(item);
+          seenIds.add(item.id);
+        }
+      }
+      liveGlobalActivityFeed.sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      if (liveGlobalActivityFeed.length > 80) {
+        liveGlobalActivityFeed.length = 80;
+      }
+    }
+    return db;
+  }
+
+  function persistPresenceToDisk(): void {
+    try {
+      const serializedMap: Record<string, ServerUserPresence> = {};
+      for (const [k, v] of livePresenceMap.entries()) {
+        serializedMap[k] = v;
+      }
+      writeDatabase({
+        livePresence: serializedMap,
+        liveActivityFeed: liveGlobalActivityFeed.slice(0, 80),
+      });
+    } catch (err) {
+      console.warn('No se pudo persistir presencia en portal_db.json:', err);
+    }
+  }
+
+  function computeEffectivePresenceRecord(
+    existing: ServerUserPresence,
+    nowMs: number,
+    overrides?: Partial<ServerUserPresence>
+  ): ServerUserPresence {
+    const lastHbMs = existing.lastHeartbeatAt ? new Date(existing.lastHeartbeatAt).getTime() : 0;
+    const lastActMs = existing.lastActionAt
+      ? new Date(existing.lastActionAt).getTime()
+      : lastHbMs;
+    const elapsedHbSec = lastHbMs > 0 ? (nowMs - lastHbMs) / 1000 : 999999;
+    const elapsedActSec = lastActMs > 0 ? (nowMs - lastActMs) / 1000 : 999999;
+
+    let effectiveStatus: 'working' | 'idle' | 'offline' = existing.status;
+    if (existing.status === 'offline' || elapsedHbSec > 110) {
+      effectiveStatus = 'offline';
+    } else if (existing.status === 'idle' || elapsedActSec > 90) {
+      effectiveStatus = 'idle';
+    } else {
+      effectiveStatus = 'working';
+    }
+
+    return {
+      ...existing,
+      ...overrides,
+      status: effectiveStatus,
+      currentAction:
+        effectiveStatus === 'offline'
+          ? 'Desconectado del portal'
+          : effectiveStatus === 'idle'
+          ? 'En la cafetería / Sin actividad reciente'
+          : existing.currentAction || 'Trabajando en el portal',
+    };
+  }
+
+  function findMatchingPresenceForCatalogUser(u: Record<string, any>): ServerUserPresence | undefined {
+    const uid = String(u.id || '').trim();
+    if (uid && livePresenceMap.has(uid)) {
+      return livePresenceMap.get(uid);
+    }
+    const uEmpNorm = normalizeEmpIdServer(u.employeeId);
+    const uEmail = String(u.email || '').trim().toLowerCase();
+    const uName = String(u.name || '').trim().toUpperCase();
+
+    for (const entry of livePresenceMap.values()) {
+      if (uEmpNorm && normalizeEmpIdServer(entry.employeeId) === uEmpNorm) {
+        return entry;
+      }
+      if (uEmail && entry.email && entry.email.trim().toLowerCase() === uEmail) {
+        return entry;
+      }
+      if (uName && entry.userName && entry.userName.trim().toUpperCase() === uName) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
+  function buildFullPresenceSnapshot(): Record<string, ServerUserPresence> {
+    const db = syncPresenceFromDisk();
     const users = (Array.isArray(db.users) ? db.users : []) as Array<Record<string, any>>;
     const nowMs = Date.now();
     const result: Record<string, ServerUserPresence> = {};
+    const consumedPresenceKeys = new Set<string>();
 
     users.forEach((u) => {
       if (!u || !u.id) return;
       const uid = String(u.id);
-      const existing = livePresenceMap.get(uid);
+      const existing = findMatchingPresenceForCatalogUser(u);
+      if (existing) {
+        consumedPresenceKeys.add(existing.userId);
+      }
       const role = (u.role === 'admin' || u.role === 'rh' ? u.role : 'supervisor') as
         | 'admin'
         | 'rh'
@@ -1075,42 +1185,32 @@ async function startServer() {
         return;
       }
 
-      const lastHbMs = existing.lastHeartbeatAt ? new Date(existing.lastHeartbeatAt).getTime() : 0;
-      const lastActMs = existing.lastActionAt ? new Date(existing.lastActionAt).getTime() : lastHbMs;
-      const elapsedHbSec = lastHbMs > 0 ? (nowMs - lastHbMs) / 1000 : 999999;
-      const elapsedActSec = lastActMs > 0 ? (nowMs - lastActMs) / 1000 : 999999;
-
-      let effectiveStatus: 'working' | 'idle' | 'offline' = existing.status;
-      if (existing.status === 'offline' || elapsedHbSec > 110) {
-        effectiveStatus = 'offline';
-      } else if (existing.status === 'idle' || elapsedActSec > 90) {
-        effectiveStatus = 'idle';
-      } else {
-        effectiveStatus = 'working';
-      }
-
-      result[uid] = {
-        ...existing,
+      result[uid] = computeEffectivePresenceRecord(existing, nowMs, {
+        userId: uid,
         userName: String(u.name || existing.userName || 'Usuario'),
         userRole: role,
         email: u.email || existing.email,
         employeeId: u.employeeId || existing.employeeId,
         supervisorList: existing.supervisorList || supList,
-        status: effectiveStatus,
-        currentAction:
-          effectiveStatus === 'offline'
-            ? 'Desconectado del portal'
-            : effectiveStatus === 'idle'
-            ? 'En la cafetería / Sin actividad reciente'
-            : existing.currentAction || 'Trabajando en el portal',
-      };
+      });
     });
+
+    // Garantizar que CUALQUIER usuario en livePresenceMap aparezca en el snapshot aunque db.users esté vacío o tenga otro ID
+    for (const [uid, existing] of livePresenceMap.entries()) {
+      const computed = computeEffectivePresenceRecord(existing, nowMs);
+      if (!result[uid]) {
+        result[uid] = computed;
+      } else if (consumedPresenceKeys.has(uid) && computed.status !== 'offline') {
+        result[uid] = computed;
+      }
+    }
 
     return result;
   }
 
   app.get('/api/portal/presence', (_req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       const snapshot = buildFullPresenceSnapshot();
       res.json({
         ok: true,
@@ -1124,6 +1224,7 @@ async function startServer() {
 
   app.post('/api/portal/presence', (req, res) => {
     try {
+      syncPresenceFromDisk();
       const body = req.body || {};
       const userId = String(body.userId || '').trim();
       if (!userId) {
@@ -1155,7 +1256,7 @@ async function startServer() {
         prev.activeTab !== activeTab ||
         (body.currentAction && body.currentAction !== prev.currentAction);
 
-      const recentActions = prev ? [...prev.recentActions] : [];
+      const recentActions = prev && Array.isArray(prev.recentActions) ? [...prev.recentActions] : [];
 
       if (isActionChange && incomingStatus !== 'offline') {
         const entry: ServerActivityEntry = {
@@ -1185,7 +1286,7 @@ async function startServer() {
         activeTab,
         currentAction,
         lastActionAt:
-          incomingStatus === 'working' && (body.recordAction || !prev)
+          incomingStatus === 'working' && (body.recordAction || !prev || prev.status !== 'working')
             ? nowISO
             : prev?.lastActionAt || nowISO,
         lastHeartbeatAt: nowISO,
@@ -1199,17 +1300,23 @@ async function startServer() {
       };
 
       livePresenceMap.set(userId, updatedUserPresence);
+      persistPresenceToDisk();
 
       const fullSnapshot = buildFullPresenceSnapshot();
+      const feedSnapshot = liveGlobalActivityFeed.slice(0, 60);
       broadcastRealtimeEvent({
         type: 'presence_update',
         actorId: userId,
         actorName: userName,
         presence: fullSnapshot,
-        activityFeed: liveGlobalActivityFeed.slice(0, 60),
+        activityFeed: feedSnapshot,
       });
 
-      res.json({ ok: true, presence: fullSnapshot });
+      res.json({
+        ok: true,
+        presence: fullSnapshot,
+        activityFeed: feedSnapshot,
+      });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -1217,6 +1324,7 @@ async function startServer() {
 
   app.post('/api/portal/presence/ping', (req, res) => {
     try {
+      syncPresenceFromDisk();
       const body = req.body || {};
       const targetUserId = String(body.targetUserId || '').trim();
       const targetUserName = String(body.targetUserName || 'Usuario').trim();
@@ -1255,6 +1363,7 @@ async function startServer() {
       };
       liveGlobalActivityFeed.unshift(feedEntry);
       if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
+      persistPresenceToDisk();
 
       broadcastRealtimeEvent({
         type: 'admin_ping',

@@ -751,15 +751,105 @@ async function startServer() {
   });
   const livePresenceMap = /* @__PURE__ */ new Map();
   const liveGlobalActivityFeed = [];
-  function buildFullPresenceSnapshot() {
+  function syncPresenceFromDisk() {
     const db = readDatabase();
+    if (db.livePresence && typeof db.livePresence === "object") {
+      Object.entries(db.livePresence).forEach(([uid, record]) => {
+        if (!record || typeof record !== "object") return;
+        const inc = record;
+        const cur = livePresenceMap.get(uid);
+        const incHb = inc.lastHeartbeatAt ? new Date(inc.lastHeartbeatAt).getTime() : 0;
+        const curHb = cur?.lastHeartbeatAt ? new Date(cur.lastHeartbeatAt).getTime() : 0;
+        if (!cur || incHb >= curHb) {
+          livePresenceMap.set(uid, inc);
+        }
+      });
+    }
+    if (Array.isArray(db.liveActivityFeed) && db.liveActivityFeed.length > 0) {
+      const seenIds = new Set(liveGlobalActivityFeed.map((e) => e.id));
+      for (const item of db.liveActivityFeed) {
+        if (item && item.id && !seenIds.has(item.id)) {
+          liveGlobalActivityFeed.push(item);
+          seenIds.add(item.id);
+        }
+      }
+      liveGlobalActivityFeed.sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      if (liveGlobalActivityFeed.length > 80) {
+        liveGlobalActivityFeed.length = 80;
+      }
+    }
+    return db;
+  }
+  function persistPresenceToDisk() {
+    try {
+      const serializedMap = {};
+      for (const [k, v] of livePresenceMap.entries()) {
+        serializedMap[k] = v;
+      }
+      writeDatabase({
+        livePresence: serializedMap,
+        liveActivityFeed: liveGlobalActivityFeed.slice(0, 80)
+      });
+    } catch (err) {
+      console.warn("No se pudo persistir presencia en portal_db.json:", err);
+    }
+  }
+  function computeEffectivePresenceRecord(existing, nowMs, overrides) {
+    const lastHbMs = existing.lastHeartbeatAt ? new Date(existing.lastHeartbeatAt).getTime() : 0;
+    const lastActMs = existing.lastActionAt ? new Date(existing.lastActionAt).getTime() : lastHbMs;
+    const elapsedHbSec = lastHbMs > 0 ? (nowMs - lastHbMs) / 1e3 : 999999;
+    const elapsedActSec = lastActMs > 0 ? (nowMs - lastActMs) / 1e3 : 999999;
+    let effectiveStatus = existing.status;
+    if (existing.status === "offline" || elapsedHbSec > 110) {
+      effectiveStatus = "offline";
+    } else if (existing.status === "idle" || elapsedActSec > 90) {
+      effectiveStatus = "idle";
+    } else {
+      effectiveStatus = "working";
+    }
+    return {
+      ...existing,
+      ...overrides,
+      status: effectiveStatus,
+      currentAction: effectiveStatus === "offline" ? "Desconectado del portal" : effectiveStatus === "idle" ? "En la cafeter\xEDa / Sin actividad reciente" : existing.currentAction || "Trabajando en el portal"
+    };
+  }
+  function findMatchingPresenceForCatalogUser(u) {
+    const uid = String(u.id || "").trim();
+    if (uid && livePresenceMap.has(uid)) {
+      return livePresenceMap.get(uid);
+    }
+    const uEmpNorm = normalizeEmpIdServer(u.employeeId);
+    const uEmail = String(u.email || "").trim().toLowerCase();
+    const uName = String(u.name || "").trim().toUpperCase();
+    for (const entry of livePresenceMap.values()) {
+      if (uEmpNorm && normalizeEmpIdServer(entry.employeeId) === uEmpNorm) {
+        return entry;
+      }
+      if (uEmail && entry.email && entry.email.trim().toLowerCase() === uEmail) {
+        return entry;
+      }
+      if (uName && entry.userName && entry.userName.trim().toUpperCase() === uName) {
+        return entry;
+      }
+    }
+    return void 0;
+  }
+  function buildFullPresenceSnapshot() {
+    const db = syncPresenceFromDisk();
     const users = Array.isArray(db.users) ? db.users : [];
     const nowMs = Date.now();
     const result = {};
+    const consumedPresenceKeys = /* @__PURE__ */ new Set();
     users.forEach((u) => {
       if (!u || !u.id) return;
       const uid = String(u.id);
-      const existing = livePresenceMap.get(uid);
+      const existing = findMatchingPresenceForCatalogUser(u);
+      if (existing) {
+        consumedPresenceKeys.add(existing.userId);
+      }
       const role = u.role === "admin" || u.role === "rh" ? u.role : "supervisor";
       const supList = u.supervisorName || (Array.isArray(u.assignedLists) && u.assignedLists.length > 0 ? u.assignedLists[0] : void 0);
       if (!existing) {
@@ -779,33 +869,28 @@ async function startServer() {
         };
         return;
       }
-      const lastHbMs = existing.lastHeartbeatAt ? new Date(existing.lastHeartbeatAt).getTime() : 0;
-      const lastActMs = existing.lastActionAt ? new Date(existing.lastActionAt).getTime() : lastHbMs;
-      const elapsedHbSec = lastHbMs > 0 ? (nowMs - lastHbMs) / 1e3 : 999999;
-      const elapsedActSec = lastActMs > 0 ? (nowMs - lastActMs) / 1e3 : 999999;
-      let effectiveStatus = existing.status;
-      if (existing.status === "offline" || elapsedHbSec > 110) {
-        effectiveStatus = "offline";
-      } else if (existing.status === "idle" || elapsedActSec > 90) {
-        effectiveStatus = "idle";
-      } else {
-        effectiveStatus = "working";
-      }
-      result[uid] = {
-        ...existing,
+      result[uid] = computeEffectivePresenceRecord(existing, nowMs, {
+        userId: uid,
         userName: String(u.name || existing.userName || "Usuario"),
         userRole: role,
         email: u.email || existing.email,
         employeeId: u.employeeId || existing.employeeId,
-        supervisorList: existing.supervisorList || supList,
-        status: effectiveStatus,
-        currentAction: effectiveStatus === "offline" ? "Desconectado del portal" : effectiveStatus === "idle" ? "En la cafeter\xEDa / Sin actividad reciente" : existing.currentAction || "Trabajando en el portal"
-      };
+        supervisorList: existing.supervisorList || supList
+      });
     });
+    for (const [uid, existing] of livePresenceMap.entries()) {
+      const computed = computeEffectivePresenceRecord(existing, nowMs);
+      if (!result[uid]) {
+        result[uid] = computed;
+      } else if (consumedPresenceKeys.has(uid) && computed.status !== "offline") {
+        result[uid] = computed;
+      }
+    }
     return result;
   }
   app.get("/api/portal/presence", (_req, res) => {
     try {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       const snapshot = buildFullPresenceSnapshot();
       res.json({
         ok: true,
@@ -818,6 +903,7 @@ async function startServer() {
   });
   app.post("/api/portal/presence", (req, res) => {
     try {
+      syncPresenceFromDisk();
       const body = req.body || {};
       const userId = String(body.userId || "").trim();
       if (!userId) {
@@ -834,7 +920,7 @@ async function startServer() {
       const userRole = body.userRole === "admin" || body.userRole === "rh" ? body.userRole : "supervisor";
       const supervisorList = body.supervisorList ? String(body.supervisorList) : prev?.supervisorList;
       const isActionChange = Boolean(body.recordAction) || !prev || prev.status !== incomingStatus || prev.activeTab !== activeTab || body.currentAction && body.currentAction !== prev.currentAction;
-      const recentActions = prev ? [...prev.recentActions] : [];
+      const recentActions = prev && Array.isArray(prev.recentActions) ? [...prev.recentActions] : [];
       if (isActionChange && incomingStatus !== "offline") {
         const entry = {
           id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -861,27 +947,34 @@ async function startServer() {
         status: incomingStatus,
         activeTab,
         currentAction,
-        lastActionAt: incomingStatus === "working" && (body.recordAction || !prev) ? nowISO : prev?.lastActionAt || nowISO,
+        lastActionAt: incomingStatus === "working" && (body.recordAction || !prev || prev.status !== "working") ? nowISO : prev?.lastActionAt || nowISO,
         lastHeartbeatAt: nowISO,
         connectedSince: incomingStatus === "offline" ? void 0 : prev?.connectedSince && prev.status !== "offline" ? prev.connectedSince : nowISO,
         recentActions
       };
       livePresenceMap.set(userId, updatedUserPresence);
+      persistPresenceToDisk();
       const fullSnapshot = buildFullPresenceSnapshot();
+      const feedSnapshot = liveGlobalActivityFeed.slice(0, 60);
       broadcastRealtimeEvent({
         type: "presence_update",
         actorId: userId,
         actorName: userName,
         presence: fullSnapshot,
-        activityFeed: liveGlobalActivityFeed.slice(0, 60)
+        activityFeed: feedSnapshot
       });
-      res.json({ ok: true, presence: fullSnapshot });
+      res.json({
+        ok: true,
+        presence: fullSnapshot,
+        activityFeed: feedSnapshot
+      });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
   });
   app.post("/api/portal/presence/ping", (req, res) => {
     try {
+      syncPresenceFromDisk();
       const body = req.body || {};
       const targetUserId = String(body.targetUserId || "").trim();
       const targetUserName = String(body.targetUserName || "Usuario").trim();
@@ -914,6 +1007,7 @@ async function startServer() {
       };
       liveGlobalActivityFeed.unshift(feedEntry);
       if (liveGlobalActivityFeed.length > 80) liveGlobalActivityFeed.length = 80;
+      persistPresenceToDisk();
       broadcastRealtimeEvent({
         type: "admin_ping",
         ping: pingPayload,
