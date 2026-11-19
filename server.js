@@ -7,9 +7,12 @@ import crypto from "crypto";
 import nodemailer from "nodemailer";
 import { createServer as createViteServer } from "vite";
 var PORT = Number(process.env.PORT) || 3e3;
-var DATA_DIR = path.resolve(process.cwd(), "data");
+var DATA_DIR = process.env.CEMENQTIME_DATA_DIR ? path.resolve(process.env.CEMENQTIME_DATA_DIR) : path.resolve(process.cwd(), "data");
 var UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 var DB_FILE = path.join(DATA_DIR, "portal_db.json");
+var PERSISTENT_BACKUP_DIR = path.join(os.homedir(), ".cemenqtime_data");
+var PERSISTENT_BACKUP_UPLOADS_DIR = path.join(PERSISTENT_BACKUP_DIR, "uploads");
+var PERSISTENT_BACKUP_DB_FILE = path.join(PERSISTENT_BACKUP_DIR, "portal_db.json");
 function renderServerEmailTemplate(template, vars) {
   let out = template || "";
   Object.entries(vars).forEach(([k, v]) => {
@@ -38,6 +41,15 @@ function ensureDataDir() {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
+  try {
+    if (!fs.existsSync(PERSISTENT_BACKUP_DIR)) {
+      fs.mkdirSync(PERSISTENT_BACKUP_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(PERSISTENT_BACKUP_UPLOADS_DIR)) {
+      fs.mkdirSync(PERSISTENT_BACKUP_UPLOADS_DIR, { recursive: true });
+    }
+  } catch {
+  }
 }
 function offloadBase64String(raw, fieldName) {
   if (!raw || typeof raw !== "string" || raw.length < 256 || raw.startsWith("@upload:")) {
@@ -52,6 +64,13 @@ function offloadBase64String(raw, fieldName) {
       const tmpUpload = `${filePath}.tmp.${process.pid}`;
       fs.writeFileSync(tmpUpload, raw, "utf-8");
       fs.renameSync(tmpUpload, filePath);
+    }
+    try {
+      const backupUploadPath = path.join(PERSISTENT_BACKUP_UPLOADS_DIR, fileName);
+      if (!fs.existsSync(backupUploadPath)) {
+        fs.writeFileSync(backupUploadPath, raw, "utf-8");
+      }
+    } catch {
     }
     uploadMemoryCache.set(fileName, raw);
     return `@upload:${fileName}`;
@@ -72,6 +91,16 @@ function hydrateBase64String(ref) {
     const filePath = path.join(UPLOADS_DIR, fileName);
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, "utf-8");
+      uploadMemoryCache.set(fileName, content);
+      return content;
+    }
+    const backupFilePath = path.join(PERSISTENT_BACKUP_UPLOADS_DIR, fileName);
+    if (fs.existsSync(backupFilePath)) {
+      const content = fs.readFileSync(backupFilePath, "utf-8");
+      try {
+        fs.writeFileSync(filePath, content, "utf-8");
+      } catch {
+      }
       uploadMemoryCache.set(fileName, content);
       return content;
     }
@@ -104,16 +133,24 @@ var cachedDiskMtimeMs = 0;
 function readDatabase() {
   try {
     ensureDataDir();
-    if (!fs.existsSync(DB_FILE)) {
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(PERSISTENT_BACKUP_DB_FILE)) {
+      try {
+        fs.copyFileSync(PERSISTENT_BACKUP_DB_FILE, DB_FILE);
+      } catch (copyErr) {
+        console.warn("Error restaurando espejo de base de datos:", copyErr);
+      }
+    }
+    const targetFile = fs.existsSync(DB_FILE) ? DB_FILE : fs.existsSync(PERSISTENT_BACKUP_DB_FILE) ? PERSISTENT_BACKUP_DB_FILE : null;
+    if (!targetFile) {
       cachedMemoryDb = {};
       cachedDiskMtimeMs = 0;
       return cachedMemoryDb;
     }
-    const stat = fs.statSync(DB_FILE);
+    const stat = fs.statSync(targetFile);
     if (cachedMemoryDb && stat.mtimeMs === cachedDiskMtimeMs) {
       return cachedMemoryDb;
     }
-    const raw = fs.readFileSync(DB_FILE, "utf-8");
+    const raw = fs.readFileSync(targetFile, "utf-8");
     const parsed = JSON.parse(raw);
     cachedMemoryDb = transformBase64FieldsDeep(parsed, "hydrate");
     cachedDiskMtimeMs = stat.mtimeMs;
@@ -208,23 +245,47 @@ function writeDatabase(partial) {
     ...mergedEmailConfig ? { emailServer: mergedEmailConfig } : {}
   } : mergedEmailConfig && current.config ? { ...current.config, emailServer: mergedEmailConfig } : current.config;
   const sameWeek = !partial.selectedWeek || !current.selectedWeek || partial.selectedWeek === current.selectedWeek;
-  const mergedReportes = Array.isArray(partial.reportes) ? mergeReportListsPreservingSupervisorEdits(current.reportes, partial.reportes, sameWeek) : current.reportes;
-  const mergedDispersals = Array.isArray(partial.dispersals) ? partial.dispersals.map((incDisp) => {
-    const curDisp = Array.isArray(current.dispersals) ? current.dispersals.find(
-      (d) => d?.semanaNumero === incDisp?.semanaNumero || d?.id === incDisp?.id
-    ) : void 0;
-    if (curDisp && Array.isArray(curDisp.reportesSnapshot) && Array.isArray(incDisp?.reportesSnapshot)) {
-      return {
-        ...incDisp,
-        reportesSnapshot: mergeReportListsPreservingSupervisorEdits(
-          curDisp.reportesSnapshot,
-          incDisp.reportesSnapshot,
-          true
-        )
-      };
+  const explicitClearReportes = Boolean(partial.clearReportes);
+  const explicitDeleteDispersal = Boolean(partial.deleteDispersal);
+  const mergedReportes = Array.isArray(partial.reportes) ? partial.reportes.length === 0 ? explicitClearReportes ? [] : current.reportes : mergeReportListsPreservingSupervisorEdits(current.reportes, partial.reportes, sameWeek) : current.reportes;
+  let mergedDispersals = current.dispersals;
+  if (Array.isArray(partial.dispersals)) {
+    if (partial.dispersals.length === 0 && Array.isArray(current.dispersals) && current.dispersals.length > 0 && !explicitDeleteDispersal) {
+      mergedDispersals = current.dispersals;
+    } else {
+      const incomingMerged = partial.dispersals.map((incDisp) => {
+        const curDisp = Array.isArray(current.dispersals) ? current.dispersals.find(
+          (d) => d?.semanaNumero === incDisp?.semanaNumero || d?.id === incDisp?.id
+        ) : void 0;
+        if (curDisp && Array.isArray(curDisp.reportesSnapshot) && curDisp.reportesSnapshot.length > 0) {
+          if (Array.isArray(incDisp?.reportesSnapshot) && incDisp.reportesSnapshot.length > 0) {
+            return {
+              ...incDisp,
+              reportesSnapshot: mergeReportListsPreservingSupervisorEdits(
+                curDisp.reportesSnapshot,
+                incDisp.reportesSnapshot,
+                true
+              )
+            };
+          }
+          return {
+            ...incDisp,
+            reportesSnapshot: curDisp.reportesSnapshot
+          };
+        }
+        return incDisp;
+      });
+      if (!explicitDeleteDispersal && Array.isArray(current.dispersals)) {
+        const incomingWeeks = new Set(incomingMerged.map((d) => d?.semanaNumero));
+        const missingFromIncoming = current.dispersals.filter(
+          (d) => d && !incomingWeeks.has(d.semanaNumero)
+        );
+        mergedDispersals = [...incomingMerged, ...missingFromIncoming];
+      } else {
+        mergedDispersals = incomingMerged;
+      }
     }
-    return incDisp;
-  }) : current.dispersals;
+  }
   const replaceEmpleadosDB = Boolean(partial.replaceEmpleadosDB);
   const deletedEmployeeIds = Array.isArray(partial.deletedEmployeeIds) ? new Set(partial.deletedEmployeeIds.map((id) => normalizeEmpIdServer(id))) : null;
   let mergedEmpleadosDB = current.empleadosDB;
@@ -274,6 +335,93 @@ function writeDatabase(partial) {
     });
     mergedEmpleadosDB = nextEmpDB;
   }
+  const incomingDeletedUserIds = Array.isArray(partial.deletedUserIds) ? partial.deletedUserIds.map((id) => String(id || "").trim()).filter(Boolean) : [];
+  const existingDeletedUserIds = Array.isArray(current.deletedUserIds) ? current.deletedUserIds.map((id) => String(id || "").trim()).filter(Boolean) : [];
+  const mergedDeletedUserIdsSet = /* @__PURE__ */ new Set([
+    ...existingDeletedUserIds,
+    ...incomingDeletedUserIds
+  ]);
+  let mergedUsers = current.users;
+  if (Array.isArray(partial.users)) {
+    const userMap = /* @__PURE__ */ new Map();
+    if (Array.isArray(current.users)) {
+      for (const u of current.users) {
+        const uid = String(u?.id || "").trim();
+        if (uid && !mergedDeletedUserIdsSet.has(uid)) {
+          userMap.set(uid, u);
+        }
+      }
+    }
+    const incomingList = partial.users;
+    const defaultIds = /* @__PURE__ */ new Set(["user_admin", "user_rh", "user_sup_oscar", "user_sup_eudis"]);
+    const isIncomingOnlyDefaultSeed = incomingList.length <= 4 && incomingList.every((u) => defaultIds.has(String(u?.id || ""))) && userMap.size > incomingList.length;
+    for (const incU of incomingList) {
+      const uid = String(incU?.id || "").trim();
+      if (!uid || mergedDeletedUserIdsSet.has(uid)) continue;
+      const existingU = userMap.get(uid);
+      if (existingU) {
+        if (isIncomingOnlyDefaultSeed) {
+          continue;
+        }
+        userMap.set(uid, { ...existingU, ...incU });
+      } else {
+        userMap.set(uid, incU);
+      }
+    }
+    mergedUsers = Array.from(userMap.values());
+  } else if (incomingDeletedUserIds.length > 0 && Array.isArray(current.users)) {
+    mergedUsers = current.users.filter(
+      (u) => u?.id && !mergedDeletedUserIdsSet.has(String(u.id).trim())
+    );
+  }
+  const incomingDeletedHorarios = Array.isArray(partial.deletedHorarioCodes) ? partial.deletedHorarioCodes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean) : [];
+  const existingDeletedHorarios = Array.isArray(current.deletedHorarioCodes) ? current.deletedHorarioCodes.map((c) => String(c || "").trim().toUpperCase()).filter(Boolean) : [];
+  const mergedDeletedHorariosSet = /* @__PURE__ */ new Set([
+    ...existingDeletedHorarios,
+    ...incomingDeletedHorarios
+  ]);
+  let mergedHorarios = current.horarios;
+  if (partial.horarios && typeof partial.horarios === "object") {
+    const nextHor = {};
+    Object.entries(current.horarios || {}).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    Object.entries(partial.horarios).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    mergedHorarios = nextHor;
+  } else if (incomingDeletedHorarios.length > 0 && current.horarios) {
+    const nextHor = {};
+    Object.entries(current.horarios).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    mergedHorarios = nextHor;
+  }
+  const mergedReleases = partial.releases && typeof partial.releases === "object" ? explicitDeleteDispersal ? { ...partial.releases } : { ...current.releases || {}, ...partial.releases } : current.releases;
+  let mergedIncidents = current.incidents;
+  if (Array.isArray(partial.incidents)) {
+    const incMap = /* @__PURE__ */ new Map();
+    if (Array.isArray(current.incidents)) {
+      for (const inc of current.incidents) {
+        if (inc?.id) incMap.set(String(inc.id), inc);
+      }
+    }
+    for (const inc of partial.incidents) {
+      if (!inc?.id) continue;
+      const existing = incMap.get(String(inc.id));
+      if (existing && existing.status !== "pendiente" && inc.status === "pendiente") {
+        continue;
+      }
+      incMap.set(String(inc.id), existing ? { ...existing, ...inc } : inc);
+    }
+    mergedIncidents = Array.from(incMap.values());
+  }
   const mergedAsignaciones = partial.asignaciones && typeof partial.asignaciones === "object" ? { ...current.asignaciones || {}, ...partial.asignaciones } : current.asignaciones;
   const replaceEventosDB = Boolean(partial.replaceEventosDB);
   let mergedEventosDB = current.eventosDB;
@@ -295,10 +443,23 @@ function writeDatabase(partial) {
   const cleanPartial = { ...partial };
   delete cleanPartial.replaceEmpleadosDB;
   delete cleanPartial.deletedEmployeeIds;
+  delete cleanPartial.deletedUserIds;
+  delete cleanPartial.deletedHorarioCodes;
   delete cleanPartial.replaceEventosDB;
+  delete cleanPartial.clearReportes;
+  delete cleanPartial.deleteDispersal;
+  if (cleanPartial.resumen === null && !explicitClearReportes && current.resumen) {
+    cleanPartial.resumen = current.resumen;
+  }
   const updated = {
     ...current,
     ...cleanPartial,
+    ...mergedUsers ? { users: mergedUsers } : {},
+    ...mergedDeletedUserIdsSet.size > 0 ? { deletedUserIds: Array.from(mergedDeletedUserIdsSet) } : {},
+    ...mergedHorarios ? { horarios: mergedHorarios } : {},
+    ...mergedDeletedHorariosSet.size > 0 ? { deletedHorarioCodes: Array.from(mergedDeletedHorariosSet) } : {},
+    ...mergedReleases ? { releases: mergedReleases } : {},
+    ...mergedIncidents ? { incidents: mergedIncidents } : {},
     ...mergedEmpleadosDB ? { empleadosDB: mergedEmpleadosDB } : {},
     ...mergedAsignaciones ? { asignaciones: mergedAsignaciones } : {},
     ...mergedEventosDB ? { eventosDB: mergedEventosDB } : {},
@@ -309,9 +470,16 @@ function writeDatabase(partial) {
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, "offload");
+  const serializedJson = JSON.stringify(diskSnapshot, null, 2);
   const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
-  fs.writeFileSync(tmpFile, JSON.stringify(diskSnapshot, null, 2), "utf-8");
+  fs.writeFileSync(tmpFile, serializedJson, "utf-8");
   fs.renameSync(tmpFile, DB_FILE);
+  try {
+    const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpBackup, serializedJson, "utf-8");
+    fs.renameSync(tmpBackup, PERSISTENT_BACKUP_DB_FILE);
+  } catch {
+  }
   try {
     cachedMemoryDb = updated;
     cachedDiskMtimeMs = fs.statSync(DB_FILE).mtimeMs;
@@ -668,9 +836,11 @@ async function startServer() {
       const emailServerFromConfig = body.config && typeof body.config === "object" && body.config.emailServer ? body.config.emailServer : void 0;
       const updated = writeDatabase({
         ...Array.isArray(body.users) ? { users: body.users } : {},
+        ...Array.isArray(body.deletedUserIds) ? { deletedUserIds: body.deletedUserIds } : {},
         ...Array.isArray(body.incidents) ? { incidents: body.incidents } : {},
         ...body.releases && typeof body.releases === "object" ? { releases: body.releases } : {},
         ...Array.isArray(body.dispersals) ? { dispersals: body.dispersals } : {},
+        ...body.deleteDispersal ? { deleteDispersal: true } : {},
         ...Array.isArray(body.notifications) ? { notifications: body.notifications } : {},
         ...body.empleadosDB && typeof body.empleadosDB === "object" ? { empleadosDB: body.empleadosDB } : {},
         ...Array.isArray(body.deletedEmployeeIds) ? { deletedEmployeeIds: body.deletedEmployeeIds } : {},
@@ -679,15 +849,18 @@ async function startServer() {
         ...body.replaceEventosDB ? { replaceEventosDB: true } : {},
         ...body.vacacionesDB && typeof body.vacacionesDB === "object" ? { vacacionesDB: body.vacacionesDB } : {},
         ...Array.isArray(body.reportes) ? { reportes: body.reportes } : {},
+        ...body.clearReportes ? { clearReportes: true } : {},
         ...body.resumen !== void 0 ? { resumen: body.resumen } : {},
         ...typeof body.selectedWeek === "string" ? { selectedWeek: body.selectedWeek } : {},
         ...body.horarios && typeof body.horarios === "object" ? { horarios: body.horarios } : {},
+        ...Array.isArray(body.deletedHorarioCodes) ? { deletedHorarioCodes: body.deletedHorarioCodes } : {},
         ...body.asignaciones && typeof body.asignaciones === "object" ? { asignaciones: body.asignaciones } : {},
         ...body.config && typeof body.config === "object" ? { config: body.config } : {},
         ...body.emailConfig && typeof body.emailConfig === "object" ? { emailConfig: body.emailConfig } : emailServerFromConfig ? { emailConfig: emailServerFromConfig } : {}
       });
       const hasEmployeeChanges = body.empleadosDB && typeof body.empleadosDB === "object" || Array.isArray(body.deletedEmployeeIds);
-      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || Array.isArray(body.reportes) || Array.isArray(body.users) || hasEmployeeChanges;
+      const shouldBroadcastReportes = Array.isArray(body.reportes) && (body.reportes.length > 0 || Boolean(body.clearReportes)) || Array.isArray(body.dispersals) && Array.isArray(updated.reportes) && updated.reportes.length > 0;
+      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || shouldBroadcastReportes || Array.isArray(body.users) || hasEmployeeChanges;
       if (hasRealtimeRelevantChanges) {
         broadcastRealtimeEvent({
           type: "portal_sync",
@@ -702,10 +875,11 @@ async function startServer() {
               empleadosDB: updated.empleadosDB,
               asignaciones: updated.asignaciones
             } : {},
-            ...Array.isArray(body.reportes) ? {
+            ...shouldBroadcastReportes ? {
               reportes: updated.reportes,
               resumen: updated.resumen,
-              selectedWeek: updated.selectedWeek
+              selectedWeek: updated.selectedWeek,
+              ...body.clearReportes ? { clearReportes: true } : {}
             } : {}
           }
         });

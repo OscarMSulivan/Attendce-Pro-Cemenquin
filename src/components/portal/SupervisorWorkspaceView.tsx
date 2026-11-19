@@ -133,6 +133,28 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     ? selectedListForWork
     : userAssignedLists[0] || currentUser.name.toUpperCase();
 
+  // Buscar si RH dispersó la semana actual (o una dispersión activa vigente) específicamente para esta lista de supervisor
+  const currentDispersal = useMemo(() => {
+    const exactMatch = dispersals.find(d => d.semanaNumero === currentWeekNumber);
+    if (
+      exactMatch &&
+      !exactMatch.cancelada &&
+      exactMatch.supervisoresNotificados.some(
+        s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
+      )
+    ) {
+      return exactMatch;
+    }
+    const activeForTarget = dispersals.find(
+      d =>
+        !d.cancelada &&
+        d.supervisoresNotificados.some(
+          s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
+        )
+    );
+    return activeForTarget || exactMatch;
+  }, [dispersals, currentWeekNumber, targetSupervisor]);
+
   // Filtrar empleados y reportes de la semana correspondientes a la lista seleccionada actualmente
   const activeListEmployees = useMemo(() => {
     if (userAssignedLists.length <= 1) return assignedEmployees;
@@ -142,11 +164,26 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   }, [assignedEmployees, userAssignedLists.length, targetSupervisor]);
 
   const activeListWeeklyReports = useMemo(() => {
-    if (userAssignedLists.length <= 1) return weeklyReports;
-    return weeklyReports.filter(
-      r => (r.empleado.jefe || '').trim().toUpperCase() === targetSupervisor
-    );
-  }, [weeklyReports, userAssignedLists.length, targetSupervisor]);
+    const filteredPrimary =
+      userAssignedLists.length <= 1
+        ? weeklyReports
+        : weeklyReports.filter(
+            r => (r.empleado.jefe || '').trim().toUpperCase() === targetSupervisor
+          );
+    if (filteredPrimary.length > 0) return filteredPrimary;
+
+    if (
+      currentDispersal &&
+      !currentDispersal.cancelada &&
+      Array.isArray(currentDispersal.reportesSnapshot) &&
+      currentDispersal.reportesSnapshot.length > 0
+    ) {
+      return (currentDispersal.reportesSnapshot as EmployeeReport[]).filter(
+        r => (r.empleado?.jefe || '').trim().toUpperCase() === targetSupervisor
+      );
+    }
+    return [];
+  }, [weeklyReports, userAssignedLists.length, targetSupervisor, currentDispersal]);
 
   // Estados para el modal de liberación de nómina
   const [isWorkingOnRelease, setIsWorkingOnRelease] = useState(false);
@@ -158,6 +195,8 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   useEffect(() => {
     onReportLiveActionRef.current = onReportLiveAction;
   }, [onReportLiveAction]);
+
+  const effectiveWeekNumber = currentDispersal?.semanaNumero ?? currentWeekNumber;
 
   // Reportar en tiempo real al módulo The Office qué sub-módulo, lista o acción está ejecutando el supervisor
   useEffect(() => {
@@ -178,7 +217,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     }
     if (isWorkingOnRelease) {
       reportFn(
-        `Preparando Liberación de Nómina Sem. ${currentWeekNumber} (${targetSupervisor})`,
+        `Preparando Liberación de Nómina Sem. ${effectiveWeekNumber} (${targetSupervisor})`,
         targetSupervisor
       );
       return;
@@ -200,7 +239,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
         ? ' [Filtro: Modificados]'
         : '';
     reportFn(
-      `Revisando Nómina Sem. ${currentWeekNumber} · Lista ${targetSupervisor}${filterDesc}`,
+      `Revisando Nómina Sem. ${effectiveWeekNumber} · Lista ${targetSupervisor}${filterDesc}`,
       targetSupervisor
     );
   }, [
@@ -209,16 +248,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     listFilterMode,
     formatModalTarget,
     isWorkingOnRelease,
-    currentWeekNumber,
+    effectiveWeekNumber,
   ]);
 
   // Obtener estado de liberación de la semana actual
-  const currentReleaseKey = `${currentWeekNumber}_${targetSupervisor}`;
+  const currentReleaseKey = `${effectiveWeekNumber}_${targetSupervisor}`;
   const currentRelease = releases[currentReleaseKey];
   const isLiberada = currentRelease?.status === 'liberado';
-
-  // Buscar si RH dispersó la semana actual específicamente para esta lista de supervisor
-  const currentDispersal = dispersals.find(d => d.semanaNumero === currentWeekNumber);
 
   // Verificar si la dispersión fue cancelada globalmente o para este supervisor
   const isCancelledForSupervisor = Boolean(

@@ -461,8 +461,11 @@ export default function App() {
           };
 
           // Si hay dispersiones con snapshot, sincronizar sus horarios con el catálogo vigente
-          if (Array.isArray(serverData.dispersals) && serverData.dispersals.length > 0) {
-            const syncedDispersals = serverData.dispersals.map(d => {
+          let syncedDispersals: PayrollDispersal[] = Array.isArray(serverData.dispersals)
+            ? serverData.dispersals
+            : [];
+          if (syncedDispersals.length > 0) {
+            syncedDispersals = syncedDispersals.map(d => {
               if (Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0) {
                 const syncedSnap = sincronizarReportesConHorarios(
                   d.reportesSnapshot as EmployeeReport[],
@@ -477,7 +480,7 @@ export default function App() {
               return d;
             });
             setDispersals(syncedDispersals);
-            PortalService.saveDispersals(syncedDispersals);
+            PortalService.cacheDispersals(syncedDispersals);
           }
 
           const findSavedDay = (empId: string, isoDate: string) => {
@@ -490,6 +493,10 @@ export default function App() {
             if (srvDay && srvDay.modificadoPorSupervisor) return srvDay;
             return localDay || srvDay;
           };
+
+          let hydratedFinalReportes: EmployeeReport[] = [];
+          let hydratedFinalResumen: PayrollSummary | null = serverData.resumen || null;
+          let hydratedFinalWeek = hydratedWeek;
 
           if (serverData.eventosDB && Object.keys(serverData.eventosDB).length > 0) {
             const reconsolidado = consolidarEventosConHorarios(
@@ -558,12 +565,13 @@ export default function App() {
                 engineOpts
               );
 
+              hydratedFinalReportes = syncedMerged;
               setReportes(syncedMerged);
               if (serverData.resumen) {
                 setResumen(serverData.resumen);
               }
             } else {
-              const baseReports = localReports.length > 0 ? localReports : serverReports;
+              const baseReports = serverReports.length > 0 ? serverReports : localReports;
               if (baseReports.length > 0) {
                 const syncedBase = sincronizarReportesConHorarios(
                   baseReports,
@@ -573,6 +581,7 @@ export default function App() {
                   hydratedVacaciones,
                   engineOpts
                 );
+                hydratedFinalReportes = syncedBase;
                 setReportes(syncedBase);
               }
               if (serverData.resumen) {
@@ -580,7 +589,7 @@ export default function App() {
               }
             }
           } else {
-            const baseReports = localReports.length > 0 ? localReports : serverReports;
+            const baseReports = serverReports.length > 0 ? serverReports : localReports;
             if (baseReports.length > 0) {
               const syncedBase = sincronizarReportesConHorarios(
                 baseReports,
@@ -590,12 +599,82 @@ export default function App() {
                 hydratedVacaciones,
                 engineOpts
               );
+              hydratedFinalReportes = syncedBase;
               setReportes(syncedBase);
             }
             if (serverData.resumen) {
               setResumen(serverData.resumen);
             }
           }
+
+          // Rescate automático desde el snapshot de la dispersión activa si reportes estaba vacío
+          if (hydratedFinalReportes.length === 0 && syncedDispersals.length > 0) {
+            const activeDispWithSnap = syncedDispersals.find(
+              d => !d.cancelada && Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0
+            );
+            if (activeDispWithSnap && Array.isArray(activeDispWithSnap.reportesSnapshot)) {
+              hydratedFinalReportes = activeDispWithSnap.reportesSnapshot as EmployeeReport[];
+              setReportes(hydratedFinalReportes);
+              hydratedFinalResumen = recomputeSummaryFromReports(hydratedFinalReportes);
+              setResumen(hydratedFinalResumen);
+              if (activeDispWithSnap.semanaPeriodo) {
+                hydratedFinalWeek = activeDispWithSnap.semanaPeriodo;
+                setSelectedWeek(activeDispWithSnap.semanaPeriodo);
+              }
+            }
+          }
+
+          // Si el servidor recién se redesplegó (ej. tras un git push) y el navegador local tiene catálogos,
+          // horarios, empleados o reportes que aún no están en el servidor, restaurarlos automáticamente
+          const serverEmpCount =
+            serverData.empleadosDB && typeof serverData.empleadosDB === 'object'
+              ? Object.keys(serverData.empleadosDB).length
+              : 0;
+          const serverHorCount =
+            serverData.horarios && typeof serverData.horarios === 'object'
+              ? Object.keys(serverData.horarios).length
+              : 0;
+          const serverAsigCount =
+            serverData.asignaciones && typeof serverData.asignaciones === 'object'
+              ? Object.keys(serverData.asignaciones).length
+              : 0;
+
+          const rescuePayload: Record<string, unknown> = {};
+          if (Object.keys(hydratedEmpleados).length > serverEmpCount) {
+            rescuePayload.empleadosDB = hydratedEmpleados;
+          }
+          if (Object.keys(hydratedHorarios).length > serverHorCount) {
+            rescuePayload.horarios = hydratedHorarios;
+          }
+          if (Object.keys(hydratedAsignaciones).length > serverAsigCount) {
+            rescuePayload.asignaciones = hydratedAsignaciones;
+          }
+          if (hydratedFinalReportes.length > 0 && serverReports.length === 0) {
+            rescuePayload.reportes = hydratedFinalReportes;
+            if (hydratedFinalResumen) rescuePayload.resumen = hydratedFinalResumen;
+            if (hydratedFinalWeek) rescuePayload.selectedWeek = hydratedFinalWeek;
+          }
+          if (!serverEmailCfg && resolvedEmailCfg?.smtpUser) {
+            rescuePayload.emailConfig = resolvedEmailCfg;
+            rescuePayload.config = { ...hydratedConfig, emailServer: resolvedEmailCfg };
+          }
+          if (Object.keys(rescuePayload).length > 0) {
+            PortalService.pushToServer(rescuePayload);
+          }
+
+          // Inicializar lastSyncedRefs con el estado hidratado para evitar que pestañas nuevas o de supervisores
+          // sobrescriban el servidor con estados vacíos o desactualizados al terminar de cargar
+          lastSyncedRefs.current = {
+            empleadosDB: Object.keys(hydratedEmpleados).length > 0 ? hydratedEmpleados : empleadosDB,
+            vacacionesDB: hydratedVacaciones,
+            reportes: hydratedFinalReportes,
+            resumen: hydratedFinalResumen,
+            selectedWeek: hydratedFinalWeek,
+            horarios: hydratedHorarios,
+            asignaciones: hydratedAsignaciones,
+            config: hydratedConfig,
+            emailConfig: resolvedEmailCfg,
+          };
         }
       })
       .finally(() => {
@@ -627,49 +706,67 @@ export default function App() {
     emailConfig?: EmailServerConfig;
   }>({});
 
+  // Usuario actual en sesión
+  const currentUser = useMemo<PortalUser>(() => {
+    return portalUsers.find(u => u.id === activeUserId) || portalUsers[0];
+  }, [portalUsers, activeUserId]);
+
   // Guardar automáticamente en el servidor únicamente las llaves que cambiaron (Delta Sync)
   useEffect(() => {
     if (!isServerHydrated) return;
+    const canManageGlobalPayroll =
+      currentUser?.role === 'admin' ||
+      currentUser?.role === 'rh' ||
+      userHasModuleAccess(currentUser, 'nomina');
+
     const timer = setTimeout(() => {
       const prev = lastSyncedRefs.current;
       const deltaPayload: Record<string, unknown> = {};
 
-      if (prev.empleadosDB !== empleadosDB) {
-        deltaPayload.empleadosDB = empleadosDB;
-        prev.empleadosDB = empleadosDB;
+      if (canManageGlobalPayroll) {
+        if (prev.empleadosDB !== empleadosDB && Object.keys(empleadosDB).length > 0) {
+          deltaPayload.empleadosDB = empleadosDB;
+          prev.empleadosDB = empleadosDB;
+        }
+        if (prev.vacacionesDB !== vacacionesDB && Object.keys(vacacionesDB).length > 0) {
+          deltaPayload.vacacionesDB = vacacionesDB;
+          prev.vacacionesDB = vacacionesDB;
+        }
+        if (prev.selectedWeek !== selectedWeek && selectedWeek) {
+          deltaPayload.selectedWeek = selectedWeek;
+          prev.selectedWeek = selectedWeek;
+        }
+        if (prev.horarios !== horarios && Object.keys(horarios).length > 0) {
+          deltaPayload.horarios = horarios;
+          prev.horarios = horarios;
+        }
+        if (prev.asignaciones !== asignaciones && Object.keys(asignaciones).length > 0) {
+          deltaPayload.asignaciones = asignaciones;
+          prev.asignaciones = asignaciones;
+        }
+        if (prev.config !== config || prev.emailConfig !== emailConfig) {
+          deltaPayload.config = {
+            ...config,
+            emailServer: emailConfig,
+          };
+          deltaPayload.emailConfig = emailConfig;
+          prev.config = config;
+          prev.emailConfig = emailConfig;
+        }
       }
-      if (prev.vacacionesDB !== vacacionesDB) {
-        deltaPayload.vacacionesDB = vacacionesDB;
-        prev.vacacionesDB = vacacionesDB;
-      }
+
+      // Nunca enviar reportes vacíos desde el Delta Sync automático (el borrado explícito usa clearReportes: true)
       if (prev.reportes !== reportes) {
-        deltaPayload.reportes = reportes;
         prev.reportes = reportes;
+        if (reportes.length > 0) {
+          deltaPayload.reportes = reportes;
+        }
       }
       if (prev.resumen !== resumen) {
-        deltaPayload.resumen = resumen;
         prev.resumen = resumen;
-      }
-      if (prev.selectedWeek !== selectedWeek) {
-        deltaPayload.selectedWeek = selectedWeek;
-        prev.selectedWeek = selectedWeek;
-      }
-      if (prev.horarios !== horarios) {
-        deltaPayload.horarios = horarios;
-        prev.horarios = horarios;
-      }
-      if (prev.asignaciones !== asignaciones) {
-        deltaPayload.asignaciones = asignaciones;
-        prev.asignaciones = asignaciones;
-      }
-      if (prev.config !== config || prev.emailConfig !== emailConfig) {
-        deltaPayload.config = {
-          ...config,
-          emailServer: emailConfig,
-        };
-        deltaPayload.emailConfig = emailConfig;
-        prev.config = config;
-        prev.emailConfig = emailConfig;
+        if (resumen !== null && reportes.length > 0) {
+          deltaPayload.resumen = resumen;
+        }
       }
 
       if (Object.keys(deltaPayload).length > 0) {
@@ -679,6 +776,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [
     isServerHydrated,
+    currentUser,
     empleadosDB,
     vacacionesDB,
     reportes,
@@ -719,11 +817,11 @@ export default function App() {
           if (data && data.ok && data.remindersSent > 0) {
             if (Array.isArray(data.dispersals)) {
               setDispersals(data.dispersals);
-              PortalService.saveDispersals(data.dispersals);
+              PortalService.cacheDispersals(data.dispersals);
             }
             if (Array.isArray(data.notifications)) {
               setNotifications(data.notifications);
-              PortalService.saveNotifications(data.notifications);
+              PortalService.cacheNotifications(data.notifications);
             }
             showToast(
               `Se envió alerta automática por vencimiento próximo a ${data.remindersSent} supervisor(es) con nómina pendiente.`,
@@ -739,11 +837,6 @@ export default function App() {
     const interval = setInterval(checkExpiring, 45000);
     return () => clearInterval(interval);
   }, [isServerHydrated, dispersals, showToast]);
-
-  // Usuario actual en sesión
-  const currentUser = useMemo<PortalUser>(() => {
-    return portalUsers.find(u => u.id === activeUserId) || portalUsers[0];
-  }, [portalUsers, activeUserId]);
 
   // Sincronización automática de incidencias y vacaciones aprobadas con el motor de cálculo (solo si hay cambios reales)
   useEffect(() => {
@@ -886,10 +979,13 @@ export default function App() {
       const incomingState = payload.state;
       if (!incomingState) return;
 
-      // 1. Actualizar usuarios si cambiaron
+      // 1. Actualizar usuarios si cambiaron (fusionando acumulativamente con localStorage)
       if (Array.isArray(incomingState.users) && incomingState.users.length > 0) {
-        const normalizedUsers = incomingState.users.map(u => PortalService.normalizeUserRecord(u));
-        setPortalUsers(normalizedUsers);
+        const { mergedUsers } = PortalService.mergeUsersCatalog(
+          PortalService.loadUsers(),
+          incomingState.users
+        );
+        setPortalUsers(mergedUsers);
       }
 
       // 2. Detectar nuevas notificaciones dirigidas al supervisor o RH en tiempo real
@@ -898,6 +994,7 @@ export default function App() {
           n => !knownNotifIdsRef.current.has(n.id)
         );
         freshNotifs.forEach(n => knownNotifIdsRef.current.add(n.id));
+        PortalService.cacheNotifications(incomingState.notifications);
         setNotifications(incomingState.notifications);
 
         if (isAuthenticated && currentUser && freshNotifs.length > 0) {
@@ -1004,7 +1101,35 @@ export default function App() {
 
       // 4. Actualizar dispersiones en tiempo real sin recargar la página
       if (Array.isArray(incomingState.dispersals)) {
-        setDispersals(incomingState.dispersals);
+        PortalService.cacheDispersals(incomingState.dispersals);
+        const cachedDispersals = PortalService.loadDispersals();
+        setDispersals(cachedDispersals);
+
+        // Si hay una dispersión activa y no vienen reportes en este paquete, asegurar que la semana y snapshot estén cargados
+        const activeDisp = cachedDispersals.find(d => !d.cancelada);
+        if (activeDisp) {
+          if (activeDisp.semanaPeriodo && !incomingState.selectedWeek) {
+            lastSyncedRefs.current.selectedWeek = activeDisp.semanaPeriodo;
+            setSelectedWeek(activeDisp.semanaPeriodo);
+          }
+          if (
+            !Array.isArray(incomingState.reportes) &&
+            Array.isArray(activeDisp.reportesSnapshot) &&
+            activeDisp.reportesSnapshot.length > 0
+          ) {
+            setReportes(prev => {
+              if (prev.length > 0) return prev;
+              const snap = activeDisp.reportesSnapshot as EmployeeReport[];
+              lastSyncedRefs.current.reportes = snap;
+              return snap;
+            });
+          }
+        }
+      }
+
+      if (typeof incomingState.selectedWeek === 'string' && incomingState.selectedWeek) {
+        lastSyncedRefs.current.selectedWeek = incomingState.selectedWeek;
+        setSelectedWeek(incomingState.selectedWeek);
       }
 
       // 5. Detectar liberaciones de nómina en tiempo real
@@ -1038,6 +1163,7 @@ export default function App() {
             }
           }
         });
+        PortalService.cacheReleases(incomingState.releases);
         setReleases(incomingState.releases);
       }
 
@@ -1045,9 +1171,14 @@ export default function App() {
       // protegiendo siempre cualquier edición local reciente o días modificados por el supervisor
       if (Array.isArray(incomingState.reportes)) {
         if (incomingState.reportes.length === 0) {
-          setReportes([]);
-          setResumen(null);
-          StorageService.clearReportesState();
+          if (Boolean((incomingState as any).clearReportes)) {
+            const emptyList: EmployeeReport[] = [];
+            lastSyncedRefs.current.reportes = emptyList;
+            lastSyncedRefs.current.resumen = null;
+            setReportes(emptyList);
+            setResumen(null);
+            StorageService.clearReportesState();
+          }
         } else {
           if (Date.now() - lastLocalReportEditAtRef.current < 4000) {
             return;
@@ -1086,14 +1217,18 @@ export default function App() {
               };
             });
 
-            return sincronizarReportesConHorarios(
+            const synced = sincronizarReportesConHorarios(
               mergedIncoming,
               currentHorarios,
               currentAsignaciones,
               currentSavedEmps
             );
+            // Actualizar referencia de Delta Sync para evitar rebote infinito entre clientes conectados
+            lastSyncedRefs.current.reportes = synced;
+            return synced;
           });
           if (incomingState.resumen) {
+            lastSyncedRefs.current.resumen = incomingState.resumen;
             setResumen(incomingState.resumen);
           }
         }
@@ -1103,6 +1238,7 @@ export default function App() {
       if (incomingState.empleadosDB && typeof incomingState.empleadosDB === 'object') {
         const incEmps = incomingState.empleadosDB as Record<string, Employee>;
         if (Object.keys(incEmps).length > 0) {
+          lastSyncedRefs.current.empleadosDB = incEmps;
           setEmpleadosDB(incEmps);
           StorageService.saveEmployees(incEmps);
           setSavedEmployeesInfo({
@@ -1979,17 +2115,28 @@ export default function App() {
           }
         );
 
+        const nextSum = recomputeSummaryFromReports(syncedCalculados) || sum;
         setReportes(syncedCalculados);
-        setResumen(recomputeSummaryFromReports(syncedCalculados) || sum);
+        setResumen(nextSum);
 
-        // El botón "Generar Reporte" lo genera únicamente para la persona de Nóminas/RH.
-        // Limpiamos cualquier dispersión previa de esta semana hasta que Nóminas haga clic en "Dispersar".
+        // Si ya existía una dispersión activa para esta semana, sincronizar su snapshot con el reporte actualizado
         const targetWeekObj = payrollWeeks.find(w => w.value === selectedWeek);
         const targetWeekNum = targetWeekObj?.weekNumber || 1;
         setDispersals(prev => {
-          const filtered = prev.filter(d => d.semanaNumero !== targetWeekNum);
-          PortalService.saveDispersals(filtered);
-          return filtered;
+          const existingIdx = prev.findIndex(d => d.semanaNumero === targetWeekNum && !d.cancelada);
+          if (existingIdx < 0) return prev;
+          const totalNorm = syncedCalculados.reduce((s, r) => s + r.totalNormal, 0);
+          const totalExt = syncedCalculados.reduce((s, r) => s + r.totalExtra, 0);
+          const next = [...prev];
+          next[existingIdx] = {
+            ...next[existingIdx],
+            empleadosCount: syncedCalculados.length,
+            totalHorasNormales: totalNorm,
+            totalHorasExtras: totalExt,
+            reportesSnapshot: syncedCalculados,
+          };
+          PortalService.saveDispersals(next);
+          return next;
         });
 
         setStatusMessage(
@@ -3085,6 +3232,7 @@ export default function App() {
   const handleDeleteHorario = (code: string) => {
     const updated = { ...horarios };
     delete updated[code];
+    lastSyncedRefs.current.horarios = updated;
     setHorarios(updated);
     StorageService.saveHorarios(updated);
 
@@ -3092,12 +3240,21 @@ export default function App() {
     Object.keys(updatedAsig).forEach(id => {
       if (updatedAsig[id] === code) delete updatedAsig[id];
     });
+    lastSyncedRefs.current.asignaciones = updatedAsig;
     setAsignaciones(updatedAsig);
     StorageService.saveAsignaciones(updatedAsig);
 
     const mergedEmp = mergeAsignaciones(empleadosDB, updatedAsig);
+    lastSyncedRefs.current.empleadosDB = mergedEmp;
     setEmpleadosDB(mergedEmp);
     StorageService.saveEmployees(mergedEmp);
+
+    PortalService.pushToServer({
+      horarios: updated,
+      deletedHorarioCodes: [code],
+      asignaciones: updatedAsig,
+      empleadosDB: mergedEmp,
+    });
 
     recalculateReportsWithUpdatedSchedules(mergedEmp, updated, eventosDB, updatedAsig);
 
@@ -3547,7 +3704,7 @@ export default function App() {
   const handleDeletePortalUser = (userId: string) => {
     setPortalUsers(prev => {
       const updated = prev.filter(u => u.id !== userId);
-      PortalService.saveUsers(updated);
+      PortalService.saveUsers(updated, [userId]);
       return updated;
     });
     setStatusMessage('Usuario eliminado del sistema');
@@ -3945,12 +4102,55 @@ export default function App() {
 
   // Verificar si la semana actual ya fue dispersada (total o parcialmente) por Nóminas/RH
   const currentWeekDispersalObj = useMemo(() => {
-    return dispersals.find(d => d.semanaNumero === currentWeekNumber);
-  }, [dispersals, currentWeekNumber]);
+    const exactMatch = dispersals.find(d => d.semanaNumero === currentWeekNumber);
+    if (exactMatch) return exactMatch;
+    // Para supervisores (o si la semana en pantalla no coincide aún con la última dispersión activa),
+    // resolver la dispersión activa vigente que incluya alguna de sus listas
+    return dispersals.find(
+      d =>
+        !d.cancelada &&
+        (userHasModuleAccess(currentUser, 'nomina') ||
+          d.supervisoresNotificados.some(s =>
+            workListSupervisors.includes(s.trim().toUpperCase())
+          ))
+    );
+  }, [dispersals, currentWeekNumber, currentUser, workListSupervisors]);
+
+  const activeReportesOrSnapshot = useMemo<EmployeeReport[]>(() => {
+    if (reportes.length > 0) return reportes;
+    if (
+      currentWeekDispersalObj &&
+      !currentWeekDispersalObj.cancelada &&
+      Array.isArray(currentWeekDispersalObj.reportesSnapshot) &&
+      currentWeekDispersalObj.reportesSnapshot.length > 0
+    ) {
+      return currentWeekDispersalObj.reportesSnapshot as EmployeeReport[];
+    }
+    return [];
+  }, [reportes, currentWeekDispersalObj]);
+
+  // Si reportes está vacío pero existe un snapshot activo en la dispersión, hidratarlo en memoria local
+  useEffect(() => {
+    if (
+      reportes.length === 0 &&
+      currentWeekDispersalObj &&
+      !currentWeekDispersalObj.cancelada &&
+      Array.isArray(currentWeekDispersalObj.reportesSnapshot) &&
+      currentWeekDispersalObj.reportesSnapshot.length > 0
+    ) {
+      const snap = currentWeekDispersalObj.reportesSnapshot as EmployeeReport[];
+      lastSyncedRefs.current.reportes = snap;
+      setReportes(snap);
+      if (currentWeekDispersalObj.semanaPeriodo && selectedWeek !== currentWeekDispersalObj.semanaPeriodo) {
+        lastSyncedRefs.current.selectedWeek = currentWeekDispersalObj.semanaPeriodo;
+        setSelectedWeek(currentWeekDispersalObj.semanaPeriodo);
+      }
+    }
+  }, [reportes.length, currentWeekDispersalObj, selectedWeek]);
 
   const isCurrentWeekDispersed = useMemo(() => {
-    return reportes.length > 0 && Boolean(currentWeekDispersalObj);
-  }, [reportes.length, currentWeekDispersalObj]);
+    return activeReportesOrSnapshot.length > 0 && Boolean(currentWeekDispersalObj && !currentWeekDispersalObj.cancelada);
+  }, [activeReportesOrSnapshot.length, currentWeekDispersalObj]);
 
   const dispersedSupervisorsCount = useMemo(() => {
     if (!currentWeekDispersalObj) return 0;
@@ -4241,9 +4441,10 @@ export default function App() {
       }
 
       PortalService.pushToServer({
-        ...(isCurrentActivePayroll ? { reportes: [], resumen: null } : {}),
+        ...(isCurrentActivePayroll ? { reportes: [], resumen: null, clearReportes: true } : {}),
         eventosDB: cleanedEventos,
-        replaceEventosDB: true
+        replaceEventosDB: true,
+        deleteDispersal: true,
       } as any);
 
       setStatusMessage(
@@ -4733,7 +4934,7 @@ export default function App() {
                     })}
                     weeklyReports={
                       isCurrentWeekDispersed || userHasModuleAccess(currentUser, 'nomina')
-                        ? reportes.filter(r => {
+                        ? activeReportesOrSnapshot.filter(r => {
                             const jefe = r.empleado.jefe?.trim().toUpperCase();
                             return Boolean(jefe && workListSupervisors.includes(jefe));
                           })
@@ -4741,8 +4942,8 @@ export default function App() {
                     }
                     incidents={incidents}
                     horarios={horarios}
-                    currentWeekNumber={currentWeekNumber}
-                    currentWeekPeriod={selectedWeek}
+                    currentWeekNumber={currentWeekDispersalObj?.semanaNumero ?? currentWeekNumber}
+                    currentWeekPeriod={currentWeekDispersalObj?.semanaPeriodo || selectedWeek}
                     horasLimiteLiberacion={config.horasLimiteLiberacion}
                     onDownloadProcessedExcel={handleDownloadSupervisorExcel}
                     onLiberarNomina={handleSupervisorLiberarNomina}

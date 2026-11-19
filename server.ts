@@ -12,9 +12,16 @@ import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 
 const PORT = Number(process.env.PORT) || 3000;
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const DATA_DIR = process.env.CEMENQTIME_DATA_DIR
+  ? path.resolve(process.env.CEMENQTIME_DATA_DIR)
+  : path.resolve(process.cwd(), 'data');
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'portal_db.json');
+
+// Espejo persistente fuera de la carpeta del repositorio git para que ningún git pull / rebuild borre usuarios ni datos
+const PERSISTENT_BACKUP_DIR = path.join(os.homedir(), '.cemenqtime_data');
+const PERSISTENT_BACKUP_UPLOADS_DIR = path.join(PERSISTENT_BACKUP_DIR, 'uploads');
+const PERSISTENT_BACKUP_DB_FILE = path.join(PERSISTENT_BACKUP_DIR, 'portal_db.json');
 
 interface ServerEmailConfig {
   smtpHost?: string;
@@ -57,6 +64,7 @@ function buildSupervisorPortalLink(
 
 interface ServerPortalDatabase {
   users?: unknown[];
+  deletedUserIds?: string[];
   incidents?: unknown[];
   releases?: Record<string, unknown>;
   dispersals?: unknown[];
@@ -69,6 +77,7 @@ interface ServerPortalDatabase {
   resumen?: unknown;
   selectedWeek?: string;
   horarios?: Record<string, unknown>;
+  deletedHorarioCodes?: string[];
   asignaciones?: Record<string, string>;
   config?: Record<string, unknown>;
   emailConfig?: ServerEmailConfig;
@@ -91,6 +100,16 @@ function ensureDataDir(): void {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
+  try {
+    if (!fs.existsSync(PERSISTENT_BACKUP_DIR)) {
+      fs.mkdirSync(PERSISTENT_BACKUP_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(PERSISTENT_BACKUP_UPLOADS_DIR)) {
+      fs.mkdirSync(PERSISTENT_BACKUP_UPLOADS_DIR, { recursive: true });
+    }
+  } catch {
+    // ignore if home dir is read-only
+  }
 }
 
 function offloadBase64String(raw: string, fieldName: string): string {
@@ -106,6 +125,14 @@ function offloadBase64String(raw: string, fieldName: string): string {
       const tmpUpload = `${filePath}.tmp.${process.pid}`;
       fs.writeFileSync(tmpUpload, raw, 'utf-8');
       fs.renameSync(tmpUpload, filePath);
+    }
+    try {
+      const backupUploadPath = path.join(PERSISTENT_BACKUP_UPLOADS_DIR, fileName);
+      if (!fs.existsSync(backupUploadPath)) {
+        fs.writeFileSync(backupUploadPath, raw, 'utf-8');
+      }
+    } catch {
+      // ignore backup upload error
     }
     uploadMemoryCache.set(fileName, raw);
     return `@upload:${fileName}`;
@@ -127,6 +154,17 @@ function hydrateBase64String(ref: string): string {
     const filePath = path.join(UPLOADS_DIR, fileName);
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, 'utf-8');
+      uploadMemoryCache.set(fileName, content);
+      return content;
+    }
+    const backupFilePath = path.join(PERSISTENT_BACKUP_UPLOADS_DIR, fileName);
+    if (fs.existsSync(backupFilePath)) {
+      const content = fs.readFileSync(backupFilePath, 'utf-8');
+      try {
+        fs.writeFileSync(filePath, content, 'utf-8');
+      } catch {
+        // ignore restore write error
+      }
       uploadMemoryCache.set(fileName, content);
       return content;
     }
@@ -162,16 +200,30 @@ let cachedDiskMtimeMs = 0;
 function readDatabase(): ServerPortalDatabase {
   try {
     ensureDataDir();
-    if (!fs.existsSync(DB_FILE)) {
+    // Si la carpeta ./data del proyecto fue limpiada en un deploy/push, restaurar automáticamente del espejo en ~/.cemenqtime_data
+    if (!fs.existsSync(DB_FILE) && fs.existsSync(PERSISTENT_BACKUP_DB_FILE)) {
+      try {
+        fs.copyFileSync(PERSISTENT_BACKUP_DB_FILE, DB_FILE);
+      } catch (copyErr) {
+        console.warn('Error restaurando espejo de base de datos:', copyErr);
+      }
+    }
+    const targetFile = fs.existsSync(DB_FILE)
+      ? DB_FILE
+      : fs.existsSync(PERSISTENT_BACKUP_DB_FILE)
+      ? PERSISTENT_BACKUP_DB_FILE
+      : null;
+
+    if (!targetFile) {
       cachedMemoryDb = {};
       cachedDiskMtimeMs = 0;
       return cachedMemoryDb;
     }
-    const stat = fs.statSync(DB_FILE);
+    const stat = fs.statSync(targetFile);
     if (cachedMemoryDb && stat.mtimeMs === cachedDiskMtimeMs) {
       return cachedMemoryDb;
     }
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
+    const raw = fs.readFileSync(targetFile, 'utf-8');
     const parsed = JSON.parse(raw) as ServerPortalDatabase;
     cachedMemoryDb = transformBase64FieldsDeep(parsed, 'hydrate') as ServerPortalDatabase;
     cachedDiskMtimeMs = stat.mtimeMs;
@@ -321,34 +373,65 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     !current.selectedWeek ||
     partial.selectedWeek === current.selectedWeek;
 
+  const explicitClearReportes = Boolean((partial as any).clearReportes);
+  const explicitDeleteDispersal = Boolean((partial as any).deleteDispersal);
+
   const mergedReportes = Array.isArray(partial.reportes)
-    ? mergeReportListsPreservingSupervisorEdits(current.reportes, partial.reportes, sameWeek)
+    ? partial.reportes.length === 0
+      ? explicitClearReportes
+        ? []
+        : current.reportes
+      : mergeReportListsPreservingSupervisorEdits(current.reportes, partial.reportes, sameWeek)
     : current.reportes;
 
-  const mergedDispersals = Array.isArray(partial.dispersals)
-    ? partial.dispersals.map((incDisp: any) => {
+  let mergedDispersals = current.dispersals;
+  if (Array.isArray(partial.dispersals)) {
+    if (
+      partial.dispersals.length === 0 &&
+      Array.isArray(current.dispersals) &&
+      current.dispersals.length > 0 &&
+      !explicitDeleteDispersal
+    ) {
+      mergedDispersals = current.dispersals;
+    } else {
+      const incomingMerged = partial.dispersals.map((incDisp: any) => {
         const curDisp = Array.isArray(current.dispersals)
           ? (current.dispersals as any[]).find(
               d => d?.semanaNumero === incDisp?.semanaNumero || d?.id === incDisp?.id
             )
           : undefined;
-        if (
-          curDisp &&
-          Array.isArray(curDisp.reportesSnapshot) &&
-          Array.isArray(incDisp?.reportesSnapshot)
-        ) {
+        if (curDisp && Array.isArray(curDisp.reportesSnapshot) && curDisp.reportesSnapshot.length > 0) {
+          if (Array.isArray(incDisp?.reportesSnapshot) && incDisp.reportesSnapshot.length > 0) {
+            return {
+              ...incDisp,
+              reportesSnapshot: mergeReportListsPreservingSupervisorEdits(
+                curDisp.reportesSnapshot,
+                incDisp.reportesSnapshot,
+                true
+              ),
+            };
+          }
+          // Si el cliente envió una dispersión compactada sin reportesSnapshot (por límite de localStorage),
+          // preservar el snapshot completo almacenado en el servidor
           return {
             ...incDisp,
-            reportesSnapshot: mergeReportListsPreservingSupervisorEdits(
-              curDisp.reportesSnapshot,
-              incDisp.reportesSnapshot,
-              true
-            ),
+            reportesSnapshot: curDisp.reportesSnapshot,
           };
         }
         return incDisp;
-      })
-    : current.dispersals;
+      });
+
+      if (!explicitDeleteDispersal && Array.isArray(current.dispersals)) {
+        const incomingWeeks = new Set(incomingMerged.map((d: any) => d?.semanaNumero));
+        const missingFromIncoming = (current.dispersals as any[]).filter(
+          d => d && !incomingWeeks.has(d.semanaNumero)
+        );
+        mergedDispersals = [...incomingMerged, ...missingFromIncoming];
+      } else {
+        mergedDispersals = incomingMerged;
+      }
+    }
+  }
 
   // Fusión permanente de empleadosDB (soporte multi-empresa: subir una segunda base nunca borra la primera)
   const replaceEmpleadosDB = Boolean((partial as any).replaceEmpleadosDB);
@@ -408,6 +491,123 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     mergedEmpleadosDB = nextEmpDB;
   }
 
+  // Fusión permanente de usuarios del portal (nunca perder usuarios creados cuando una pestaña envía DEFAULT_USERS)
+  const incomingDeletedUserIds = Array.isArray((partial as any).deletedUserIds)
+    ? (partial as any).deletedUserIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const existingDeletedUserIds = Array.isArray(current.deletedUserIds)
+    ? current.deletedUserIds.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const mergedDeletedUserIdsSet = new Set<string>([
+    ...existingDeletedUserIds,
+    ...incomingDeletedUserIds,
+  ]);
+
+  let mergedUsers: unknown[] | undefined = current.users;
+  if (Array.isArray(partial.users)) {
+    const userMap = new Map<string, any>();
+    if (Array.isArray(current.users)) {
+      for (const u of current.users as any[]) {
+        const uid = String(u?.id || '').trim();
+        if (uid && !mergedDeletedUserIdsSet.has(uid)) {
+          userMap.set(uid, u);
+        }
+      }
+    }
+
+    // Si incoming trae únicamente los 4 usuarios por defecto sin ediciones mientras el servidor ya tiene usuarios personalizados,
+    // sólo agregar los que falten sin sobrescribir cambios personalizados existentes
+    const incomingList = partial.users as any[];
+    const defaultIds = new Set(['user_admin', 'user_rh', 'user_sup_oscar', 'user_sup_eudis']);
+    const isIncomingOnlyDefaultSeed =
+      incomingList.length <= 4 &&
+      incomingList.every(u => defaultIds.has(String(u?.id || ''))) &&
+      userMap.size > incomingList.length;
+
+    for (const incU of incomingList) {
+      const uid = String(incU?.id || '').trim();
+      if (!uid || mergedDeletedUserIdsSet.has(uid)) continue;
+      const existingU = userMap.get(uid);
+      if (existingU) {
+        if (isIncomingOnlyDefaultSeed) {
+          continue;
+        }
+        userMap.set(uid, { ...existingU, ...incU });
+      } else {
+        userMap.set(uid, incU);
+      }
+    }
+    mergedUsers = Array.from(userMap.values());
+  } else if (incomingDeletedUserIds.length > 0 && Array.isArray(current.users)) {
+    mergedUsers = (current.users as any[]).filter(
+      u => u?.id && !mergedDeletedUserIdsSet.has(String(u.id).trim())
+    );
+  }
+
+  // Fusión permanente de horarios programados
+  const incomingDeletedHorarios = Array.isArray((partial as any).deletedHorarioCodes)
+    ? (partial as any).deletedHorarioCodes.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+  const existingDeletedHorarios = Array.isArray(current.deletedHorarioCodes)
+    ? current.deletedHorarioCodes.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+  const mergedDeletedHorariosSet = new Set<string>([
+    ...existingDeletedHorarios,
+    ...incomingDeletedHorarios,
+  ]);
+
+  let mergedHorarios: Record<string, unknown> | undefined = current.horarios;
+  if (partial.horarios && typeof partial.horarios === 'object') {
+    const nextHor: Record<string, unknown> = {};
+    Object.entries(current.horarios || {}).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    Object.entries(partial.horarios).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    mergedHorarios = nextHor;
+  } else if (incomingDeletedHorarios.length > 0 && current.horarios) {
+    const nextHor: Record<string, unknown> = {};
+    Object.entries(current.horarios).forEach(([code, cfg]) => {
+      if (!mergedDeletedHorariosSet.has(code.trim().toUpperCase())) {
+        nextHor[code] = cfg;
+      }
+    });
+    mergedHorarios = nextHor;
+  }
+
+  // Fusión acumulativa de liberaciones (salvo cuando se elimina explícitamente una nómina)
+  const mergedReleases: Record<string, unknown> | undefined =
+    partial.releases && typeof partial.releases === 'object'
+      ? explicitDeleteDispersal
+        ? { ...partial.releases }
+        : { ...(current.releases || {}), ...partial.releases }
+      : current.releases;
+
+  // Fusión acumulativa de incidencias por ID (preservando resoluciones más recientes)
+  let mergedIncidents: unknown[] | undefined = current.incidents;
+  if (Array.isArray(partial.incidents)) {
+    const incMap = new Map<string, any>();
+    if (Array.isArray(current.incidents)) {
+      for (const inc of current.incidents as any[]) {
+        if (inc?.id) incMap.set(String(inc.id), inc);
+      }
+    }
+    for (const inc of partial.incidents as any[]) {
+      if (!inc?.id) continue;
+      const existing = incMap.get(String(inc.id));
+      if (existing && existing.status !== 'pendiente' && inc.status === 'pendiente') {
+        continue;
+      }
+      incMap.set(String(inc.id), existing ? { ...existing, ...inc } : inc);
+    }
+    mergedIncidents = Array.from(incMap.values());
+  }
+
   // Fusión permanente de asignaciones de horario
   const mergedAsignaciones: Record<string, string> | undefined =
     partial.asignaciones && typeof partial.asignaciones === 'object'
@@ -436,11 +636,29 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
   const cleanPartial: Record<string, unknown> = { ...(partial as Record<string, unknown>) };
   delete cleanPartial.replaceEmpleadosDB;
   delete cleanPartial.deletedEmployeeIds;
+  delete cleanPartial.deletedUserIds;
+  delete cleanPartial.deletedHorarioCodes;
   delete cleanPartial.replaceEventosDB;
+  delete cleanPartial.clearReportes;
+  delete cleanPartial.deleteDispersal;
+
+  if (cleanPartial.resumen === null && !explicitClearReportes && current.resumen) {
+    cleanPartial.resumen = current.resumen;
+  }
 
   const updated: ServerPortalDatabase = {
     ...current,
     ...cleanPartial,
+    ...(mergedUsers ? { users: mergedUsers } : {}),
+    ...(mergedDeletedUserIdsSet.size > 0
+      ? { deletedUserIds: Array.from(mergedDeletedUserIdsSet) }
+      : {}),
+    ...(mergedHorarios ? { horarios: mergedHorarios } : {}),
+    ...(mergedDeletedHorariosSet.size > 0
+      ? { deletedHorarioCodes: Array.from(mergedDeletedHorariosSet) }
+      : {}),
+    ...(mergedReleases ? { releases: mergedReleases } : {}),
+    ...(mergedIncidents ? { incidents: mergedIncidents } : {}),
     ...(mergedEmpleadosDB ? { empleadosDB: mergedEmpleadosDB } : {}),
     ...(mergedAsignaciones ? { asignaciones: mergedAsignaciones } : {}),
     ...(mergedEventosDB ? { eventosDB: mergedEventosDB } : {}),
@@ -451,9 +669,17 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     updatedAt: new Date().toISOString(),
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, 'offload');
+  const serializedJson = JSON.stringify(diskSnapshot, null, 2);
   const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
-  fs.writeFileSync(tmpFile, JSON.stringify(diskSnapshot, null, 2), 'utf-8');
+  fs.writeFileSync(tmpFile, serializedJson, 'utf-8');
   fs.renameSync(tmpFile, DB_FILE);
+  try {
+    const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+    fs.writeFileSync(tmpBackup, serializedJson, 'utf-8');
+    fs.renameSync(tmpBackup, PERSISTENT_BACKUP_DB_FILE);
+  } catch {
+    // ignore if backup dir is not writable
+  }
   try {
     cachedMemoryDb = updated;
     cachedDiskMtimeMs = fs.statSync(DB_FILE).mtimeMs;
@@ -895,9 +1121,11 @@ async function startServer() {
           : undefined;
       const updated = writeDatabase({
         ...(Array.isArray(body.users) ? { users: body.users } : {}),
+        ...(Array.isArray(body.deletedUserIds) ? { deletedUserIds: body.deletedUserIds } : {}),
         ...(Array.isArray(body.incidents) ? { incidents: body.incidents } : {}),
         ...(body.releases && typeof body.releases === 'object' ? { releases: body.releases } : {}),
         ...(Array.isArray(body.dispersals) ? { dispersals: body.dispersals } : {}),
+        ...(body.deleteDispersal ? { deleteDispersal: true } : {}),
         ...(Array.isArray(body.notifications) ? { notifications: body.notifications } : {}),
         ...(body.empleadosDB && typeof body.empleadosDB === 'object' ? { empleadosDB: body.empleadosDB } : {}),
         ...(Array.isArray(body.deletedEmployeeIds) ? { deletedEmployeeIds: body.deletedEmployeeIds } : {}),
@@ -906,9 +1134,11 @@ async function startServer() {
         ...(body.replaceEventosDB ? { replaceEventosDB: true } : {}),
         ...(body.vacacionesDB && typeof body.vacacionesDB === 'object' ? { vacacionesDB: body.vacacionesDB } : {}),
         ...(Array.isArray(body.reportes) ? { reportes: body.reportes } : {}),
+        ...(body.clearReportes ? { clearReportes: true } : {}),
         ...(body.resumen !== undefined ? { resumen: body.resumen } : {}),
         ...(typeof body.selectedWeek === 'string' ? { selectedWeek: body.selectedWeek } : {}),
         ...(body.horarios && typeof body.horarios === 'object' ? { horarios: body.horarios } : {}),
+        ...(Array.isArray(body.deletedHorarioCodes) ? { deletedHorarioCodes: body.deletedHorarioCodes } : {}),
         ...(body.asignaciones && typeof body.asignaciones === 'object' ? { asignaciones: body.asignaciones } : {}),
         ...(body.config && typeof body.config === 'object' ? { config: body.config } : {}),
         ...(body.emailConfig && typeof body.emailConfig === 'object'
@@ -922,12 +1152,16 @@ async function startServer() {
         (body.empleadosDB && typeof body.empleadosDB === 'object') ||
         Array.isArray(body.deletedEmployeeIds);
 
+      const shouldBroadcastReportes =
+        (Array.isArray(body.reportes) && (body.reportes.length > 0 || Boolean(body.clearReportes))) ||
+        (Array.isArray(body.dispersals) && Array.isArray(updated.reportes) && updated.reportes.length > 0);
+
       const hasRealtimeRelevantChanges =
         Array.isArray(body.incidents) ||
         Array.isArray(body.dispersals) ||
         Array.isArray(body.notifications) ||
         (body.releases && typeof body.releases === 'object') ||
-        Array.isArray(body.reportes) ||
+        shouldBroadcastReportes ||
         Array.isArray(body.users) ||
         hasEmployeeChanges;
 
@@ -947,11 +1181,12 @@ async function startServer() {
                   asignaciones: updated.asignaciones,
                 }
               : {}),
-            ...(Array.isArray(body.reportes)
+            ...(shouldBroadcastReportes
               ? {
                   reportes: updated.reportes,
                   resumen: updated.resumen,
                   selectedWeek: updated.selectedWeek,
+                  ...(body.clearReportes ? { clearReportes: true } : {}),
                 }
               : {}),
           },

@@ -18,6 +18,7 @@ import { PushNotificationService } from './pushNotificationService';
 
 const STORAGE_KEYS = {
   USERS: 'attendancePro_portal_users_v1',
+  DELETED_USERS: 'attendancePro_portal_deleted_users_v1',
   ACTIVE_USER_ID: 'attendancePro_portal_active_user_v1',
   AUTH_SESSION: 'attendancePro_portal_auth_session_v1',
   INCIDENTS: 'attendancePro_portal_incidents_v1',
@@ -131,24 +132,42 @@ export const DEFAULT_INCIDENTS: IncidentRequest[] = [
 ];
 
 export class PortalService {
+  private static memoryDispersals: PayrollDispersal[] | null = null;
+  private static memoryReleases: Record<string, PayrollRelease> | null = null;
+  private static memoryNotifications: PortalNotification[] | null = null;
+
   /**
    * Guarda de forma segura en localStorage sin lanzar excepciones QuotaExceededError
    * que interrumpan el renderizado de React o bloqueen el envío al servidor.
    */
-  private static safeSetLocalStorage(key: string, value: unknown, compactFallback?: () => unknown): void {
+  private static safeSetLocalStorage(
+    key: string,
+    value: unknown,
+    compactFallback?: () => unknown,
+    ultraCompactFallback?: () => unknown
+  ): void {
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem(key, JSON.stringify(value));
+      return;
     } catch {
       if (compactFallback) {
         try {
           localStorage.setItem(key, JSON.stringify(compactFallback()));
           return;
         } catch {
-          // ignore secondary quota error
+          // try ultra-compact fallback next
         }
       }
-      console.warn(`[PortalService] Quota de localStorage alcanzada al guardar ${key}; sincronizando con el servidor.`);
+      if (ultraCompactFallback) {
+        try {
+          localStorage.setItem(key, JSON.stringify(ultraCompactFallback()));
+          return;
+        } catch {
+          // ignore tertiary quota error
+        }
+      }
+      console.warn(`[PortalService] Quota de localStorage alcanzada al guardar ${key}; manteniendo en memoria y servidor.`);
     }
   }
 
@@ -172,11 +191,58 @@ export class PortalService {
     }));
   }
 
+  private static metadataOnlyDispersalsForLocalStorage(dispersals: PayrollDispersal[]): PayrollDispersal[] {
+    return dispersals.map(d => ({
+      ...d,
+      reportesSnapshot: undefined,
+    }));
+  }
+
   private static compactIncidentsForLocalStorage(incidents: IncidentRequest[]): IncidentRequest[] {
     return incidents.map(inc => ({
       ...inc,
       archivoFormatoBase64: undefined,
     }));
+  }
+
+  /**
+   * Actualiza la caché en memoria y localStorage sin disparar pushToServer (útil al recibir SSE o hidratar del servidor).
+   */
+  static cacheDispersals(dispersals: PayrollDispersal[]): void {
+    const normalized = dispersals
+      .filter((d: PayrollDispersal) => d && d.id !== 'disp_semana_43')
+      .map((d: PayrollDispersal) => {
+        const existingInMem = this.memoryDispersals?.find(
+          m => m.semanaNumero === d.semanaNumero || m.id === d.id
+        );
+        return {
+          ...d,
+          supervisoresNotificados: Array.isArray(d.supervisoresNotificados)
+            ? d.supervisoresNotificados.map(s => normalizeSupervisorName(s))
+            : [],
+          reportesSnapshot:
+            Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0
+              ? d.reportesSnapshot
+              : existingInMem?.reportesSnapshot,
+        };
+      });
+    this.memoryDispersals = normalized;
+    this.safeSetLocalStorage(
+      STORAGE_KEYS.DISPERSALS,
+      normalized,
+      () => this.compactDispersalsForLocalStorage(normalized),
+      () => this.metadataOnlyDispersalsForLocalStorage(normalized)
+    );
+  }
+
+  static cacheReleases(releases: Record<string, PayrollRelease>): void {
+    this.memoryReleases = releases;
+    this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, releases);
+  }
+
+  static cacheNotifications(notifications: PortalNotification[]): void {
+    this.memoryNotifications = notifications;
+    this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, notifications);
   }
 
   /**
@@ -209,11 +275,92 @@ export class PortalService {
     });
   }
 
+  static loadDeletedUserIds(): string[] {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.DELETED_USERS);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.map((id: unknown) => String(id || '').trim()).filter(Boolean)
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveDeletedUserIds(ids: string[]): void {
+    const unique = Array.from(new Set(ids.map(id => String(id || '').trim()).filter(Boolean)));
+    this.safeSetLocalStorage(STORAGE_KEYS.DELETED_USERS, unique);
+  }
+
+  /**
+   * Fusiona acumulativamente los usuarios locales y del servidor por ID (igual que horarios y empleadosDB),
+   * respetando las bajas explícitas (deletedUserIds) para que un push o reinicio de contenedor nunca borre usuarios.
+   */
+  static mergeUsersCatalog(
+    localUsers: PortalUser[],
+    serverUsers?: PortalUser[],
+    serverDeletedIds?: string[]
+  ): { mergedUsers: PortalUser[]; mergedDeletedIds: string[]; needsServerSync: boolean } {
+    const localDeleted = this.loadDeletedUserIds();
+    const deletedSet = new Set<string>([
+      ...localDeleted,
+      ...(Array.isArray(serverDeletedIds) ? serverDeletedIds : []),
+    ]);
+
+    const userMap = new Map<string, PortalUser>();
+    DEFAULT_USERS.forEach(u => {
+      if (!deletedSet.has(u.id)) {
+        userMap.set(u.id, this.normalizeUserRecord(u));
+      }
+    });
+
+    // 1. Usuarios guardados localmente en el navegador
+    localUsers.forEach(u => {
+      if (!u || !u.id || deletedSet.has(u.id)) return;
+      userMap.set(u.id, this.normalizeUserRecord(u));
+    });
+
+    const srvList = Array.isArray(serverUsers) ? serverUsers : [];
+    const defaultIds = new Set(['user_admin', 'user_rh', 'user_sup_oscar', 'user_sup_eudis']);
+    const isServerOnlyDefaultSeed =
+      srvList.length <= 4 &&
+      srvList.every(u => defaultIds.has(String(u?.id || ''))) &&
+      userMap.size > srvList.length;
+
+    // 2. Usuarios del servidor (sin pisar usuarios personalizados locales si el servidor recién reinició con los 4 por defecto)
+    srvList.forEach(u => {
+      if (!u || !u.id || deletedSet.has(u.id)) return;
+      const normSrv = this.normalizeUserRecord(u);
+      const existingLocal = userMap.get(normSrv.id);
+      if (existingLocal && isServerOnlyDefaultSeed) {
+        return;
+      }
+      userMap.set(normSrv.id, existingLocal ? { ...existingLocal, ...normSrv } : normSrv);
+    });
+
+    const mergedUsers = Array.from(userMap.values());
+    const mergedDeletedIds = Array.from(deletedSet);
+
+    const serverIds = new Set(srvList.map(u => u?.id).filter(Boolean));
+    const needsServerSync =
+      mergedUsers.length > srvList.length ||
+      mergedUsers.some(u => !serverIds.has(u.id));
+
+    return {
+      mergedUsers,
+      mergedDeletedIds,
+      needsServerSync,
+    };
+  }
+
   /**
    * Obtiene el estado centralizado desde el servidor Express (/api/portal/state)
+   * fusionando usuarios, liberaciones, dispersiones e incidencias con localStorage para nunca perder datos tras un push.
    */
   static async fetchServerState(): Promise<{
     users?: PortalUser[];
+    deletedUserIds?: string[];
     incidents?: IncidentRequest[];
     releases?: Record<string, PayrollRelease>;
     dispersals?: PayrollDispersal[];
@@ -234,25 +381,87 @@ export class PortalService {
       const res = await fetch('/api/portal/state');
       if (!res.ok) return null;
       const data = await res.json();
-      if (data.users && Array.isArray(data.users) && data.users.length > 0) {
-        this.safeSetLocalStorage(STORAGE_KEYS.USERS, data.users);
+
+      // 1. Fusión acumulativa de Usuarios (igual que horarios: local + servidor respetando deletedUserIds)
+      const localUsers = this.loadUsers();
+      const { mergedUsers, mergedDeletedIds, needsServerSync: usersNeedSync } = this.mergeUsersCatalog(
+        localUsers,
+        Array.isArray(data.users) ? data.users : undefined,
+        Array.isArray(data.deletedUserIds) ? data.deletedUserIds : undefined
+      );
+      this.saveDeletedUserIds(mergedDeletedIds);
+      this.safeSetLocalStorage(STORAGE_KEYS.USERS, mergedUsers);
+      data.users = mergedUsers;
+
+      // 2. Fusión acumulativa de Incidencias por ID
+      const localIncidents = this.loadIncidents();
+      const srvIncidents: IncidentRequest[] = Array.isArray(data.incidents) ? data.incidents : [];
+      const incMap = new Map<string, IncidentRequest>();
+      localIncidents.forEach(inc => {
+        if (inc?.id) incMap.set(inc.id, inc);
+      });
+      srvIncidents.forEach(inc => {
+        if (inc?.id) incMap.set(inc.id, inc);
+      });
+      const mergedIncidents = Array.from(incMap.values());
+      this.safeSetLocalStorage(STORAGE_KEYS.INCIDENTS, mergedIncidents, () =>
+        this.compactIncidentsForLocalStorage(mergedIncidents)
+      );
+      data.incidents = mergedIncidents;
+
+      // 3. Fusión acumulativa de Liberaciones
+      const localReleases = this.loadReleases();
+      const srvReleases: Record<string, PayrollRelease> =
+        data.releases && typeof data.releases === 'object' ? data.releases : {};
+      const mergedReleases = { ...localReleases, ...srvReleases };
+      this.cacheReleases(mergedReleases);
+      data.releases = mergedReleases;
+
+      // 4. Fusión acumulativa de Dispersiones por semanaNumero
+      const localDispersals = this.loadDispersals();
+      const srvDispersals: PayrollDispersal[] = Array.isArray(data.dispersals) ? data.dispersals : [];
+      const dispMap = new Map<number, PayrollDispersal>();
+      localDispersals.forEach(d => {
+        if (d?.semanaNumero) dispMap.set(d.semanaNumero, d);
+      });
+      srvDispersals.forEach(d => {
+        if (!d?.semanaNumero) return;
+        const loc = dispMap.get(d.semanaNumero);
+        dispMap.set(d.semanaNumero, {
+          ...(loc || {}),
+          ...d,
+          reportesSnapshot:
+            Array.isArray(d.reportesSnapshot) && d.reportesSnapshot.length > 0
+              ? d.reportesSnapshot
+              : loc?.reportesSnapshot,
+        });
+      });
+      const mergedDispersals = Array.from(dispMap.values());
+      this.cacheDispersals(mergedDispersals);
+      data.dispersals = mergedDispersals;
+
+      // 5. Notificaciones
+      if (data.notifications && Array.isArray(data.notifications) && data.notifications.length > 0) {
+        this.cacheNotifications(data.notifications);
       }
-      if (data.incidents && Array.isArray(data.incidents)) {
-        this.safeSetLocalStorage(STORAGE_KEYS.INCIDENTS, data.incidents, () =>
-          this.compactIncidentsForLocalStorage(data.incidents)
-        );
+
+      // Si el servidor tenía menos usuarios o dispersiones que el almacenamiento local (ej. tras un push / redeploy),
+      // sincronizar inmediatamente al servidor los registros rescatados
+      if (
+        usersNeedSync ||
+        mergedDispersals.length > srvDispersals.length ||
+        Object.keys(mergedReleases).length > Object.keys(srvReleases).length
+      ) {
+        this.pushToServer({
+          users: mergedUsers,
+          ...(mergedDeletedIds.length > 0 ? { deletedUserIds: mergedDeletedIds } : {}),
+          ...(mergedDispersals.length > srvDispersals.length ? { dispersals: mergedDispersals } : {}),
+          ...(Object.keys(mergedReleases).length > Object.keys(srvReleases).length
+            ? { releases: mergedReleases }
+            : {}),
+        });
       }
-      if (data.releases && typeof data.releases === 'object') {
-        this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, data.releases);
-      }
-      if (data.dispersals && Array.isArray(data.dispersals)) {
-        this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, data.dispersals, () =>
-          this.compactDispersalsForLocalStorage(data.dispersals)
-        );
-      }
-      if (data.notifications && Array.isArray(data.notifications)) {
-        this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, data.notifications);
-      }
+
       const serverEmailCfg = data.emailConfig || data.config?.emailServer;
       if (serverEmailCfg && typeof serverEmailCfg === 'object') {
         const localCurrent = this.loadEmailConfig();
@@ -340,11 +549,14 @@ export class PortalService {
 
   static loadUsers(): PortalUser[] {
     try {
+      const deletedSet = new Set(this.loadDeletedUserIds());
       const data = localStorage.getItem(STORAGE_KEYS.USERS);
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((u: PortalUser) => this.normalizeUserRecord(u));
+          return parsed
+            .filter((u: PortalUser) => u && u.id && !deletedSet.has(u.id))
+            .map((u: PortalUser) => this.normalizeUserRecord(u));
         }
       }
     } catch (e) {
@@ -353,10 +565,25 @@ export class PortalService {
     return DEFAULT_USERS;
   }
 
-  static saveUsers(users: PortalUser[]): void {
+  static saveUsers(users: PortalUser[], deletedUserIds?: string[]): void {
     const normalized = users.map(u => this.normalizeUserRecord(u));
+    if (Array.isArray(deletedUserIds) && deletedUserIds.length > 0) {
+      const currentDeleted = this.loadDeletedUserIds();
+      const updatedDeleted = Array.from(new Set([...currentDeleted, ...deletedUserIds]));
+      this.saveDeletedUserIds(updatedDeleted);
+      this.safeSetLocalStorage(STORAGE_KEYS.USERS, normalized);
+      this.pushToServer({ users: normalized, deletedUserIds: updatedDeleted });
+      return;
+    }
+    // Si se guarda un usuario cuyo ID estaba previamente en deletedUserIds, quitarlo de la lista de eliminados
+    const savedIds = new Set(normalized.map(u => u.id));
+    const remainingDeleted = this.loadDeletedUserIds().filter(id => !savedIds.has(id));
+    this.saveDeletedUserIds(remainingDeleted);
     this.safeSetLocalStorage(STORAGE_KEYS.USERS, normalized);
-    this.pushToServer({ users: normalized });
+    this.pushToServer({
+      users: normalized,
+      ...(remainingDeleted.length > 0 ? { deletedUserIds: remainingDeleted } : {}),
+    });
   }
 
   /**
@@ -489,13 +716,16 @@ export class PortalService {
   }
 
   static loadReleases(): Record<string, PayrollRelease> {
+    if (this.memoryReleases !== null) {
+      return this.memoryReleases;
+    }
     try {
       const data = localStorage.getItem(STORAGE_KEYS.RELEASES);
       if (data) {
         const parsed = JSON.parse(data);
         if (parsed && typeof parsed === 'object') {
           const normalized: Record<string, PayrollRelease> = {};
-          Object.entries(parsed as Record<string, PayrollRelease>).forEach(([key, rel]) => {
+          Object.entries(parsed as Record<string, PayrollRelease>).forEach(([, rel]) => {
             const supName = normalizeSupervisorName(rel.supervisorNombre);
             const newKey = `${rel.semanaNumero}_${supName}`;
             normalized[newKey] = {
@@ -504,66 +734,77 @@ export class PortalService {
               supervisorNombre: supName
             };
           });
+          this.memoryReleases = normalized;
           return normalized;
         }
       }
     } catch (e) {
       console.warn('Error loading releases', e);
     }
+    this.memoryReleases = {};
     return {};
   }
 
   static saveReleases(releases: Record<string, PayrollRelease>): void {
-    this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, releases);
+    this.cacheReleases(releases);
     this.pushToServer({ releases });
   }
 
   static loadDispersals(): PayrollDispersal[] {
+    if (this.memoryDispersals !== null) {
+      return this.memoryDispersals;
+    }
     try {
       const data = localStorage.getItem(STORAGE_KEYS.DISPERSALS);
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
-          return parsed
-            .filter((d: PayrollDispersal) => d.id !== 'disp_semana_43')
+          const normalized = parsed
+            .filter((d: PayrollDispersal) => d && d.id !== 'disp_semana_43')
             .map((d: PayrollDispersal) => ({
               ...d,
               supervisoresNotificados: Array.isArray(d.supervisoresNotificados)
                 ? d.supervisoresNotificados.map(s => normalizeSupervisorName(s))
                 : []
             }));
+          this.memoryDispersals = normalized;
+          return normalized;
         }
       }
     } catch (e) {
       console.warn('Error loading dispersals', e);
     }
+    this.memoryDispersals = [];
     return [];
   }
 
   static saveDispersals(dispersals: PayrollDispersal[], extraServerPayload?: Record<string, unknown>): void {
-    this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, dispersals, () =>
-      this.compactDispersalsForLocalStorage(dispersals)
-    );
-    this.pushToServer({ dispersals, ...(extraServerPayload || {}) });
+    this.cacheDispersals(dispersals);
+    this.pushToServer({ dispersals: this.memoryDispersals || dispersals, ...(extraServerPayload || {}) });
   }
 
   static loadNotifications(): PortalNotification[] {
+    if (this.memoryNotifications !== null) {
+      return this.memoryNotifications;
+    }
     try {
       const data = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       if (data) {
         const parsed = JSON.parse(data);
         if (Array.isArray(parsed)) {
+          this.memoryNotifications = parsed;
           return parsed;
         }
       }
     } catch (e) {
       console.warn('Error loading notifications', e);
     }
+    this.memoryNotifications = [];
     return [];
   }
 
   static saveNotifications(notifications: PortalNotification[]): void {
-    this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, notifications);
+    this.cacheNotifications(notifications);
     this.pushToServer({ notifications });
   }
 
@@ -809,8 +1050,6 @@ export class PortalService {
       dispersals.unshift(newDispersal);
     }
 
-    this.saveDispersals(dispersals);
-
     // Guardar notificaciones en el sistema
     const currentNotifications = this.loadNotifications();
     const filteredExisting = currentNotifications.filter(
@@ -822,7 +1061,17 @@ export class PortalService {
         )
     );
     const updatedNotifications = [...newNotifications, ...filteredExisting].slice(0, 100);
-    this.saveNotifications(updatedNotifications);
+
+    this.cacheDispersals(dispersals);
+    this.cacheNotifications(updatedNotifications);
+    this.pushToServer({
+      dispersals: this.memoryDispersals || dispersals,
+      notifications: updatedNotifications,
+      ...(snapshotMeta?.reportesSnapshot && snapshotMeta.reportesSnapshot.length > 0
+        ? { reportes: snapshotMeta.reportesSnapshot }
+        : {}),
+      ...(semanaPeriodo ? { selectedWeek: semanaPeriodo } : {}),
+    });
 
     // Disparar envío automático en servidor Express con credenciales SMTP
     if (sendCorporateEmail && typeof window !== 'undefined' && window.location.protocol !== 'file:') {
@@ -864,7 +1113,7 @@ export class PortalService {
     horasLimite: number,
     resetFromNow = false
   ): PayrollDispersal | undefined {
-    const dispersals = this.loadDispersals();
+    const dispersals = [...this.loadDispersals()];
     const idx = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
     if (idx < 0) return undefined;
 
@@ -902,7 +1151,7 @@ export class PortalService {
     deletedDispersal: boolean;
     newNotifications: PortalNotification[];
   } {
-    const dispersals = this.loadDispersals();
+    const dispersals = [...this.loadDispersals()];
     const existingIndex = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
     const disp = existingIndex >= 0 ? dispersals[existingIndex] : undefined;
     const nowISO = new Date().toISOString();
@@ -921,9 +1170,7 @@ export class PortalService {
     // Si es cancelación global de la nómina o se indicó borrar la información obtenida
     if (isGlobal && deleteObtainedData) {
       const remainingDispersals = dispersals.filter(d => d.semanaNumero !== semanaNumero);
-      this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, remainingDispersals, () =>
-        this.compactDispersalsForLocalStorage(remainingDispersals)
-      );
+      this.cacheDispersals(remainingDispersals);
 
       // Borrar todas las liberaciones de esa semana
       const releases = this.loadReleases();
@@ -934,7 +1181,7 @@ export class PortalService {
           remainingReleases[key] = rel;
         }
       });
-      this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, remainingReleases);
+      this.cacheReleases(remainingReleases);
 
       // Si había supervisores notificados, generar aviso de cancelación y limpiar avisos previos de dispersión de esa semana
       const newNotifications: PortalNotification[] = normalizedTargets.map(sup => ({
@@ -956,12 +1203,13 @@ export class PortalService {
         n => !(n.semanaNumero === semanaNumero && n.titulo?.includes('Dispersada'))
       );
       const updatedNotifications = [...newNotifications, ...currentNotifications].slice(0, 100);
-      this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, updatedNotifications);
+      this.cacheNotifications(updatedNotifications);
 
       this.pushToServer({
         dispersals: remainingDispersals,
         releases: remainingReleases,
         notifications: updatedNotifications,
+        deleteDispersal: true,
       });
 
       if (
