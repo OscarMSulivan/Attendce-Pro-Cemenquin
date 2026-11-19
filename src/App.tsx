@@ -1043,53 +1043,59 @@ export default function App() {
 
       // 6. Actualizar reportes en vivo si el supervisor o RH está visualizando la semana activa,
       // protegiendo siempre cualquier edición local reciente o días modificados por el supervisor
-      if (Array.isArray(incomingState.reportes) && incomingState.reportes.length > 0) {
-        if (Date.now() - lastLocalReportEditAtRef.current < 4000) {
-          return;
-        }
-        const currentHorarios = StorageService.loadHorarios();
-        const currentAsignaciones = StorageService.loadAsignaciones();
-        const currentSavedEmps = StorageService.loadSavedEmployees()?.empleados || {};
-        setReportes(prevReportes => {
-          const mergedIncoming = (incomingState.reportes as EmployeeReport[]).map(incRep => {
-            const normId = normalizeEmployeeId(incRep?.empleado?.id);
-            const localRep = prevReportes.find(r => normalizeEmployeeId(r.empleado.id) === normId);
-            if (!localRep) return incRep;
+      if (Array.isArray(incomingState.reportes)) {
+        if (incomingState.reportes.length === 0) {
+          setReportes([]);
+          setResumen(null);
+          StorageService.clearReportesState();
+        } else {
+          if (Date.now() - lastLocalReportEditAtRef.current < 4000) {
+            return;
+          }
+          const currentHorarios = StorageService.loadHorarios();
+          const currentAsignaciones = StorageService.loadAsignaciones();
+          const currentSavedEmps = StorageService.loadSavedEmployees()?.empleados || {};
+          setReportes(prevReportes => {
+            const mergedIncoming = (incomingState.reportes as EmployeeReport[]).map(incRep => {
+              const normId = normalizeEmployeeId(incRep?.empleado?.id);
+              const localRep = prevReportes.find(r => normalizeEmployeeId(r.empleado.id) === normId);
+              if (!localRep) return incRep;
 
-            const mergedDias = incRep.dias.map(incDay => {
-              const localDay = localRep.dias.find(d => d.isoDate === incDay.isoDate);
-              if (!localDay) return incDay;
-              const localEdited =
-                Boolean(localDay.modificadoPorSupervisor) ||
-                localDay.horasExtrasAutorizadas !== undefined ||
-                Boolean(localDay.notaSupervisorDia) ||
-                Boolean(localDay.formatoSubidoNombre);
-              const incEdited =
-                Boolean(incDay.modificadoPorSupervisor) ||
-                incDay.horasExtrasAutorizadas !== undefined ||
-                Boolean(incDay.notaSupervisorDia) ||
-                Boolean(incDay.formatoSubidoNombre);
-              if (localEdited && !incEdited) {
-                return localDay;
-              }
-              return incDay;
+              const mergedDias = incRep.dias.map(incDay => {
+                const localDay = localRep.dias.find(d => d.isoDate === incDay.isoDate);
+                if (!localDay) return incDay;
+                const localEdited =
+                  Boolean(localDay.modificadoPorSupervisor) ||
+                  localDay.horasExtrasAutorizadas !== undefined ||
+                  Boolean(localDay.notaSupervisorDia) ||
+                  Boolean(localDay.formatoSubidoNombre);
+                const incEdited =
+                  Boolean(incDay.modificadoPorSupervisor) ||
+                  incDay.horasExtrasAutorizadas !== undefined ||
+                  Boolean(incDay.notaSupervisorDia) ||
+                  Boolean(incDay.formatoSubidoNombre);
+                if (localEdited && !incEdited) {
+                  return localDay;
+                }
+                return incDay;
+              });
+
+              return {
+                ...incRep,
+                dias: mergedDias,
+              };
             });
 
-            return {
-              ...incRep,
-              dias: mergedDias,
-            };
+            return sincronizarReportesConHorarios(
+              mergedIncoming,
+              currentHorarios,
+              currentAsignaciones,
+              currentSavedEmps
+            );
           });
-
-          return sincronizarReportesConHorarios(
-            mergedIncoming,
-            currentHorarios,
-            currentAsignaciones,
-            currentSavedEmps
-          );
-        });
-        if (incomingState.resumen) {
-          setResumen(incomingState.resumen);
+          if (incomingState.resumen) {
+            setResumen(incomingState.resumen);
+          }
         }
       }
 
@@ -4163,25 +4169,103 @@ export default function App() {
     );
   };
 
-  // Cancelar nóminas dispersadas (por supervisor o global)
+  // Cancelar nóminas dispersadas o en proceso (por supervisor o global con borrado de información obtenida)
   const handleCancelDispersal = (
     semanaNum: number,
     targetSupervisors?: string[],
-    motivo?: string
+    motivo?: string,
+    explicitSemanaPeriodo?: string
   ) => {
+    const isFullPayrollCancel = !targetSupervisors || targetSupervisors.length === 0;
+    const existingDisp = dispersals.find(d => d.semanaNumero === semanaNum);
+    const matchingWeekOption = payrollWeeks.find(w => w.weekNumber === semanaNum);
+    const targetPeriodo =
+      explicitSemanaPeriodo ||
+      existingDisp?.semanaPeriodo ||
+      (semanaNum === currentWeekNumber ? selectedWeek : matchingWeekOption?.value) ||
+      '';
+
     PortalService.cancelDispersal(
       semanaNum,
       currentUser.name,
       targetSupervisors,
-      motivo
+      motivo,
+      isFullPayrollCancel
     );
     setDispersals(PortalService.loadDispersals());
     setNotifications(PortalService.loadNotifications());
     setReleases(PortalService.loadReleases());
 
-    const affected = targetSupervisors && targetSupervisors.length > 0
-      ? targetSupervisors.join(', ')
-      : 'Todas las listas';
+    if (isFullPayrollCancel) {
+      // Determinar si la nómina cancelada corresponde a la que está cargada en pantalla
+      const isCurrentActivePayroll =
+        semanaNum === currentWeekNumber ||
+        !targetPeriodo ||
+        targetPeriodo === selectedWeek;
+
+      // Filtrar eventosDB para borrar los registros obtenidos de esa semana cancelada
+      let cleanedEventos: EventsDB = { ...eventosDB };
+      if (targetPeriodo && targetPeriodo.includes('|')) {
+        const [startISO, endISO] = targetPeriodo.split('|');
+        if (startISO && endISO) {
+          const nextEventos: EventsDB = {};
+          for (const [empId, datesMap] of Object.entries(eventosDB)) {
+            if (!datesMap || typeof datesMap !== 'object') continue;
+            const remainingDates: typeof datesMap = {};
+            for (const [fechaStr, punches] of Object.entries(datesMap)) {
+              if (fechaStr < startISO || fechaStr > endISO) {
+                remainingDates[fechaStr] = punches;
+              }
+            }
+            if (Object.keys(remainingDates).length > 0) {
+              nextEventos[empId] = remainingDates;
+            }
+          }
+          cleanedEventos = nextEventos;
+        }
+      } else if (isCurrentActivePayroll) {
+        cleanedEventos = {};
+      }
+
+      setEventosDB(cleanedEventos);
+
+      if (isCurrentActivePayroll) {
+        const emptyReports: EmployeeReport[] = [];
+        setReportes(emptyReports);
+        setResumen(null);
+        setSelectedSupervisor('');
+        setDispersionMode('prompt');
+        StorageService.clearReportesState();
+        lastSyncedRefs.current.reportes = emptyReports;
+        lastSyncedRefs.current.resumen = null;
+      }
+
+      PortalService.pushToServer({
+        ...(isCurrentActivePayroll ? { reportes: [], resumen: null } : {}),
+        eventosDB: cleanedEventos,
+        replaceEventosDB: true
+      } as any);
+
+      setStatusMessage(
+        `🗑️ Nómina de la Semana ${semanaNum} cancelada, cerrada y su información obtenida fue eliminada.${
+          motivo ? ` Motivo: ${motivo}` : ''
+        }`
+      );
+      setStatusType('warning');
+      showToast(
+        `La nómina de la Semana ${semanaNum} fue cerrada y toda su información obtenida se eliminó del sistema.`,
+        'warning',
+        'Nómina Cancelada y Eliminada'
+      );
+      reportUserPresence(
+        'working',
+        `Canceló y eliminó nómina Semana ${semanaNum}`,
+        true
+      );
+      return;
+    }
+
+    const affected = targetSupervisors.join(', ');
 
     setStatusMessage(`⚠️ Dispersión de la Semana ${semanaNum} cancelada para: ${affected}. ${motivo ? `Motivo: ${motivo}` : ''}`);
     setStatusType('warning');
@@ -4504,6 +4588,7 @@ export default function App() {
       setReportes([]);
       setResumen(null);
       setSelectedSupervisor('');
+      StorageService.clearReportesState();
       setStatusMessage('Listo para cargar archivos o seleccionar periodo para una nueva dispersión.');
       setStatusType('info');
     }
@@ -4713,6 +4798,14 @@ export default function App() {
                       }
                       setPortalTab('semaforo');
                     }}
+                    onCancelAndDeletePayroll={(opts = {}) =>
+                      handleCancelDispersal(
+                        opts.semanaNumero ?? currentWeekNumber,
+                        undefined,
+                        opts.motivo,
+                        opts.semanaPeriodo
+                      )
+                    }
                   />
 
                   <AnimatePresence mode="wait">

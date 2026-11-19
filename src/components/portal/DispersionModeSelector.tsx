@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { PayrollDispersal, PayrollRelease } from '../../types/portal';
 import { DispersalCountdownTimer } from './DispersalCountdownTimer';
+import { HeadlessModal } from '../ui/HeadlessModal';
 
 export type DispersionWorkspaceMode = 'prompt' | 'new' | 'existing';
 
@@ -38,6 +39,11 @@ interface DispersionModeSelectorProps {
   onOpenDispersedPayroll: (dispersal: PayrollDispersal) => void;
   onStartNewPayroll: (clearCurrentReport?: boolean) => void;
   onNavigateToSemaforo: (dispersal?: PayrollDispersal) => void;
+  onCancelAndDeletePayroll?: (options?: {
+    semanaNumero?: number;
+    semanaPeriodo?: string;
+    motivo?: string;
+  }) => void;
 }
 
 export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
@@ -53,9 +59,16 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
   onOpenDispersedPayroll,
   onStartNewPayroll,
   onNavigateToSemaforo,
+  onCancelAndDeletePayroll,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'cancelled'>('all');
+  const [cancelModalTarget, setCancelModalTarget] = useState<{
+    semanaNumero: number;
+    semanaPeriodo: string;
+    label: string;
+  } | null>(null);
+  const [cancelMotivo, setCancelMotivo] = useState('');
 
   const sortedDispersals = [...dispersals].sort((a, b) => {
     const timeA = new Date(a.fechaDispersion).getTime() || 0;
@@ -79,6 +92,92 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
 
   const activeDispersalObj = dispersals.find((d) => d.semanaNumero === currentWeekNumber);
 
+  const openCancelConfirm = (semanaNum: number, semanaPer: string, label: string) => {
+    setCancelMotivo('');
+    setCancelModalTarget({
+      semanaNumero: semanaNum,
+      semanaPeriodo: semanaPer,
+      label,
+    });
+  };
+
+  const handleConfirmCancelPayroll = () => {
+    if (!cancelModalTarget) return;
+    if (onCancelAndDeletePayroll) {
+      onCancelAndDeletePayroll({
+        semanaNumero: cancelModalTarget.semanaNumero,
+        semanaPeriodo: cancelModalTarget.semanaPeriodo,
+        motivo: cancelMotivo.trim() || undefined,
+      });
+    } else {
+      onStartNewPayroll(true);
+    }
+    setCancelModalTarget(null);
+    setCancelMotivo('');
+  };
+
+  const renderCancelConfirmModal = () => {
+    if (!cancelModalTarget) return null;
+    return (
+      <HeadlessModal
+        isOpen={Boolean(cancelModalTarget)}
+        onClose={() => setCancelModalTarget(null)}
+        maxWidth="max-w-md"
+        title={
+          <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+            <Ban className="w-5 h-5 shrink-0" />
+            <span className="font-bold text-base text-slate-900 dark:text-white">
+              Cancelar, Cerrar y Borrar Nómina
+            </span>
+          </div>
+        }
+        subtitle={`Semana ${cancelModalTarget.semanaNumero} (${(
+          cancelModalTarget.semanaPeriodo || ''
+        ).replace('|', ' al ')})`}
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            ¿Confirmas que deseas <strong>cancelar y cerrar</strong>{' '}
+            <strong>{cancelModalTarget.label}</strong>? Se cerrará esta nómina y se borrará toda la
+            información ya obtenida (cálculo de asistencia en pantalla, dispersión, liberaciones y
+            eventos cargados de esa semana) para que puedas empezar en limpio.
+          </p>
+
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
+              Motivo de la Cancelación (Opcional):
+            </label>
+            <textarea
+              rows={2}
+              value={cancelMotivo}
+              onChange={(e) => setCancelMotivo(e.target.value)}
+              placeholder="Ej: Se cerrará esta nómina para cargar un nuevo archivo o periodo..."
+              className="w-full text-xs rounded-xl p-3 bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.08] text-slate-900 dark:text-white outline-none focus:border-rose-500 resize-none"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-200 dark:border-white/[0.06]">
+            <button
+              type="button"
+              onClick={() => setCancelModalTarget(null)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white cursor-pointer"
+            >
+              Volver
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmCancelPayroll}
+              className="px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider bg-rose-600 hover:bg-rose-500 text-white shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+            >
+              <Ban className="w-4 h-4" />
+              <span>Cancelar y Borrar Nómina</span>
+            </button>
+          </div>
+        </div>
+      </HeadlessModal>
+    );
+  };
+
   // ============================================================================
   // BARRA PERSISTENTE SUPERIOR CUANDO EL USUARIO YA ESTÁ TRABAJANDO EN EL MÓDULO
   // ============================================================================
@@ -87,94 +186,115 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
     const cleanPeriodo = (currentWeekPeriod || '').replace('|', ' al ');
 
     return (
-      <div className="mb-5 rounded-2xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.08] px-4 sm:px-5 py-3.5 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            type="button"
-            onClick={() => onSelectMode('prompt')}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-white dark:text-[#A9DFD8] border border-slate-900 dark:border-[#A9DFD8]/35 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Regresar a Selección / Consultar Dispersadas ({dispersals.length})</span>
-          </button>
+      <>
+        <div className="mb-5 rounded-2xl bg-white dark:bg-[#21222D] border border-slate-200 dark:border-white/[0.08] px-4 sm:px-5 py-3.5 shadow-sm flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => onSelectMode('prompt')}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-white dark:text-[#A9DFD8] border border-slate-900 dark:border-[#A9DFD8]/35 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Regresar a Selección / Consultar Dispersadas ({dispersals.length})</span>
+            </button>
 
-          <div className="h-5 w-[1px] bg-slate-200 dark:bg-white/10 hidden sm:block" />
+            <div className="h-5 w-[1px] bg-slate-200 dark:bg-white/10 hidden sm:block" />
 
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-extrabold text-slate-900 dark:text-white">
-                {mode === 'existing'
-                  ? `Trabajando Nómina ya Dispersada — Semana ${currentWeekNumber}`
-                  : `Preparando / Dispersando Nueva Nómina — Semana ${currentWeekNumber}`}
-              </span>
-              {cleanPeriodo && (
-                <span className="text-xs font-mono text-slate-500 dark:text-[#87888C]">
-                  · {cleanPeriodo}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+                  {mode === 'existing'
+                    ? `Trabajando Nómina ya Dispersada — Semana ${currentWeekNumber}`
+                    : `Preparando / Dispersando Nueva Nómina — Semana ${currentWeekNumber}`}
                 </span>
-              )}
-              {activeDispersalObj && !activeDispersalObj.cancelada && (
-                <span className="text-xs font-bold text-teal-600 dark:text-[#A9DFD8]">
-                  · {activeDispersalObj.supervisoresNotificados.length} listas dispersadas
-                </span>
-              )}
+                {cleanPeriodo && (
+                  <span className="text-xs font-mono text-slate-500 dark:text-[#87888C]">
+                    · {cleanPeriodo}
+                  </span>
+                )}
+                {activeDispersalObj && !activeDispersalObj.cancelada && (
+                  <span className="text-xs font-bold text-teal-600 dark:text-[#A9DFD8]">
+                    · {activeDispersalObj.supervisoresNotificados.length} listas dispersadas
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
-          {sortedDispersals.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-slate-500 dark:text-[#87888C]">
-                Cambiar a dispersada:
-              </span>
-              <select
-                value={
-                  activeDispersalObj ? String(activeDispersalObj.semanaNumero) : ''
-                }
-                onChange={(e) => {
-                  const weekNum = Number(e.target.value);
-                  const found = dispersals.find((d) => d.semanaNumero === weekNum);
-                  if (found) {
-                    onOpenDispersedPayroll(found);
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            {sortedDispersals.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-semibold text-slate-500 dark:text-[#87888C]">
+                  Cambiar a dispersada:
+                </span>
+                <select
+                  value={
+                    activeDispersalObj ? String(activeDispersalObj.semanaNumero) : ''
                   }
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.08] text-xs font-mono font-bold text-slate-800 dark:text-white outline-none cursor-pointer"
-              >
-                <option value="" disabled>
-                  Elegir semana dispersada...
-                </option>
-                {sortedDispersals.map((d) => (
-                  <option key={d.id} value={String(d.semanaNumero)}>
-                    Semana {d.semanaNumero} ({d.semanaPeriodo.replace('|', ' a ')})
+                  onChange={(e) => {
+                    const weekNum = Number(e.target.value);
+                    const found = dispersals.find((d) => d.semanaNumero === weekNum);
+                    if (found) {
+                      onOpenDispersedPayroll(found);
+                    }
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.08] text-xs font-mono font-bold text-slate-800 dark:text-white outline-none cursor-pointer"
+                >
+                  <option value="" disabled>
+                    Elegir semana dispersada...
                   </option>
-                ))}
-              </select>
-            </div>
-          )}
+                  {sortedDispersals.map((d) => (
+                    <option key={d.id} value={String(d.semanaNumero)}>
+                      Semana {d.semanaNumero} ({d.semanaPeriodo.replace('|', ' a ')})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-          {mode === 'existing' && (
-            <button
-              type="button"
-              onClick={() => onStartNewPayroll(false)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 hover:bg-slate-100 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <PlusCircle className="w-3.5 h-3.5 text-teal-600 dark:text-[#A9DFD8]" />
-              <span>Dispersar Otra Nómina</span>
-            </button>
-          )}
+            {mode === 'existing' && (
+              <button
+                type="button"
+                onClick={() => onStartNewPayroll(false)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 hover:bg-slate-100 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <PlusCircle className="w-3.5 h-3.5 text-teal-600 dark:text-[#A9DFD8]" />
+                <span>Dispersar Otra Nómina</span>
+              </button>
+            )}
 
-          {isWorkingExisting && (
-            <button
-              type="button"
-              onClick={() => onNavigateToSemaforo(activeDispersalObj)}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 hover:bg-slate-100 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-sky-700 dark:text-[#20AEF3] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>Ver Semáforo</span>
-            </button>
-          )}
+            {isWorkingExisting && (
+              <button
+                type="button"
+                onClick={() => onNavigateToSemaforo(activeDispersalObj)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-white/[0.08] bg-slate-50 hover:bg-slate-100 dark:bg-[#171821] dark:hover:bg-[#2B2B36] text-sky-700 dark:text-[#20AEF3] text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Ver Semáforo</span>
+              </button>
+            )}
+
+            {(reportesCount > 0 || Boolean(activeDispersalObj) || hasEvents) && (
+              <button
+                type="button"
+                onClick={() =>
+                  openCancelConfirm(
+                    currentWeekNumber,
+                    currentWeekPeriod,
+                    `la Nómina de la Semana ${currentWeekNumber}`
+                  )
+                }
+                className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/35 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Cancelar y cerrar esta nómina borrando la información ya obtenida"
+              >
+                <Ban className="w-3.5 h-3.5 text-rose-500" />
+                <span>Cancelar Nómina</span>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+        {renderCancelConfirmModal()}
+      </>
     );
   }
 
@@ -263,13 +383,21 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
                 </span>
               </button>
 
-              {reportesCount > 0 && (
+              {(reportesCount > 0 || hasEvents) && (
                 <button
                   type="button"
-                  onClick={() => onStartNewPayroll(true)}
-                  className="px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/[0.1] bg-white hover:bg-slate-100 dark:bg-[#21222D] dark:hover:bg-[#2B2B36] text-slate-700 dark:text-slate-200 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  onClick={() =>
+                    openCancelConfirm(
+                      currentWeekNumber,
+                      currentWeekPeriod,
+                      `la Nómina en Pantalla (Semana ${currentWeekNumber})`
+                    )
+                  }
+                  className="px-3.5 py-2.5 rounded-xl border border-rose-500/40 bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Cancelar y cerrar esta nómina borrando la información ya obtenida"
                 >
-                  Limpiar y Empezar Desde Cero
+                  <Ban className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Cancelar Nómina</span>
                 </button>
               )}
             </div>
@@ -327,6 +455,21 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
                   >
                     Ir al Semáforo de Liberación
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openCancelConfirm(
+                        sortedDispersals[0].semanaNumero,
+                        sortedDispersals[0].semanaPeriodo,
+                        `la Nómina Dispersada de la Semana ${sortedDispersals[0].semanaNumero}`
+                      )
+                    }
+                    className="px-3.5 py-2.5 rounded-xl border border-rose-300 dark:border-rose-500/40 bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                    title="Cancelar y cerrar esta nómina borrando la información ya obtenida"
+                  >
+                    <Ban className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Cancelar Nómina</span>
+                  </button>
                 </>
               ) : (
                 <span className="text-xs text-slate-500 dark:text-[#87888C] py-2">
@@ -346,7 +489,7 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
               Historial de Nóminas Dispersadas ({filteredDispersals.length})
             </h3>
             <p className="text-xs text-slate-500 dark:text-[#87888C] mt-0.5">
-              Selecciona cualquier nómina dispersada para abrir su tabla de asistencia, trabajar sus registros o consultar qué supervisores ya liberaron.
+              Selecciona cualquier nómina dispersada para abrir su tabla de asistencia, trabajar sus registros o cancelarla y borrarla de la información obtenida.
             </p>
           </div>
 
@@ -510,7 +653,23 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
+                  <div className="flex items-center gap-2 flex-wrap shrink-0 self-end lg:self-center">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openCancelConfirm(
+                          disp.semanaNumero,
+                          disp.semanaPeriodo,
+                          `la Nómina de la Semana ${disp.semanaNumero}`
+                        )
+                      }
+                      className="px-3 py-2 rounded-xl border border-rose-300 dark:border-rose-500/35 bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                      title="Cancelar y cerrar esta nómina borrando la información ya obtenida"
+                    >
+                      <Ban className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Cancelar</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => onNavigateToSemaforo(disp)}
@@ -535,6 +694,7 @@ export const DispersionModeSelector: React.FC<DispersionModeSelectorProps> = ({
           </div>
         )}
       </div>
+      {renderCancelConfirmModal()}
     </div>
   );
 };

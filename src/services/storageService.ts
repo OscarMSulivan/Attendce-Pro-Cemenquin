@@ -254,6 +254,14 @@ export class StorageService {
     }
   }
 
+  static clearReportesState(): void {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.REPORTES_STATE);
+    } catch (e) {
+      console.warn('Error clearing reportes state from localStorage', e);
+    }
+  }
+
   static exportBackup(empleadosDB: Record<string, Employee>): Blob {
     const payload = {
       tipo: 'CemenQtime_Respaldo',

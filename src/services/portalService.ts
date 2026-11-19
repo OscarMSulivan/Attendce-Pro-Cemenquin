@@ -888,31 +888,109 @@ export class PortalService {
   }
 
   /**
-   * Cancela la dispersión de una nómina completa o de listas específicas seleccionadas.
+   * Cancela la dispersión de una nómina completa (cerrándola y borrándola de la información obtenida)
+   * o de listas específicas seleccionadas.
    */
   static cancelDispersal(
     semanaNumero: number,
     canceladoPor: string,
     targetSupervisors?: string[],
-    motivo?: string
+    motivo?: string,
+    deleteObtainedData = true
   ): {
     dispersal?: PayrollDispersal;
+    deletedDispersal: boolean;
     newNotifications: PortalNotification[];
   } {
     const dispersals = this.loadDispersals();
     const existingIndex = dispersals.findIndex(d => d.semanaNumero === semanaNumero);
-    if (existingIndex < 0) return { newNotifications: [] };
-
-    const disp = dispersals[existingIndex];
+    const disp = existingIndex >= 0 ? dispersals[existingIndex] : undefined;
     const nowISO = new Date().toISOString();
+
     const isGlobal =
       !targetSupervisors ||
       targetSupervisors.length === 0 ||
-      targetSupervisors.length >= disp.supervisoresNotificados.length;
+      (disp ? targetSupervisors.length >= disp.supervisoresNotificados.length : true);
 
-    const normalizedTargets = (targetSupervisors || disp.supervisoresNotificados).map(s =>
-      normalizeSupervisorName(s).toUpperCase()
-    );
+    const normalizedTargets = (
+      targetSupervisors && targetSupervisors.length > 0
+        ? targetSupervisors
+        : disp?.supervisoresNotificados || []
+    ).map(s => normalizeSupervisorName(s).toUpperCase());
+
+    // Si es cancelación global de la nómina o se indicó borrar la información obtenida
+    if (isGlobal && deleteObtainedData) {
+      const remainingDispersals = dispersals.filter(d => d.semanaNumero !== semanaNumero);
+      this.safeSetLocalStorage(STORAGE_KEYS.DISPERSALS, remainingDispersals, () =>
+        this.compactDispersalsForLocalStorage(remainingDispersals)
+      );
+
+      // Borrar todas las liberaciones de esa semana
+      const releases = this.loadReleases();
+      const weekPrefix = `${semanaNumero}_`;
+      const remainingReleases: Record<string, PayrollRelease> = {};
+      Object.entries(releases).forEach(([key, rel]) => {
+        if (!key.startsWith(weekPrefix) && rel.semanaNumero !== semanaNumero) {
+          remainingReleases[key] = rel;
+        }
+      });
+      this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, remainingReleases);
+
+      // Si había supervisores notificados, generar aviso de cancelación y limpiar avisos previos de dispersión de esa semana
+      const newNotifications: PortalNotification[] = normalizedTargets.map(sup => ({
+        id: `notif_canc_${semanaNumero}_${sup.replace(/\s+/g, '_')}_${Date.now()}`,
+        targetSupervisor: sup,
+        semanaNumero,
+        semanaPeriodo: disp?.semanaPeriodo || '',
+        titulo: `⚠️ Nómina Semana ${semanaNumero} Cancelada y Cerrada — Lista ${sup}`,
+        mensaje: `La nómina de la Semana ${semanaNumero} ha sido cancelada y cerrada por ${canceladoPor}.${
+          motivo ? ` Motivo: ${motivo}` : ''
+        } La información obtenida fue eliminada del proceso activo.`,
+        enviadoPor: canceladoPor,
+        fechaEnvio: nowISO,
+        leida: false,
+        emailEnviado: true,
+      }));
+
+      const currentNotifications = this.loadNotifications().filter(
+        n => !(n.semanaNumero === semanaNumero && n.titulo?.includes('Dispersada'))
+      );
+      const updatedNotifications = [...newNotifications, ...currentNotifications].slice(0, 100);
+      this.safeSetLocalStorage(STORAGE_KEYS.NOTIFICATIONS, updatedNotifications);
+
+      this.pushToServer({
+        dispersals: remainingDispersals,
+        releases: remainingReleases,
+        notifications: updatedNotifications,
+      });
+
+      if (
+        normalizedTargets.length > 0 &&
+        typeof window !== 'undefined' &&
+        window.location.protocol !== 'file:'
+      ) {
+        fetch('/api/notifications/cancel-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            semanaNumero,
+            canceladoPor,
+            targetSupervisors: normalizedTargets,
+            motivo,
+          }),
+        }).catch(() => {});
+      }
+
+      return {
+        dispersal: undefined,
+        deletedDispersal: true,
+        newNotifications,
+      };
+    }
+
+    if (!disp || existingIndex < 0) {
+      return { deletedDispersal: false, newNotifications: [] };
+    }
 
     const updatedCancelled = Array.from(
       new Set([...(disp.supervisoresCancelados || []), ...normalizedTargets])
@@ -935,14 +1013,13 @@ export class PortalService {
     dispersals[existingIndex] = updatedDispersal;
     this.saveDispersals(dispersals);
 
-    // Revocar cualquier release existente para que no quede liberada
+    // Eliminar o revocar el release de la lista cancelada
     const releases = this.loadReleases();
     let releasesChanged = false;
     normalizedTargets.forEach(sup => {
       const releaseKey = `${semanaNumero}_${sup}`;
       if (releases[releaseKey]) {
-        releases[releaseKey].status = 'en_revision';
-        releases[releaseKey].notasRevision = `[CANCELACIÓN DE DISPERSIÓN] ${motivo || 'Dispersión cancelada por RH'}`;
+        delete releases[releaseKey];
         releasesChanged = true;
       }
     });
@@ -985,6 +1062,7 @@ export class PortalService {
 
     return {
       dispersal: updatedDispersal,
+      deletedDispersal: false,
       newNotifications,
     };
   }

@@ -514,16 +514,16 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
             </button>
           )}
 
-          {/* Botón Cancelar Dispersión (si hay listas dispersadas en la semana) */}
-          {dispersedListsCount > 0 && onCancelDispersal && (
+          {/* Botón Cancelar Nómina (cierra la nómina activa y borra la información ya obtenida) */}
+          {(dispersedListsCount > 0 || Boolean(currentDispersal) || empleados.length > 0) && onCancelDispersal && (
             <button
               type="button"
               onClick={() => handleOpenCancelModal('all')}
               className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-100 dark:hover:bg-rose-500/25 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-500/35 text-xs font-bold transition-all cursor-pointer"
-              title="Cancelar la dispersión de nómina de esta semana"
+              title="Cancelar y cerrar esta nómina borrando la información ya obtenida"
             >
               <Ban className="w-4 h-4 text-rose-500" />
-              <span>Cancelar Dispersión</span>
+              <span>Cancelar Nómina</span>
             </button>
           )}
 
@@ -1070,28 +1070,32 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
             <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
               <Ban className="w-5 h-5 shrink-0" />
               <span className="font-bold text-base text-slate-900 dark:text-white">
-                Cancelar Nómina Dispersada
+                {cancelTarget === 'all'
+                  ? 'Cancelar, Cerrar y Borrar Nómina'
+                  : 'Cancelar Dispersión de Lista'}
               </span>
             </div>
           }
           subtitle={`Semana ${semanaNumero} — ${
-            cancelTarget === 'all' ? 'Todas las listas' : `Lista de ${cancelTarget}`
+            cancelTarget === 'all' ? 'Cerrar nómina y borrar información obtenida' : `Lista de ${cancelTarget}`
           }`}
         >
           <div className="space-y-4">
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              Al cancelar la dispersión, la nómina quedará bloqueada para que el supervisor no pueda liberarla y se enviará un aviso de cancelación en el sistema.
+              {cancelTarget === 'all'
+                ? `Al cancelar esta nómina (Semana ${semanaNumero}), se cerrará la nómina activa y se borrará toda la información ya obtenida (cálculo de asistencia, dispersión, liberaciones y eventos cargados de esta semana) para que puedas cargarla o trabajarla de nuevo desde cero.`
+                : 'Al cancelar la dispersión de esta lista, quedará bloqueada para que el supervisor no pueda liberarla y se enviará un aviso de cancelación en el sistema.'}
             </p>
 
             <div>
               <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 block mb-1">
-                Motivo de la Cancelación:
+                Motivo de la Cancelación (Opcional):
               </label>
               <textarea
                 rows={3}
                 value={cancelMotivo}
                 onChange={(e) => setCancelMotivo(e.target.value)}
-                placeholder="Ej: No trabajó su nómina / Corrección solicitada por Dirección antes del cálculo final..."
+                placeholder="Ej: Corrección de archivo de checadas / Se volverá a procesar la nómina desde cero..."
                 className="w-full text-xs rounded-xl p-3 bg-slate-50 dark:bg-[#171821] border border-slate-200 dark:border-white/[0.08] text-slate-900 dark:text-white outline-none focus:border-rose-500 resize-none"
               />
             </div>
@@ -1110,7 +1114,9 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
                 className="px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider bg-rose-600 hover:bg-rose-500 text-white shadow-md cursor-pointer transition-all flex items-center gap-1.5"
               >
                 <Ban className="w-4 h-4" />
-                <span>Confirmar Cancelación</span>
+                <span>
+                  {cancelTarget === 'all' ? 'Cancelar y Borrar Nómina' : 'Confirmar Cancelación'}
+                </span>
               </button>
             </div>
           </div>
