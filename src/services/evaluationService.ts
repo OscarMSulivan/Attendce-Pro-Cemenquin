@@ -1,0 +1,946 @@
+/**
+ * Motor de cálculo, importación/exportación Excel y generación de formato imprimible
+ * para el módulo de Evaluaciones de Desempeño Anuales (CemenQtime).
+ */
+
+import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
+import saveAs from 'file-saver';
+import {
+  EVALUATION_COMPETENCIES,
+  INCIDENCE_METRIC_LABELS,
+  createEmptyCompetencies,
+  type CompetencyScore,
+  type EmployeeEvaluationIncidenceScores,
+  type EmployeeEvaluationIncidences,
+  type EmployeeEvaluationRecord,
+  type EvaluationCampaign,
+  type EvaluationCompetencyId,
+  type IncidenceMetricKey,
+  type IncidenceRuleBracket,
+  type IncidenceScoringRules,
+} from '../types/evaluations';
+
+const INCIDENCE_KEYS: IncidenceMetricKey[] = [
+  'faltas',
+  'incapacidades',
+  'retardos',
+  'permisos',
+];
+
+function round1(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+export function getMetricMaxPoints(brackets: IncidenceRuleBracket[]): number {
+  if (!Array.isArray(brackets) || brackets.length === 0) {
+    return 0;
+  }
+  let max = 0;
+  for (const bracket of brackets) {
+    if (Number.isFinite(bracket.puntos) && bracket.puntos > max) {
+      max = bracket.puntos;
+    }
+  }
+  return max;
+}
+
+export function getRulesMaxTotal(rules: IncidenceScoringRules): number {
+  let total = 0;
+  for (const key of INCIDENCE_KEYS) {
+    total += getMetricMaxPoints(rules[key]);
+  }
+  return total;
+}
+
+export function scoreIncidenceCount(
+  count: number,
+  brackets: IncidenceRuleBracket[],
+): number {
+  if (!Number.isFinite(count) || count < 0 || !Array.isArray(brackets) || brackets.length === 0) {
+    return 0;
+  }
+  for (const bracket of brackets) {
+    const meetsMin = count >= bracket.min;
+    const meetsMax = bracket.max === null || count <= bracket.max;
+    if (meetsMin && meetsMax) {
+      return Number.isFinite(bracket.puntos) ? bracket.puntos : 0;
+    }
+  }
+  return 0;
+}
+
+export interface CalculatedEvaluationScores {
+  puntajesIncidencias: EmployeeEvaluationIncidenceScores;
+  puntajeCompetencias: number;
+  porcentajeCompetencias: number;
+  calificacionFinal: number;
+  answeredCount: number;
+}
+
+export function calculateEvaluationScores(
+  incidencias: EmployeeEvaluationIncidences,
+  competencias: Record<EvaluationCompetencyId, CompetencyScore>,
+  rules: IncidenceScoringRules,
+): CalculatedEvaluationScores {
+  let puntajeCompetencias = 0;
+  let answeredCount = 0;
+
+  for (const comp of EVALUATION_COMPETENCIES) {
+    const score = competencias[comp.id];
+    if (score !== null && score !== undefined && Number.isFinite(score)) {
+      puntajeCompetencias += score;
+      answeredCount += 1;
+    }
+  }
+
+  puntajeCompetencias = round1(puntajeCompetencias);
+  const porcentajeCompetencias = round1((puntajeCompetencias / 10) * 100);
+
+  const valorFI = scoreIncidenceCount(incidencias.faltas, rules.faltas);
+  const valorINC = scoreIncidenceCount(incidencias.incapacidades, rules.incapacidades);
+  const valorRE = scoreIncidenceCount(incidencias.retardos, rules.retardos);
+  const valorPER = scoreIncidenceCount(incidencias.permisos, rules.permisos);
+
+  const total = round1(valorFI + valorINC + valorRE + valorPER);
+  const maxTotal = getRulesMaxTotal(rules);
+  const porcentaje = maxTotal > 0 ? round1((total / maxTotal) * 100) : 0;
+
+  const calificacionFinal = round1((porcentajeCompetencias + porcentaje) / 2);
+
+  return {
+    puntajesIncidencias: {
+      faltas: valorFI,
+      incapacidades: valorINC,
+      retardos: valorRE,
+      permisos: valorPER,
+      total,
+      maxTotal,
+      porcentaje,
+    },
+    puntajeCompetencias,
+    porcentajeCompetencias,
+    calificacionFinal,
+    answeredCount,
+  };
+}
+
+export function recalculateRecordWithRules(
+  record: EmployeeEvaluationRecord,
+  rules: IncidenceScoringRules,
+): EmployeeEvaluationRecord {
+  const scores = calculateEvaluationScores(
+    record.incidencias,
+    record.competencias,
+    rules,
+  );
+
+  return {
+    ...record,
+    puntajesIncidencias: scores.puntajesIncidencias,
+    puntajeCompetencias: scores.puntajeCompetencias,
+    porcentajeCompetencias: scores.porcentajeCompetencias,
+    calificacionFinal: scores.calificacionFinal,
+  };
+}
+
+function normalizeHeader(header: string): string {
+  return header
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+const HEADER_ALIASES = {
+  empleadoId: new Set([
+    'codigo',
+    'id',
+    'clave',
+    'empleadoid',
+    'noempleado',
+    'numeroempleado',
+    'numempleado',
+    'codigocolaborador',
+  ]),
+  nombre: new Set([
+    'nombre',
+    'nombredelcolaborador',
+    'nombrecolaborador',
+    'colaborador',
+    'empleado',
+    'nombrecompleto',
+  ]),
+  fechaIngreso: new Set([
+    'hiredate',
+    'fechadeingreso',
+    'fechaingreso',
+    'ingreso',
+    'fechaalta',
+    'antiguedad',
+  ]),
+  supervisor: new Set([
+    'supervisor',
+    'jefedirecto',
+    'jefe',
+    'evaluador',
+    'lider',
+    'encargado',
+  ]),
+  puesto: new Set(['puesto', 'cargo', 'posicion', 'puestodetrabajo']),
+  area: new Set([
+    'departamento',
+    'area',
+    'depto',
+    'ubicacion',
+    'sucursal',
+    'planta',
+  ]),
+  justificacion: new Set(['justificacion', 'motivo', 'concepto', 'tipo']),
+  faltas: new Set([
+    'fi',
+    'faltas',
+    'faltasinjustificadas',
+    'inasistencias',
+    'falta',
+  ]),
+  incapacidades: new Set([
+    'incint',
+    'incapacidades',
+    'incapacidad',
+    'incapacidadesinternas',
+    'inc',
+  ]),
+  retardos: new Set(['re', 'retardos', 'retardo', 'llegadastarde']),
+  permisos: new Set([
+    'pcgypsg',
+    'permisos',
+    'permiso',
+    'pcg',
+    'psg',
+    'permisosconysingose',
+    'permisosconysingoce',
+  ]),
+} as const;
+
+type ParsedFieldKey = keyof typeof HEADER_ALIASES;
+
+function matchFieldKey(rawHeader: string): ParsedFieldKey | null {
+  const norm = normalizeHeader(rawHeader);
+  if (!norm) return null;
+  for (const key of Object.keys(HEADER_ALIASES) as ParsedFieldKey[]) {
+    if (HEADER_ALIASES[key].has(norm)) {
+      return key;
+    }
+  }
+  return null;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function formatExcelDate(raw: unknown): string {
+  if (raw === null || raw === undefined || raw === '') {
+    return '';
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    const utcMs = (Math.floor(raw) - 25569) * 86400 * 1000;
+    const date = new Date(utcMs);
+    if (!Number.isNaN(date.getTime())) {
+      return `${pad2(date.getUTCDate())}/${pad2(date.getUTCMonth() + 1)}/${date.getUTCFullYear()}`;
+    }
+    return String(raw);
+  }
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+    return `${pad2(raw.getUTCDate())}/${pad2(raw.getUTCMonth() + 1)}/${raw.getUTCFullYear()}`;
+  }
+  const str = String(raw).trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  if (isoMatch) {
+    return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  }
+  return str;
+}
+
+function parseNonNegativeNumber(raw: unknown): number {
+  if (raw === null || raw === undefined || raw === '') {
+    return 0;
+  }
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw >= 0 ? raw : 0;
+  }
+  const cleaned = String(raw).trim().replace(',', '.');
+  const num = Number(cleaned);
+  return Number.isFinite(num) && num >= 0 ? num : 0;
+}
+
+function generateRecordId(campaignId: string, rowIndex: number, empleadoId?: string): string {
+  if (empleadoId) {
+    const safeEmp = empleadoId.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (safeEmp) {
+      return `eval_${campaignId}_${safeEmp}_${rowIndex}`;
+    }
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `eval_${campaignId}_${crypto.randomUUID()}`;
+  }
+  return `eval_${campaignId}_${Date.now()}_${rowIndex}`;
+}
+
+export function parseEvaluationsExcelBuffer(
+  buffer: ArrayBuffer,
+  campaignId: string,
+  rules: IncidenceScoringRules,
+): { records: EmployeeEvaluationRecord[]; warnings: string[] } {
+  const warnings: string[] = [];
+  const records: EmployeeEvaluationRecord[] = [];
+
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    warnings.push('El archivo Excel no contiene hojas de cálculo.');
+    return { records, warnings };
+  }
+
+  const sheet = workbook.Sheets[firstSheetName];
+  const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: '',
+    raw: true,
+  });
+
+  if (rawRows.length === 0) {
+    warnings.push('La hoja principal está vacía o no contiene filas de colaboradores.');
+    return { records, warnings };
+  }
+
+  const nowIso = new Date().toISOString();
+
+  rawRows.forEach((rawRow, idx) => {
+    const values = Object.values(rawRow);
+    const isEmptyRow = values.every((v) => v === null || v === undefined || String(v).trim() === '');
+    if (isEmptyRow) {
+      return;
+    }
+
+    const mapped: Partial<Record<ParsedFieldKey, unknown>> = {};
+    for (const [colHeader, cellValue] of Object.entries(rawRow)) {
+      const field = matchFieldKey(colHeader);
+      if (field && mapped[field] === undefined) {
+        mapped[field] = cellValue;
+      }
+    }
+
+    const nombre = String(mapped.nombre ?? '').trim();
+    if (!nombre) {
+      warnings.push(`Fila ${idx + 2}: omitida porque no contiene nombre del colaborador.`);
+      return;
+    }
+
+    const empleadoIdRaw = String(mapped.empleadoId ?? '').trim();
+    const empleadoId = empleadoIdRaw || undefined;
+    const fechaIngreso = formatExcelDate(mapped.fechaIngreso);
+    const supervisor = String(mapped.supervisor ?? '').trim();
+    const puesto = String(mapped.puesto ?? '').trim();
+    const area = String(mapped.area ?? '').trim();
+    const justificacionRaw = String(mapped.justificacion ?? '').trim();
+    const justificacion = justificacionRaw || 'Evaluación Anual.';
+
+    const incidencias: EmployeeEvaluationIncidences = {
+      faltas: parseNonNegativeNumber(mapped.faltas),
+      incapacidades: parseNonNegativeNumber(mapped.incapacidades),
+      retardos: parseNonNegativeNumber(mapped.retardos),
+      permisos: parseNonNegativeNumber(mapped.permisos),
+    };
+
+    const competencias = createEmptyCompetencies();
+    const scores = calculateEvaluationScores(incidencias, competencias, rules);
+
+    records.push({
+      id: generateRecordId(campaignId, idx + 1, empleadoId),
+      campaignId,
+      empleadoId,
+      nombre,
+      fechaIngreso,
+      supervisor,
+      puesto,
+      area,
+      justificacion,
+      incidencias,
+      puntajesIncidencias: scores.puntajesIncidencias,
+      competencias,
+      puntajeCompetencias: scores.puntajeCompetencias,
+      porcentajeCompetencias: scores.porcentajeCompetencias,
+      calificacionFinal: scores.calificacionFinal,
+      status: 'pendiente',
+      actualizadaEn: nowIso,
+    });
+  });
+
+  return { records, warnings };
+}
+
+export async function downloadEvaluationTemplateExcel(): Promise<void> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'CemenQtime';
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet('Base_Evaluaciones');
+  sheet.columns = [
+    { header: 'Codigo', key: 'Codigo', width: 12 },
+    { header: 'nombre', key: 'nombre', width: 32 },
+    { header: 'hireDate', key: 'hireDate', width: 15 },
+    { header: 'Supervisor', key: 'Supervisor', width: 26 },
+    { header: 'Puesto', key: 'Puesto', width: 24 },
+    { header: 'Departamento', key: 'Departamento', width: 22 },
+    { header: 'FI', key: 'FI', width: 10 },
+    { header: 'INC_Int', key: 'INC_Int', width: 12 },
+    { header: 'RE', key: 'RE', width: 10 },
+    { header: 'PCGyPSG', key: 'PCGyPSG', width: 12 },
+    { header: 'Justificacion', key: 'Justificacion', width: 22 },
+  ];
+
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  headerRow.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF1E3A5F' },
+  };
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  sheet.addRow({
+    Codigo: '1001',
+    nombre: 'Ejemplo Colaborador',
+    hireDate: '15/03/2021',
+    Supervisor: 'Nombre del Supervisor',
+    Puesto: 'Operador General',
+    Departamento: 'Producción',
+    FI: 0,
+    INC_Int: 0,
+    RE: 1,
+    PCGyPSG: 0,
+    Justificacion: 'Evaluación Anual.',
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  saveAs(blob, 'Plantilla_Evaluaciones_Desempeno.xlsx');
+}
+
+export async function exportEvaluationsSummaryExcel(
+  campaign: EvaluationCampaign,
+  records: EmployeeEvaluationRecord[],
+): Promise<void> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'CemenQtime';
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet('Resumen_Evaluaciones');
+
+  const baseColumns: Partial<ExcelJS.Column>[] = [
+    { header: 'Código', key: 'empleadoId', width: 12 },
+    { header: 'Colaborador', key: 'nombre', width: 30 },
+    { header: 'Fecha Ingreso', key: 'fechaIngreso', width: 14 },
+    { header: 'Supervisor', key: 'supervisor', width: 24 },
+    { header: 'Puesto', key: 'puesto', width: 22 },
+    { header: 'Área', key: 'area', width: 20 },
+    { header: 'Estado', key: 'status', width: 14 },
+    { header: 'Fecha Evaluación', key: 'fechaEvaluacion', width: 16 },
+    { header: 'Evaluado Por', key: 'evaluadoPor', width: 22 },
+  ];
+
+  const competencyColumns: Partial<ExcelJS.Column>[] = EVALUATION_COMPETENCIES.map((c) => ({
+    header: c.criterio,
+    key: `comp_${c.id}`,
+    width: 16,
+  }));
+
+  const scoreColumns: Partial<ExcelJS.Column>[] = [
+    { header: 'Puntaje Comp. (/10)', key: 'puntajeCompetencias', width: 18 },
+    { header: '% Competencias', key: 'porcentajeCompetencias', width: 16 },
+    { header: INCIDENCE_METRIC_LABELS.faltas.excelCode, key: 'fi', width: 10 },
+    { header: 'Valor FI', key: 'valorFi', width: 10 },
+    { header: INCIDENCE_METRIC_LABELS.incapacidades.excelCode, key: 'inc', width: 10 },
+    { header: 'Valor INC', key: 'valorInc', width: 10 },
+    { header: INCIDENCE_METRIC_LABELS.retardos.excelCode, key: 're', width: 10 },
+    { header: 'Valor RE', key: 'valorRe', width: 10 },
+    { header: INCIDENCE_METRIC_LABELS.permisos.excelCode, key: 'per', width: 12 },
+    { header: 'Valor PER', key: 'valorPer', width: 10 },
+    { header: 'Total Incidencias', key: 'totalInc', width: 16 },
+    { header: '% Incidencias', key: 'porcentajeInc', width: 14 },
+    { header: 'Calificación Final (%)', key: 'calificacionFinal', width: 20 },
+    { header: 'Comentarios Evaluador', key: 'comentarios', width: 34 },
+  ];
+
+  sheet.columns = [...baseColumns, ...competencyColumns, ...scoreColumns];
+
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  headerRow.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF1E3A5F' },
+  };
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+  for (const record of records) {
+    const rowData: Record<string, string | number> = {
+      empleadoId: record.empleadoId ?? '',
+      nombre: record.nombre,
+      fechaIngreso: record.fechaIngreso,
+      supervisor: record.supervisor,
+      puesto: record.puesto,
+      area: record.area,
+      status: record.status,
+      fechaEvaluacion: record.fechaEvaluacion ?? '',
+      evaluadoPor: record.evaluadoPor ?? '',
+      puntajeCompetencias: record.puntajeCompetencias,
+      porcentajeCompetencias: record.porcentajeCompetencias,
+      fi: record.incidencias.faltas,
+      valorFi: record.puntajesIncidencias.faltas,
+      inc: record.incidencias.incapacidades,
+      valorInc: record.puntajesIncidencias.incapacidades,
+      re: record.incidencias.retardos,
+      valorRe: record.puntajesIncidencias.retardos,
+      per: record.incidencias.permisos,
+      valorPer: record.puntajesIncidencias.permisos,
+      totalInc: `${record.puntajesIncidencias.total}/${record.puntajesIncidencias.maxTotal}`,
+      porcentajeInc: record.puntajesIncidencias.porcentaje,
+      calificacionFinal: record.calificacionFinal,
+      comentarios: record.comentariosEvaluador ?? '',
+    };
+
+    for (const comp of EVALUATION_COMPETENCIES) {
+      const score = record.competencias[comp.id];
+      rowData[`comp_${comp.id}`] = score === null ? '' : score;
+    }
+
+    sheet.addRow(rowData);
+  }
+
+  const safeName = campaign.nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  saveAs(blob, `Evaluaciones_${safeName || 'Campana'}_${campaign.anioEmision}.xlsx`);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderCompetencyCell(label: string, isSelected: boolean): string {
+  const mark = isSelected ? '<span class="x-mark">X</span>' : '';
+  return `<td class="opt-cell${isSelected ? ' selected' : ''}">
+    <div class="opt-label">${escapeHtml(label)}</div>
+    <div class="opt-box">${mark}</div>
+  </td>`;
+}
+
+function renderSingleEvaluationPage(
+  campaign: EvaluationCampaign,
+  record: EmployeeEvaluationRecord,
+  logoUrl: string,
+  isLast: boolean,
+): string {
+  const competencyRows = EVALUATION_COMPETENCIES.map((comp) => {
+    const score = record.competencias[comp.id];
+    const scoreDisplay = score === null ? '' : String(score);
+    return `<tr>
+      <td class="criterio-cell">${escapeHtml(comp.criterio)}</td>
+      <td class="pregunta-cell">${escapeHtml(comp.pregunta)}</td>
+      ${renderCompetencyCell(comp.labels['1'], score === 1)}
+      ${renderCompetencyCell(comp.labels['0.5'], score === 0.5)}
+      ${renderCompetencyCell(comp.labels['0'], score === 0)}
+      <td class="score-cell">${escapeHtml(scoreDisplay)}</td>
+    </tr>`;
+  }).join('\n');
+
+  const incidenceRows = INCIDENCE_KEYS.map((key) => {
+    const meta = INCIDENCE_METRIC_LABELS[key];
+    const count = record.incidencias[key];
+    const score = record.puntajesIncidencias[key];
+    return `<tr>
+      <td>${escapeHtml(meta.label)}</td>
+      <td class="num-cell">${escapeHtml(String(count))}</td>
+      <td class="num-cell">${escapeHtml(String(score))}</td>
+    </tr>`;
+  }).join('\n');
+
+  const evaluatorCommentsHtml = record.comentariosEvaluador?.trim()
+    ? `<div class="comments-box">
+        <strong>Comentarios del evaluador:</strong>
+        <p>${escapeHtml(record.comentariosEvaluador.trim())}</p>
+      </div>`
+    : '';
+
+  const pageClass = isLast ? 'eval-page eval-page-last' : 'eval-page';
+
+  return `<section class="${pageClass}">
+    <table class="header-table">
+      <tr>
+        <td class="logo-cell" rowspan="2">
+          <img src="${escapeHtml(logoUrl)}" alt="Cemenquin" class="logo-img" />
+        </td>
+        <td class="title-top">FORMATO</td>
+        <td class="year-cell" rowspan="2">
+          <div class="year-label">AÑO DE EMISIÓN</div>
+          <div class="year-value">${escapeHtml(String(campaign.anioEmision))}</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="title-main">EVALUACIÓN DE DESEMPEÑO</td>
+      </tr>
+    </table>
+
+    <table class="meta-table">
+      <tr>
+        <td colspan="2"><strong>Nombre del colaborador:</strong> ${escapeHtml(record.nombre)}</td>
+        <td><strong>Fecha de evaluación:</strong> ${escapeHtml(record.fechaEvaluacion ?? '')}</td>
+      </tr>
+      <tr>
+        <td><strong>Fecha de ingreso:</strong> ${escapeHtml(record.fechaIngreso)}</td>
+        <td><strong>Supervisor:</strong> ${escapeHtml(record.supervisor)}</td>
+        <td><strong>Puesto:</strong> ${escapeHtml(record.puesto)}</td>
+      </tr>
+      <tr>
+        <td colspan="2"><strong>Justificación:</strong> ${escapeHtml(record.justificacion)}</td>
+        <td><strong>Área:</strong> ${escapeHtml(record.area)}</td>
+      </tr>
+    </table>
+
+    <p class="instruction">
+      <strong>Instrucciones.</strong> 1.- Marcar con una (X) la casilla según el desempeño del colaborador, anotando el puntaje correspondiente en la última columna evaluación por competencias (50%).
+    </p>
+
+    <table class="comp-table">
+      <thead>
+        <tr>
+          <th style="width: 17%;">Criterio</th>
+          <th style="width: 38%;">Pregunta</th>
+          <th style="width: 12%;">1</th>
+          <th style="width: 12%;">0.5</th>
+          <th style="width: 12%;">0</th>
+          <th style="width: 9%;">Puntaje</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${competencyRows}
+        <tr class="total-row">
+          <td colspan="5" class="total-label">Puntaje total</td>
+          <td class="score-cell">${escapeHtml(String(record.puntajeCompetencias))}/10</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="instruction">
+      2.- A continuación, aparecerá la suma del puntaje conforme al acumulado de inasistencias, incapacidades internas y retardos durante el año ${escapeHtml(String(campaign.anioIncidencias))}.
+    </p>
+
+    <div class="bottom-grid">
+      <table class="inc-table">
+        <thead>
+          <tr>
+            <th colspan="3">Incidencias ${escapeHtml(String(campaign.anioIncidencias))} (50%)</th>
+          </tr>
+          <tr>
+            <th>Concepto</th>
+            <th>Cantidad</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${incidenceRows}
+          <tr class="total-row">
+            <td colspan="2" class="total-label">Puntaje total incidencias</td>
+            <td class="num-cell">${escapeHtml(String(record.puntajesIncidencias.total))}/${escapeHtml(String(record.puntajesIncidencias.maxTotal))}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="summary-wrapper">
+        <table class="summary-table">
+          <thead>
+            <tr>
+              <th colspan="2">RESUMEN FINAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Evaluación por competencias</td>
+              <td class="num-cell">${escapeHtml(String(record.porcentajeCompetencias))}%</td>
+            </tr>
+            <tr>
+              <td>Puntaje total incidencias</td>
+              <td class="num-cell">${escapeHtml(String(record.puntajesIncidencias.porcentaje))}%</td>
+            </tr>
+            <tr class="final-row">
+              <td>Calificación final</td>
+              <td class="num-cell">${escapeHtml(String(record.calificacionFinal))}%</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="instruction small-note">
+          3.- Finalmente, se realizará promedio de la evaluación por competencias y el puntaje total de incidencias.
+        </p>
+      </div>
+    </div>
+
+    ${evaluatorCommentsHtml}
+
+    <div class="signature-block">
+      <div class="signature-line">${escapeHtml(record.evaluadoPor ?? '')}</div>
+      <div class="signature-label">NOMBRE Y FIRMA DEL EVALUADOR</div>
+    </div>
+  </section>`;
+}
+
+export function buildPrintableEvaluationHtml(
+  campaign: EvaluationCampaign,
+  records: EmployeeEvaluationRecord[],
+  logoUrl = '/assets/cemenquin-eval-logo.png',
+): string {
+  const pagesHtml = records
+    .map((record, index) =>
+      renderSingleEvaluationPage(
+        campaign,
+        record,
+        logoUrl,
+        index === records.length - 1,
+      ),
+    )
+    .join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Evaluación de Desempeño - ${escapeHtml(campaign.nombre)}</title>
+  <style>
+    @page {
+      size: letter portrait;
+      margin: 10mm;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #111827;
+      margin: 0;
+      padding: 0;
+      font-size: 10.5px;
+      line-height: 1.3;
+      background: #ffffff;
+    }
+    .eval-page {
+      width: 100%;
+      page-break-after: always;
+      break-after: page;
+      padding-bottom: 6px;
+    }
+    .eval-page-last {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #374151;
+      padding: 4px 6px;
+      vertical-align: middle;
+    }
+    .header-table {
+      margin-bottom: 8px;
+    }
+    .logo-cell {
+      width: 24%;
+      text-align: center;
+    }
+    .logo-img {
+      max-width: 140px;
+      max-height: 48px;
+      object-fit: contain;
+    }
+    .title-top {
+      text-align: center;
+      font-weight: bold;
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      background: #f3f4f6;
+    }
+    .title-main {
+      text-align: center;
+      font-weight: bold;
+      font-size: 14px;
+      color: #1e3a5f;
+    }
+    .year-cell {
+      width: 18%;
+      text-align: center;
+    }
+    .year-label {
+      font-size: 9px;
+      font-weight: bold;
+      color: #4b5563;
+    }
+    .year-value {
+      font-size: 15px;
+      font-weight: bold;
+      color: #1e3a5f;
+    }
+    .meta-table {
+      margin-bottom: 8px;
+      font-size: 10px;
+    }
+    .instruction {
+      margin: 6px 0;
+      font-size: 10px;
+    }
+    .small-note {
+      font-size: 9.5px;
+      margin-top: 6px;
+    }
+    .comp-table th {
+      background: #1e3a5f;
+      color: #ffffff;
+      text-align: center;
+      font-size: 10px;
+    }
+    .criterio-cell {
+      font-weight: bold;
+      font-size: 10px;
+    }
+    .pregunta-cell {
+      font-size: 9.8px;
+    }
+    .opt-cell {
+      text-align: center;
+      padding: 3px 4px;
+    }
+    .opt-cell.selected {
+      background: #eff6ff;
+    }
+    .opt-label {
+      font-size: 9px;
+      color: #374151;
+    }
+    .opt-box {
+      min-height: 14px;
+      font-weight: bold;
+      font-size: 11px;
+      color: #1e3a5f;
+    }
+    .x-mark {
+      font-weight: bold;
+    }
+    .score-cell, .num-cell {
+      text-align: center;
+      font-weight: bold;
+    }
+    .total-row td {
+      background: #f3f4f6;
+      font-weight: bold;
+    }
+    .total-label {
+      text-align: right;
+    }
+    .bottom-grid {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-top: 6px;
+    }
+    .inc-table {
+      width: 52%;
+    }
+    .inc-table th, .summary-table th {
+      background: #1e3a5f;
+      color: #ffffff;
+      text-align: center;
+      font-size: 10px;
+    }
+    .summary-wrapper {
+      width: 48%;
+    }
+    .final-row td {
+      background: #dbeafe;
+      font-weight: bold;
+      font-size: 11.5px;
+    }
+    .comments-box {
+      margin-top: 8px;
+      border: 1px solid #9ca3af;
+      padding: 6px 8px;
+      font-size: 10px;
+    }
+    .comments-box p {
+      margin: 4px 0 0 0;
+      white-space: pre-wrap;
+    }
+    .signature-block {
+      margin-top: 28px;
+      text-align: center;
+    }
+    .signature-line {
+      width: 280px;
+      min-height: 18px;
+      margin: 0 auto 4px auto;
+      border-bottom: 1px solid #111827;
+      font-size: 10px;
+    }
+    .signature-label {
+      font-weight: bold;
+      font-size: 10px;
+      letter-spacing: 0.4px;
+    }
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+${pagesHtml}
+</body>
+</html>`;
+}
+
+export function printEvaluations(
+  campaign: EvaluationCampaign,
+  records: EmployeeEvaluationRecord[],
+): void {
+  if (typeof window === 'undefined' || records.length === 0) {
+    return;
+  }
+  const html = buildPrintableEvaluationHtml(campaign, records);
+  const printWindow = window.open('', '_blank', 'width=960,height=1100');
+  if (!printWindow) {
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => {
+    printWindow.print();
+  }, 250);
+}
