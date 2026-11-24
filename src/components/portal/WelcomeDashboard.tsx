@@ -20,6 +20,7 @@ import {
   Zap,
   Sparkles,
   TrendingUp,
+  Award,
 } from 'lucide-react';
 import {
   PortalUser,
@@ -601,6 +602,32 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
               </div>
               <div className="flex items-center text-xs font-bold text-[#FEB95A] mt-4 pt-3 border-t border-white/[0.05]">
                 <span>Abrir Incidencias</span>
+                <ArrowRight className="w-4 h-4 ml-auto group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+          )}
+
+          {/* Módulo: Evaluaciones Anuales de Desempeño */}
+          {userHasModuleAccess(currentUser, 'evaluaciones') && (
+            <div
+              onClick={() => onNavigateTab('evaluaciones')}
+              className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
+            >
+              <div>
+                <div className="w-11 h-11 rounded-xl bg-[#A9DFD8]/15 border border-[#A9DFD8]/30 flex items-center justify-center text-[#A9DFD8] mb-3.5 group-hover:scale-105 transition-transform">
+                  <Award className="w-5 h-5" />
+                </div>
+                <h4 className="text-sm font-extrabold text-white group-hover:text-[#A9DFD8] transition-colors">
+                  Evaluaciones Anuales
+                </h4>
+                <p className="text-xs text-[#87888C] mt-1 leading-relaxed">
+                  {isSupervisor
+                    ? 'Evalúa las 10 competencias de tu equipo asignado y descarga el formato oficial.'
+                    : 'Gestiona campañas anuales, equivalencias de incidencias (/20), avance por supervisor y formatos PDF.'}
+                </p>
+              </div>
+              <div className="flex items-center text-xs font-bold text-[#A9DFD8] mt-4 pt-3 border-t border-white/[0.05]">
+                <span>Abrir Evaluaciones</span>
                 <ArrowRight className="w-4 h-4 ml-auto group-hover:translate-x-1 transition-transform" />
               </div>
             </div>
