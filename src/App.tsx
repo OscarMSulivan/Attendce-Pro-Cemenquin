@@ -103,6 +103,9 @@ const ContpaqiExportView = React.lazy(() =>
 const PixelOfficeMonitorView = React.lazy(() =>
   import('./components/portal/PixelOfficeMonitorView').then(m => ({ default: m.PixelOfficeMonitorView }))
 );
+const EvaluationsModuleView = React.lazy(() =>
+  import('./components/portal/evaluations/EvaluationsModuleView').then(m => ({ default: m.EvaluationsModuleView }))
+);
 import { PortalService } from './services/portalService';
 import { PushNotificationService } from './services/pushNotificationService';
 import {
@@ -121,6 +124,10 @@ import {
   userHasAnyAdminPanelAccess,
   doesIncidentSkipRHValidation,
 } from './types/portal';
+import {
+  EvaluationCampaign,
+  EmployeeEvaluationRecord,
+} from './types/evaluations';
 import { ListChecks, Send, Mail, CheckCircle2 } from 'lucide-react';
 import { ToastContainer, ToastItem, ToastType } from './components/Toast';
 
@@ -241,6 +248,12 @@ export default function App() {
   const [releases, setReleases] = useState<Record<string, PayrollRelease>>(() => PortalService.loadReleases());
   const [dispersals, setDispersals] = useState<PayrollDispersal[]>(() => PortalService.loadDispersals());
   const [notifications, setNotifications] = useState<PortalNotification[]>(() => PortalService.loadNotifications());
+  const [evaluationCampaigns, setEvaluationCampaigns] = useState<EvaluationCampaign[]>(() =>
+    PortalService.getEvaluationCampaigns()
+  );
+  const [evaluationRecords, setEvaluationRecords] = useState<EmployeeEvaluationRecord[]>(() =>
+    PortalService.getEvaluationRecords()
+  );
   const [emailConfig, setEmailConfig] = useState<EmailServerConfig>(() => PortalService.loadEmailConfig());
   const [isNewIncidentModalOpen, setIsNewIncidentModalOpen] = useState<boolean>(false);
   const [initialIncidentEmployeeId, setInitialIncidentEmployeeId] = useState<string | undefined>(undefined);
@@ -286,6 +299,12 @@ export default function App() {
           }
           if (serverData.notifications) {
             setNotifications(serverData.notifications);
+          }
+          if (Array.isArray(serverData.evaluationCampaigns)) {
+            setEvaluationCampaigns(serverData.evaluationCampaigns);
+          }
+          if (Array.isArray(serverData.evaluationRecords)) {
+            setEvaluationRecords(serverData.evaluationRecords);
           }
           const localHorarios = StorageService.loadHorarios();
           const hydratedHorarios: Record<string, ScheduleConfig> = {
@@ -1247,6 +1266,16 @@ export default function App() {
           });
         }
       }
+
+      // 8. Sincronizar campañas y registros de Evaluaciones Anuales en tiempo real
+      if (Array.isArray(incomingState.evaluationCampaigns)) {
+        PortalService.saveEvaluationCampaigns(incomingState.evaluationCampaigns, { skipSync: true });
+        setEvaluationCampaigns(incomingState.evaluationCampaigns);
+      }
+      if (Array.isArray(incomingState.evaluationRecords)) {
+        PortalService.saveEvaluationRecords(incomingState.evaluationRecords, { skipSync: true });
+        setEvaluationRecords(incomingState.evaluationRecords);
+      }
     });
 
     return () => {
@@ -1357,6 +1386,7 @@ export default function App() {
       empleados: 'Consultando Padrón Multi-Empresa y Listas',
       semaforo: 'Auditando Semáforo de Liberación RH',
       incidencias: 'Revisando Bandeja de Incidencias',
+      evaluaciones: 'Gestionando Evaluaciones Anuales',
       contpaqi: 'Preparando exportación CONTPAQi',
       usuarios: 'En Configuración de Usuarios y Accesos',
     };
@@ -4598,6 +4628,27 @@ export default function App() {
     }).length;
   }, [supervisorsList, currentWeekNumber, releases]);
 
+  const pendingEvaluationsCount = useMemo(() => {
+    const activeCampaignIds = new Set(
+      evaluationCampaigns.filter(c => c.status === 'activa').map(c => c.id)
+    );
+    if (activeCampaignIds.size === 0) return 0;
+
+    const allowedSupSet =
+      currentUser?.role === 'supervisor'
+        ? new Set(getUserAllowedLists(currentUser).map(normalizeSupervisorName))
+        : null;
+
+    return evaluationRecords.filter(rec => {
+      if (!activeCampaignIds.has(rec.campaignId)) return false;
+      if (rec.status === 'completada') return false;
+      if (allowedSupSet) {
+        return allowedSupSet.has(normalizeSupervisorName(rec.supervisor));
+      }
+      return true;
+    }).length;
+  }, [evaluationCampaigns, evaluationRecords, currentUser]);
+
   // Supervisores presentes en la lista activa en pantalla para dispersión directa en 1 clic (sin pop-up)
   const activeListSupervisors = useMemo(() => {
     if (selectedSupervisor) return [selectedSupervisor];
@@ -4819,6 +4870,7 @@ export default function App() {
         onTabChange={handleNavigatePortalTab}
         pendingIncidentsCount={pendingIncidentsCount}
         pendingReleasesCount={pendingReleasesCount}
+        pendingEvaluationsCount={pendingEvaluationsCount}
         onlineUsersCount={onlineUsersCount}
         onOpenSchedules={() => setIsSchedulesOpen(true)}
         onOpenAssign={() => setIsAssignOpen(true)}
@@ -5184,6 +5236,20 @@ export default function App() {
                   onApproveIncident={handleApproveIncident}
                   onRejectIncident={handleRejectIncident}
                   onOpenAssignSchedules={() => setIsAssignOpen(true)}
+                />
+              )}
+
+              {portalTab === 'evaluaciones' && userHasModuleAccess(currentUser, 'evaluaciones') && (
+                <EvaluationsModuleView
+                  currentUser={currentUser}
+                  campaigns={evaluationCampaigns}
+                  records={evaluationRecords}
+                  onSaveBundle={(nextCampaigns, nextRecords) => {
+                    setEvaluationCampaigns(nextCampaigns);
+                    setEvaluationRecords(nextRecords);
+                    PortalService.saveEvaluationsBundle(nextCampaigns, nextRecords);
+                  }}
+                  onShowToast={(msg, type = 'info') => showToast(msg, type)}
                 />
               )}
 

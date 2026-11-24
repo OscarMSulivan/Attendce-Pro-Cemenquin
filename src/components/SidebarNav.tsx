@@ -27,6 +27,7 @@ import {
   ListChecks,
   Radio,
   X,
+  Award,
 } from 'lucide-react';
 import { UserRole, PortalUser, PortalModule, userHasModuleAccess, userHasAnyAdminPanelAccess } from '../types/portal';
 
@@ -37,6 +38,7 @@ interface SidebarNavProps {
   currentUser?: PortalUser;
   pendingIncidentsCount: number;
   pendingReleasesCount: number;
+  pendingEvaluationsCount?: number;
   onlineUsersCount?: number;
   onOpenSchedules: () => void;
   onOpenAssign: () => void;
@@ -60,6 +62,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   currentUser,
   pendingIncidentsCount,
   pendingReleasesCount,
+  pendingEvaluationsCount = 0,
   onlineUsersCount = 0,
   onOpenSchedules,
   onOpenAssign,
@@ -159,6 +162,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       isActive: activeTab === 'incidencias',
       badge: pendingIncidentsCount,
       show: checkAccess('incidencias'),
+    },
+    {
+      id: 'evaluaciones',
+      label: 'Evaluaciones Anuales',
+      icon: Award,
+      onClick: () => handleAction(() => onTabChange('evaluaciones')),
+      isActive: activeTab === 'evaluaciones',
+      badge: pendingEvaluationsCount,
+      show: checkAccess('evaluaciones'),
     },
     {
       id: 'contpaqi',

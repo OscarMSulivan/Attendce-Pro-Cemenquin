@@ -451,6 +451,8 @@ function writeDatabase(partial) {
   if (cleanPartial.resumen === null && !explicitClearReportes && current.resumen) {
     cleanPartial.resumen = current.resumen;
   }
+  const mergedEvaluationCampaigns = Array.isArray(partial.evaluationCampaigns) ? partial.evaluationCampaigns : current.evaluationCampaigns;
+  const mergedEvaluationRecords = Array.isArray(partial.evaluationRecords) ? partial.evaluationRecords : current.evaluationRecords;
   const updated = {
     ...current,
     ...cleanPartial,
@@ -467,6 +469,8 @@ function writeDatabase(partial) {
     ...mergedDispersals ? { dispersals: mergedDispersals } : {},
     ...mergedConfig ? { config: mergedConfig } : {},
     ...mergedEmailConfig ? { emailConfig: mergedEmailConfig } : {},
+    ...mergedEvaluationCampaigns !== void 0 ? { evaluationCampaigns: mergedEvaluationCampaigns } : {},
+    ...mergedEvaluationRecords !== void 0 ? { evaluationRecords: mergedEvaluationRecords } : {},
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, "offload");
@@ -856,11 +860,13 @@ async function startServer() {
         ...Array.isArray(body.deletedHorarioCodes) ? { deletedHorarioCodes: body.deletedHorarioCodes } : {},
         ...body.asignaciones && typeof body.asignaciones === "object" ? { asignaciones: body.asignaciones } : {},
         ...body.config && typeof body.config === "object" ? { config: body.config } : {},
-        ...body.emailConfig && typeof body.emailConfig === "object" ? { emailConfig: body.emailConfig } : emailServerFromConfig ? { emailConfig: emailServerFromConfig } : {}
+        ...body.emailConfig && typeof body.emailConfig === "object" ? { emailConfig: body.emailConfig } : emailServerFromConfig ? { emailConfig: emailServerFromConfig } : {},
+        ...Array.isArray(body.evaluationCampaigns) ? { evaluationCampaigns: body.evaluationCampaigns } : {},
+        ...Array.isArray(body.evaluationRecords) ? { evaluationRecords: body.evaluationRecords } : {}
       });
       const hasEmployeeChanges = body.empleadosDB && typeof body.empleadosDB === "object" || Array.isArray(body.deletedEmployeeIds);
       const shouldBroadcastReportes = Array.isArray(body.reportes) && (body.reportes.length > 0 || Boolean(body.clearReportes)) || Array.isArray(body.dispersals) && Array.isArray(updated.reportes) && updated.reportes.length > 0;
-      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || shouldBroadcastReportes || Array.isArray(body.users) || hasEmployeeChanges;
+      const hasRealtimeRelevantChanges = Array.isArray(body.incidents) || Array.isArray(body.dispersals) || Array.isArray(body.notifications) || body.releases && typeof body.releases === "object" || shouldBroadcastReportes || Array.isArray(body.users) || hasEmployeeChanges || Array.isArray(body.evaluationCampaigns) || Array.isArray(body.evaluationRecords);
       if (hasRealtimeRelevantChanges) {
         broadcastRealtimeEvent({
           type: "portal_sync",
@@ -871,6 +877,8 @@ async function startServer() {
             ...body.releases && typeof body.releases === "object" ? { releases: updated.releases } : {},
             ...Array.isArray(body.dispersals) ? { dispersals: updated.dispersals } : {},
             ...Array.isArray(body.notifications) ? { notifications: updated.notifications } : {},
+            ...Array.isArray(body.evaluationCampaigns) ? { evaluationCampaigns: updated.evaluationCampaigns } : {},
+            ...Array.isArray(body.evaluationRecords) ? { evaluationRecords: updated.evaluationRecords } : {},
             ...hasEmployeeChanges ? {
               empleadosDB: updated.empleadosDB,
               asignaciones: updated.asignaciones

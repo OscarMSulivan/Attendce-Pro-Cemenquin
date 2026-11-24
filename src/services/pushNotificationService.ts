@@ -50,6 +50,8 @@ export interface RealtimePortalPayload {
     selectedWeek?: string;
     empleadosDB?: Record<string, any>;
     asignaciones?: Record<string, string>;
+    evaluationCampaigns?: any[];
+    evaluationRecords?: any[];
   };
   presence?: Record<string, UserLivePresence>;
   activityFeed?: LiveActivityLogEntry[];

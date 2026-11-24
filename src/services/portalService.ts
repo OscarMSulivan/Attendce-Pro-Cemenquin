@@ -270,6 +270,8 @@ export class PortalService {
         reportes: payload.reportes as any[] | undefined,
         resumen: payload.resumen,
         selectedWeek: payload.selectedWeek as string | undefined,
+        evaluationCampaigns: payload.evaluationCampaigns as EvaluationCampaign[] | undefined,
+        evaluationRecords: payload.evaluationRecords as EmployeeEvaluationRecord[] | undefined,
       },
     });
     fetch('/api/portal/sync', {
