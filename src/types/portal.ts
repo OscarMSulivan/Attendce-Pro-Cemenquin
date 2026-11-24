@@ -11,6 +11,7 @@ export type PortalModule =
   | 'empleados'         // Padrón Permanente de Empleados y Asignación de Listas (Multi-Empresa)
   | 'semaforo'          // Semáforo de Nóminas y Monitoreo
   | 'incidencias'       // Bandeja de Incidencias
+  | 'evaluaciones'      // Evaluaciones Anuales de Desempeño
   | 'contpaqi'          // Exportador CONTPAQi® Nóminas
   | 'tiempo_extra'      // Configuración de Reglas de Tiempo Extra
   | 'tiempo_limite'     // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
@@ -24,6 +25,7 @@ export const ALL_PORTAL_MODULES: PortalModule[] = [
   'empleados',
   'semaforo',
   'incidencias',
+  'evaluaciones',
   'contpaqi',
   'tiempo_extra',
   'tiempo_limite',
@@ -57,6 +59,11 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
     short: 'Incidencias',
     title: 'Bandeja de Incidencias',
     description: 'Solicitudes, permisos y validación de formatos',
+  },
+  evaluaciones: {
+    short: 'Evaluaciones Anuales',
+    title: 'Evaluaciones Anuales de Desempeño',
+    description: 'Gestionar campañas anuales, equivalencias de incidencias y evaluar competencias del equipo',
   },
   contpaqi: {
     short: 'CONTPAQi',
@@ -128,7 +135,7 @@ export function getUserAllowedModules(user: PortalUser): PortalModule[] {
       user.allowedModules.includes('nomina') &&
       user.allowedModules.includes('incidencias')
     ) {
-      return ['trabajar_listas', 'incidencias'];
+      return ['trabajar_listas', 'incidencias', 'evaluaciones'];
     }
     // Migración transparente: usuarios RH o con permiso de Dispersión ('nomina') obtienen acceso al Padrón ('empleados')
     if (
@@ -145,6 +152,7 @@ export function getUserAllowedModules(user: PortalUser): PortalModule[] {
       'empleados',
       'semaforo',
       'incidencias',
+      'evaluaciones',
       'contpaqi',
       'tiempo_extra',
       'tiempo_limite',
@@ -152,7 +160,7 @@ export function getUserAllowedModules(user: PortalUser): PortalModule[] {
       'smtp_correo',
     ];
   }
-  return ['trabajar_listas', 'incidencias'];
+  return ['trabajar_listas', 'incidencias', 'evaluaciones'];
 }
 
 export function userHasModuleAccess(user: PortalUser, module: PortalModule): boolean {

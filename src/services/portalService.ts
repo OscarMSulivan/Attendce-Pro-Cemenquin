@@ -13,6 +13,10 @@ import {
   PortalUser,
   getUserAllowedLists,
 } from '../types/portal';
+import {
+  EmployeeEvaluationRecord,
+  EvaluationCampaign,
+} from '../types/evaluations';
 import { getDateRangeISO, normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarUtils';
 import { PushNotificationService } from './pushNotificationService';
 
@@ -26,6 +30,8 @@ const STORAGE_KEYS = {
   DISPERSALS: 'attendancePro_portal_dispersals_v1',
   NOTIFICATIONS: 'attendancePro_portal_notifications_v1',
   EMAIL_CONFIG: 'attendancePro_portal_email_config_v1',
+  EVALUATION_CAMPAIGNS: 'attendancePro_portal_eval_campaigns_v1',
+  EVALUATION_RECORDS: 'attendancePro_portal_eval_records_v1',
 };
 
 export const DEFAULT_USERS: PortalUser[] = [
@@ -374,6 +380,8 @@ export class PortalService {
     horarios?: Record<string, any>;
     asignaciones?: Record<string, string>;
     config?: Record<string, any>;
+    evaluationCampaigns?: EvaluationCampaign[];
+    evaluationRecords?: EmployeeEvaluationRecord[];
     serverInfo?: { hostname: string; uptime: number; storagePath: string };
   } | null> {
     if (typeof window === 'undefined' || window.location.protocol === 'file:') return null;
@@ -445,12 +453,55 @@ export class PortalService {
         this.cacheNotifications(data.notifications);
       }
 
-      // Si el servidor tenía menos usuarios o dispersiones que el almacenamiento local (ej. tras un push / redeploy),
+      // 6. Evaluaciones Anuales (campañas y registros)
+      const localEvalCampaigns = this.getEvaluationCampaigns();
+      const srvEvalCampaigns: EvaluationCampaign[] | null = Array.isArray(data.evaluationCampaigns)
+        ? data.evaluationCampaigns
+        : null;
+      let resolvedEvalCampaigns: EvaluationCampaign[] | undefined;
+      let evalCampaignsNeedSync = false;
+      if (srvEvalCampaigns && srvEvalCampaigns.length > 0) {
+        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, srvEvalCampaigns);
+        resolvedEvalCampaigns = srvEvalCampaigns;
+      } else if (localEvalCampaigns.length > 0) {
+        resolvedEvalCampaigns = localEvalCampaigns;
+        evalCampaignsNeedSync = true;
+      } else if (srvEvalCampaigns) {
+        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, srvEvalCampaigns);
+        resolvedEvalCampaigns = srvEvalCampaigns;
+      }
+      if (resolvedEvalCampaigns !== undefined) {
+        data.evaluationCampaigns = resolvedEvalCampaigns;
+      }
+
+      const localEvalRecords = this.getEvaluationRecords();
+      const srvEvalRecords: EmployeeEvaluationRecord[] | null = Array.isArray(data.evaluationRecords)
+        ? data.evaluationRecords
+        : null;
+      let resolvedEvalRecords: EmployeeEvaluationRecord[] | undefined;
+      let evalRecordsNeedSync = false;
+      if (srvEvalRecords && srvEvalRecords.length > 0) {
+        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, srvEvalRecords);
+        resolvedEvalRecords = srvEvalRecords;
+      } else if (localEvalRecords.length > 0) {
+        resolvedEvalRecords = localEvalRecords;
+        evalRecordsNeedSync = true;
+      } else if (srvEvalRecords) {
+        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, srvEvalRecords);
+        resolvedEvalRecords = srvEvalRecords;
+      }
+      if (resolvedEvalRecords !== undefined) {
+        data.evaluationRecords = resolvedEvalRecords;
+      }
+
+      // Si el servidor tenía menos usuarios, dispersiones o evaluaciones que el almacenamiento local (ej. tras un push / redeploy),
       // sincronizar inmediatamente al servidor los registros rescatados
       if (
         usersNeedSync ||
         mergedDispersals.length > srvDispersals.length ||
-        Object.keys(mergedReleases).length > Object.keys(srvReleases).length
+        Object.keys(mergedReleases).length > Object.keys(srvReleases).length ||
+        evalCampaignsNeedSync ||
+        evalRecordsNeedSync
       ) {
         this.pushToServer({
           users: mergedUsers,
@@ -458,6 +509,12 @@ export class PortalService {
           ...(mergedDispersals.length > srvDispersals.length ? { dispersals: mergedDispersals } : {}),
           ...(Object.keys(mergedReleases).length > Object.keys(srvReleases).length
             ? { releases: mergedReleases }
+            : {}),
+          ...(evalCampaignsNeedSync && resolvedEvalCampaigns
+            ? { evaluationCampaigns: resolvedEvalCampaigns }
+            : {}),
+          ...(evalRecordsNeedSync && resolvedEvalRecords
+            ? { evaluationRecords: resolvedEvalRecords }
             : {}),
         });
       }
@@ -1343,5 +1400,73 @@ export class PortalService {
 
     return result;
   }
+
+  static getEvaluationCampaigns(): EvaluationCampaign[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.EVALUATION_CAMPAIGNS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed as EvaluationCampaign[];
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading evaluation campaigns', e);
+    }
+    return [];
+  }
+
+  static saveEvaluationCampaigns(
+    campaigns: EvaluationCampaign[],
+    options?: { skipSync?: boolean }
+  ): void {
+    this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, campaigns);
+    if (!options?.skipSync) {
+      this.pushToServer({ evaluationCampaigns: campaigns });
+    }
+  }
+
+  static getEvaluationRecords(): EmployeeEvaluationRecord[] {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.EVALUATION_RECORDS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed as EmployeeEvaluationRecord[];
+        }
+      }
+    } catch (e) {
+      console.warn('Error loading evaluation records', e);
+    }
+    return [];
+  }
+
+  static saveEvaluationRecords(
+    records: EmployeeEvaluationRecord[],
+    options?: { skipSync?: boolean }
+  ): void {
+    this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, records);
+    if (!options?.skipSync) {
+      this.pushToServer({ evaluationRecords: records });
+    }
+  }
+
+  static saveEvaluationsBundle(
+    campaigns: EvaluationCampaign[],
+    records: EmployeeEvaluationRecord[],
+    options?: { skipSync?: boolean }
+  ): void {
+    this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, campaigns);
+    this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, records);
+    if (!options?.skipSync) {
+      this.pushToServer({
+        evaluationCampaigns: campaigns,
+        evaluationRecords: records,
+      });
+    }
+  }
 }
+
 

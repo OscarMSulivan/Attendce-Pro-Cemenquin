@@ -83,6 +83,8 @@ interface ServerPortalDatabase {
   emailConfig?: ServerEmailConfig;
   livePresence?: Record<string, any>;
   liveActivityFeed?: any[];
+  evaluationCampaigns?: unknown[];
+  evaluationRecords?: unknown[];
   updatedAt?: string;
 }
 
@@ -646,6 +648,14 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     cleanPartial.resumen = current.resumen;
   }
 
+  const mergedEvaluationCampaigns: unknown[] | undefined = Array.isArray(partial.evaluationCampaigns)
+    ? partial.evaluationCampaigns
+    : current.evaluationCampaigns;
+
+  const mergedEvaluationRecords: unknown[] | undefined = Array.isArray(partial.evaluationRecords)
+    ? partial.evaluationRecords
+    : current.evaluationRecords;
+
   const updated: ServerPortalDatabase = {
     ...current,
     ...cleanPartial,
@@ -666,6 +676,12 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     ...(mergedDispersals ? { dispersals: mergedDispersals } : {}),
     ...(mergedConfig ? { config: mergedConfig } : {}),
     ...(mergedEmailConfig ? { emailConfig: mergedEmailConfig } : {}),
+    ...(mergedEvaluationCampaigns !== undefined
+      ? { evaluationCampaigns: mergedEvaluationCampaigns }
+      : {}),
+    ...(mergedEvaluationRecords !== undefined
+      ? { evaluationRecords: mergedEvaluationRecords }
+      : {}),
     updatedAt: new Date().toISOString(),
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, 'offload');
@@ -1146,6 +1162,12 @@ async function startServer() {
           : emailServerFromConfig
           ? { emailConfig: emailServerFromConfig }
           : {}),
+        ...(Array.isArray(body.evaluationCampaigns)
+          ? { evaluationCampaigns: body.evaluationCampaigns }
+          : {}),
+        ...(Array.isArray(body.evaluationRecords)
+          ? { evaluationRecords: body.evaluationRecords }
+          : {}),
       } as Partial<ServerPortalDatabase>);
 
       const hasEmployeeChanges =
@@ -1163,7 +1185,9 @@ async function startServer() {
         (body.releases && typeof body.releases === 'object') ||
         shouldBroadcastReportes ||
         Array.isArray(body.users) ||
-        hasEmployeeChanges;
+        hasEmployeeChanges ||
+        Array.isArray(body.evaluationCampaigns) ||
+        Array.isArray(body.evaluationRecords);
 
       if (hasRealtimeRelevantChanges) {
         broadcastRealtimeEvent({
@@ -1175,6 +1199,12 @@ async function startServer() {
             ...(body.releases && typeof body.releases === 'object' ? { releases: updated.releases } : {}),
             ...(Array.isArray(body.dispersals) ? { dispersals: updated.dispersals } : {}),
             ...(Array.isArray(body.notifications) ? { notifications: updated.notifications } : {}),
+            ...(Array.isArray(body.evaluationCampaigns)
+              ? { evaluationCampaigns: updated.evaluationCampaigns }
+              : {}),
+            ...(Array.isArray(body.evaluationRecords)
+              ? { evaluationRecords: updated.evaluationRecords }
+              : {}),
             ...(hasEmployeeChanges
               ? {
                   empleadosDB: updated.empleadosDB,
