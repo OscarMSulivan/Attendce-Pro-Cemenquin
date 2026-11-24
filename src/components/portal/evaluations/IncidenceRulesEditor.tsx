@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -146,10 +146,21 @@ export const IncidenceRulesEditor: React.FC<IncidenceRulesEditorProps> = ({
     cloneRules(rules),
   );
   const [savedNotice, setSavedNotice] = useState(false);
+  const lastSavedSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setDraftRules(cloneRules(rules));
-    setSavedNotice(false);
+    const cloned = cloneRules(rules);
+    setDraftRules(cloned);
+    const incomingSnapshot = JSON.stringify(cloned);
+    if (
+      lastSavedSnapshotRef.current !== null &&
+      lastSavedSnapshotRef.current === incomingSnapshot
+    ) {
+      lastSavedSnapshotRef.current = null;
+    } else {
+      lastSavedSnapshotRef.current = null;
+      setSavedNotice(false);
+    }
   }, [rules]);
 
   const validation = useMemo(() => validateRules(draftRules), [draftRules]);
@@ -216,7 +227,9 @@ export const IncidenceRulesEditor: React.FC<IncidenceRulesEditorProps> = ({
 
   const handleSave = () => {
     if (disabled || hasErrors) return;
-    onSaveRules(cloneRules(draftRules));
+    const cloned = cloneRules(draftRules);
+    lastSavedSnapshotRef.current = JSON.stringify(cloned);
+    onSaveRules(cloned);
     setSavedNotice(true);
   };
 
