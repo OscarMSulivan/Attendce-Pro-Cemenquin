@@ -578,6 +578,167 @@
   }
 }
 
+/* ==========================================================================
+ * Modal Futurista — Analizador e Importador de Incidencias (Dark + Light Mode)
+ * ========================================================================== */
+.eval-futuristic-modal {
+  --ef-shell-bg: #111522;
+  --ef-header-bg: linear-gradient(135deg, #161c2e 0%, #101524 100%);
+  --ef-subbar-bg: #0d111b;
+  --ef-card-bg: #171d2f;
+  --ef-card-alt: #121726;
+  --ef-input-bg: #0d111b;
+  --ef-border: rgba(148, 163, 184, 0.16);
+  --ef-border-strong: rgba(45, 212, 191, 0.35);
+  --ef-text: #f8fafc;
+  --ef-text-secondary: #cbd5e1;
+  --ef-text-muted: #94a3b8;
+  --ef-accent: #2dd4bf;
+  --ef-accent-soft: rgba(45, 212, 191, 0.14);
+  --ef-accent-border: rgba(45, 212, 191, 0.38);
+  --ef-accent-ink: #5eead4;
+  --ef-btn-primary-bg: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
+  --ef-btn-primary-text: #ffffff;
+  --ef-grid-dot: rgba(45, 212, 191, 0.11);
+  --ef-badge-ignore-bg: rgba(148, 163, 184, 0.1);
+  --ef-badge-ignore-text: #94a3b8;
+  --ef-badge-ignore-border: rgba(148, 163, 184, 0.22);
+  --ef-badge-faltas-bg: rgba(244, 63, 94, 0.15);
+  --ef-badge-faltas-text: #fda4af;
+  --ef-badge-faltas-border: rgba(244, 63, 94, 0.35);
+  --ef-badge-inc-bg: rgba(245, 158, 11, 0.15);
+  --ef-badge-inc-text: #fcd34d;
+  --ef-badge-inc-border: rgba(245, 158, 11, 0.35);
+  --ef-badge-ret-bg: rgba(14, 165, 233, 0.15);
+  --ef-badge-ret-text: #7dd3fc;
+  --ef-badge-ret-border: rgba(14, 165, 233, 0.35);
+  --ef-badge-perm-bg: rgba(139, 92, 246, 0.16);
+  --ef-badge-perm-text: #c4b5fd;
+  --ef-badge-perm-border: rgba(139, 92, 246, 0.38);
+  --ef-badge-custom-bg: rgba(20, 184, 166, 0.16);
+  --ef-badge-custom-text: #5eead4;
+  --ef-badge-custom-border: rgba(45, 212, 191, 0.4);
+  --ef-success-bg: rgba(16, 185, 129, 0.12);
+  --ef-success-border: rgba(16, 185, 129, 0.35);
+  --ef-success-text: #6ee7b7;
+  --ef-warn-bg: rgba(245, 158, 11, 0.12);
+  --ef-warn-border: rgba(245, 158, 11, 0.35);
+  --ef-warn-text: #fcd34d;
+  --ef-danger-bg: rgba(244, 63, 94, 0.12);
+  --ef-danger-border: rgba(244, 63, 94, 0.35);
+  --ef-danger-text: #fda4af;
+  background: var(--ef-shell-bg) !important;
+  color: var(--ef-text) !important;
+  border-color: var(--ef-border-strong) !important;
+  box-shadow: 0 25px 70px -15px rgba(2, 6, 23, 0.75), 0 0 0 1px rgba(45, 212, 191, 0.18), 0 0 40px -10px rgba(14, 165, 233, 0.22);
+}
+
+body.light-mode .eval-futuristic-modal {
+  --ef-shell-bg: #ffffff;
+  --ef-header-bg: linear-gradient(135deg, #f8fafc 0%, #eff6ff 55%, #f0fdfa 100%);
+  --ef-subbar-bg: #f1f5f9;
+  --ef-card-bg: #ffffff;
+  --ef-card-alt: #f8fafc;
+  --ef-input-bg: #ffffff;
+  --ef-border: #cbd5e1;
+  --ef-border-strong: #0d9488;
+  --ef-text: #0f172a;
+  --ef-text-secondary: #1e293b;
+  --ef-text-muted: #475569;
+  --ef-accent: #0d9488;
+  --ef-accent-soft: #ccfbf1;
+  --ef-accent-border: #14b8a6;
+  --ef-accent-ink: #0f766e;
+  --ef-btn-primary-bg: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+  --ef-btn-primary-text: #ffffff;
+  --ef-grid-dot: rgba(13, 148, 136, 0.16);
+  --ef-badge-ignore-bg: #f1f5f9;
+  --ef-badge-ignore-text: #475569;
+  --ef-badge-ignore-border: #cbd5e1;
+  --ef-badge-faltas-bg: #ffe4e6;
+  --ef-badge-faltas-text: #be123c;
+  --ef-badge-faltas-border: #fda4af;
+  --ef-badge-inc-bg: #fef3c7;
+  --ef-badge-inc-text: #b45309;
+  --ef-badge-inc-border: #fcd34d;
+  --ef-badge-ret-bg: #e0f2fe;
+  --ef-badge-ret-text: #0369a1;
+  --ef-badge-ret-border: #7dd3fc;
+  --ef-badge-perm-bg: #ede9fe;
+  --ef-badge-perm-text: #6d28d9;
+  --ef-badge-perm-border: #c4b5fd;
+  --ef-badge-custom-bg: #ccfbf1;
+  --ef-badge-custom-text: #0f766e;
+  --ef-badge-custom-border: #5eead4;
+  --ef-success-bg: #ecfdf5;
+  --ef-success-border: #6ee7b7;
+  --ef-success-text: #047857;
+  --ef-warn-bg: #fffbeb;
+  --ef-warn-border: #fcd34d;
+  --ef-warn-text: #b45309;
+  --ef-danger-bg: #fff1f2;
+  --ef-danger-border: #fda4af;
+  --ef-danger-text: #be123c;
+  box-shadow: 0 25px 60px -15px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(13, 148, 136, 0.25);
+}
+
+.eval-futuristic-modal select option {
+  background-color: var(--ef-card-bg);
+  color: var(--ef-text);
+}
+
+.eval-futuristic-grid-bg {
+  background-image: radial-gradient(var(--ef-grid-dot) 1.25px, transparent 1.25px);
+  background-size: 18px 18px;
+}
+
+@keyframes eval-scanline-sweep {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(380%);
+    opacity: 0;
+  }
+}
+
+@keyframes eval-orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes eval-orbit-spin-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.eval-scanline {
+  animation: eval-scanline-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.eval-orbit {
+  animation: eval-orbit-spin 2.4s linear infinite;
+}
+
+.eval-orbit-reverse {
+  animation: eval-orbit-spin-reverse 3.4s linear infinite;
+}
+
 @media print {
   .no-print {
     display: none !important;

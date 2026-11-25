@@ -39,7 +39,11 @@ import {
   type EvaluationRecordStatus,
   type IncidenceScoringRules,
 } from '../../../types/evaluations';
-import { getUserAllowedLists, type PortalUser } from '../../../types/portal';
+import {
+  getUserAllowedLists,
+  userHasModuleAccess,
+  type PortalUser,
+} from '../../../types/portal';
 import type { Employee } from '../../../types/attendance';
 import { normalizeSupervisorName } from '../../../utils/calendarUtils';
 import {
@@ -165,7 +169,7 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
   onSaveBundle,
   onShowToast,
 }) => {
-  const isManager = currentUser.role === 'admin' || currentUser.role === 'rh';
+  const isManager = userHasModuleAccess(currentUser, 'evaluaciones_admin');
   const currentYear = new Date().getFullYear();
 
   const visibleCampaigns = useMemo(() => {

@@ -480,8 +480,11 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     if (targetRole === 'rh') {
       return [
         'nomina',
+        'empleados',
         'semaforo',
         'incidencias',
+        'evaluaciones_admin',
+        'evaluaciones',
         'contpaqi',
         'tiempo_extra',
         'tiempo_limite',
@@ -489,7 +492,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
         'smtp_correo',
       ];
     }
-    return ['trabajar_listas', 'incidencias'];
+    return ['trabajar_listas', 'incidencias', 'evaluaciones'];
   };
 
   const openNewUserModal = (
@@ -627,7 +630,9 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
         : getDefaultModulesForRole(role);
 
     const hasWorkListsAccess =
-      role === 'supervisor' || finalModules.includes('trabajar_listas');
+      role === 'supervisor' ||
+      finalModules.includes('trabajar_listas') ||
+      finalModules.includes('evaluaciones');
 
     const cleanLists = hasWorkListsAccess
       ? assignedLists.map(l => l.trim().toUpperCase()).filter(Boolean)
@@ -2397,12 +2402,95 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                           </div>
                         );
                       })()}
+
+                      {/* Fila 3: Rol Distribuidor / Gestor de Evaluaciones Anuales (RH) */}
+                      {(() => {
+                        const hasEvalAdmin =
+                          role === 'admin' || allowedModules.includes('evaluaciones_admin');
+                        return (
+                          <div className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <Shield
+                                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                                  hasEvalAdmin ? 'text-emerald-400' : 'text-[#87888C]'
+                                }`}
+                              />
+                              <div>
+                                <p className="text-xs font-extrabold text-white">
+                                  Rol Distribuidor de Evaluaciones Anuales (RH)
+                                </p>
+                                <p className="text-[11px] text-[#87888C] mt-0.5">
+                                  Permite crear campañas anuales, configurar reglas de equivalencias (/20), subir y mapear el Excel de incidencias, abrir/distribuir evaluaciones y exportar concentrados.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={role === 'admin'}
+                              onClick={() => handleToggleModuleAccess('evaluaciones_admin')}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                hasEvalAdmin ? 'bg-emerald-400' : 'bg-[#21222D] border border-white/15'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+                                  hasEvalAdmin
+                                    ? 'translate-x-6 bg-[#171821]'
+                                    : 'translate-x-1 bg-[#87888C]'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Fila 4: Rol Evaluador de Desempeño */}
+                      {(() => {
+                        const hasEvaluator =
+                          role === 'admin' || allowedModules.includes('evaluaciones');
+                        return (
+                          <div className="p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-start gap-3">
+                              <UserCheck
+                                className={`w-4 h-4 mt-0.5 shrink-0 ${
+                                  hasEvaluator ? 'text-violet-400' : 'text-[#87888C]'
+                                }`}
+                              />
+                              <div>
+                                <p className="text-xs font-extrabold text-white">
+                                  Rol Evaluador de Desempeño
+                                </p>
+                                <p className="text-[11px] text-[#87888C] mt-0.5">
+                                  Permite entrar a Evaluaciones Anuales para calificar las 10 competencias únicamente de los colaboradores en las listas asignadas abajo.
+                                </p>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={role === 'admin'}
+                              onClick={() => handleToggleModuleAccess('evaluaciones')}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors cursor-pointer ${
+                                hasEvaluator ? 'bg-violet-400' : 'bg-[#21222D] border border-white/15'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+                                  hasEvaluator
+                                    ? 'translate-x-6 bg-[#171821]'
+                                    : 'translate-x-1 bg-[#87888C]'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
 
-                    {/* Selector de Listas Asignadas cuando Trabajar Listas está activo */}
+                    {/* Selector de Listas Asignadas cuando Trabajar Listas o Evaluador está activo */}
                     {(role === 'supervisor' ||
                       role === 'admin' ||
-                      allowedModules.includes('trabajar_listas')) && (
+                      allowedModules.includes('trabajar_listas') ||
+                      allowedModules.includes('evaluaciones')) && (
                       <div className="border border-white/[0.08] rounded-xl p-4 space-y-3 bg-[#171821]">
                         <div className="flex items-center justify-between flex-wrap gap-2">
                           <div>

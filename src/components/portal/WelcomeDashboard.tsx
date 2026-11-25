@@ -608,7 +608,8 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
           )}
 
           {/* Módulo: Evaluaciones Anuales de Desempeño */}
-          {userHasModuleAccess(currentUser, 'evaluaciones') && (
+          {(userHasModuleAccess(currentUser, 'evaluaciones') ||
+            userHasModuleAccess(currentUser, 'evaluaciones_admin')) && (
             <div
               onClick={() => onNavigateTab('evaluaciones')}
               className="p-5 rounded-2xl bg-[#21222D] border border-white/[0.07] hover:border-[#A9DFD8]/50 transition-all cursor-pointer group shadow-lg flex flex-col justify-between card-lift"
@@ -621,9 +622,9 @@ export const WelcomeDashboard: React.FC<WelcomeDashboardProps> = ({
                   Evaluaciones Anuales
                 </h4>
                 <p className="text-xs text-[#87888C] mt-1 leading-relaxed">
-                  {isSupervisor
-                    ? 'Evalúa las 10 competencias de tu equipo asignado y descarga el formato oficial.'
-                    : 'Gestiona campañas anuales, equivalencias de incidencias (/20), avance por supervisor y formatos PDF.'}
+                  {userHasModuleAccess(currentUser, 'evaluaciones_admin')
+                    ? 'Gestiona campañas anuales, equivalencias de incidencias (/20), distribuye a evaluadores y exporta PDF/Excel.'
+                    : 'Evalúa las 10 competencias de tu equipo asignado y descarga el formato oficial PDF.'}
                 </p>
               </div>
               <div className="flex items-center text-xs font-bold text-[#A9DFD8] mt-4 pt-3 border-t border-white/[0.05]">

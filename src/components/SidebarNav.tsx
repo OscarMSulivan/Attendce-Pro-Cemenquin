@@ -170,7 +170,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(() => onTabChange('evaluaciones')),
       isActive: activeTab === 'evaluaciones',
       badge: pendingEvaluationsCount,
-      show: checkAccess('evaluaciones'),
+      show: checkAccess('evaluaciones') || checkAccess('evaluaciones_admin'),
     },
     {
       id: 'contpaqi',

@@ -4634,8 +4634,12 @@ export default function App() {
     );
     if (activeCampaignIds.size === 0) return 0;
 
+    const isEvalManager = currentUser
+      ? userHasModuleAccess(currentUser, 'evaluaciones_admin')
+      : false;
+
     const allowedSupSet =
-      currentUser?.role === 'supervisor'
+      currentUser && !isEvalManager
         ? new Set(getUserAllowedLists(currentUser).map(normalizeSupervisorName))
         : null;
 
@@ -5239,7 +5243,9 @@ export default function App() {
                 />
               )}
 
-              {portalTab === 'evaluaciones' && userHasModuleAccess(currentUser, 'evaluaciones') && (
+              {portalTab === 'evaluaciones' &&
+                (userHasModuleAccess(currentUser, 'evaluaciones') ||
+                  userHasModuleAccess(currentUser, 'evaluaciones_admin')) && (
                 <EvaluationsModuleView
                   currentUser={currentUser}
                   empleadosDB={empleadosDB}

@@ -6,18 +6,19 @@
 export type UserRole = 'admin' | 'rh' | 'supervisor';
 
 export type PortalModule = 
-  | 'nomina'            // Módulo de Dispersión y Cálculo Global de Nómina
-  | 'trabajar_listas'   // Módulo para Trabajar y Liberar Listas de Nómina Asignadas
-  | 'empleados'         // Padrón Permanente de Empleados y Asignación de Listas (Multi-Empresa)
-  | 'semaforo'          // Semáforo de Nóminas y Monitoreo
-  | 'incidencias'       // Bandeja de Incidencias
-  | 'evaluaciones'      // Evaluaciones Anuales de Desempeño
-  | 'contpaqi'          // Exportador CONTPAQi® Nóminas
-  | 'tiempo_extra'      // Configuración de Reglas de Tiempo Extra
-  | 'tiempo_limite'     // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
-  | 'plantillas_correo' // Configuración de Mensajes de Correo y Alerta por Vencimiento
-  | 'smtp_correo'       // Configuración de Credenciales SMTP para Correo Automático
-  | 'usuarios';         // Administración de Usuarios, Roles y Permisos
+  | 'nomina'             // Módulo de Dispersión y Cálculo Global de Nómina
+  | 'trabajar_listas'    // Módulo para Trabajar y Liberar Listas de Nómina Asignadas
+  | 'empleados'          // Padrón Permanente de Empleados y Asignación de Listas (Multi-Empresa)
+  | 'semaforo'           // Semáforo de Nóminas y Monitoreo
+  | 'incidencias'        // Bandeja de Incidencias
+  | 'evaluaciones_admin' // Gestor / Distribuidor de Evaluaciones Anuales (RH)
+  | 'evaluaciones'       // Evaluador de Desempeño (califica competencias de su equipo asignado)
+  | 'contpaqi'           // Exportador CONTPAQi® Nóminas
+  | 'tiempo_extra'       // Configuración de Reglas de Tiempo Extra
+  | 'tiempo_limite'      // Configuración de Límite de Tiempo para Trabajar/Liberar Lista
+  | 'plantillas_correo'  // Configuración de Mensajes de Correo y Alerta por Vencimiento
+  | 'smtp_correo'        // Configuración de Credenciales SMTP para Correo Automático
+  | 'usuarios';          // Administración de Usuarios, Roles y Permisos
 
 export const ALL_PORTAL_MODULES: PortalModule[] = [
   'nomina',
@@ -25,6 +26,7 @@ export const ALL_PORTAL_MODULES: PortalModule[] = [
   'empleados',
   'semaforo',
   'incidencias',
+  'evaluaciones_admin',
   'evaluaciones',
   'contpaqi',
   'tiempo_extra',
@@ -60,10 +62,15 @@ export const PORTAL_MODULE_LABELS: Record<PortalModule, { short: string; title: 
     title: 'Bandeja de Incidencias',
     description: 'Solicitudes, permisos y validación de formatos',
   },
+  evaluaciones_admin: {
+    short: 'Distribuidor Evaluaciones (RH)',
+    title: 'Gestor / Distribuidor de Evaluaciones (RH)',
+    description: 'Crear campañas anuales, configurar equivalencias /20, importar Excel, distribuir a evaluadores y exportar resultados',
+  },
   evaluaciones: {
-    short: 'Evaluaciones Anuales',
-    title: 'Evaluaciones Anuales de Desempeño',
-    description: 'Gestionar campañas anuales, equivalencias de incidencias y evaluar competencias del equipo',
+    short: 'Evaluador de Desempeño',
+    title: 'Evaluador de Desempeño',
+    description: 'Evaluar las 10 competencias de sus colaboradores asignados y descargar formatos oficiales PDF',
   },
   contpaqi: {
     short: 'CONTPAQi',
@@ -152,6 +159,7 @@ export function getUserAllowedModules(user: PortalUser): PortalModule[] {
       'empleados',
       'semaforo',
       'incidencias',
+      'evaluaciones_admin',
       'evaluaciones',
       'contpaqi',
       'tiempo_extra',
@@ -167,6 +175,17 @@ export function userHasModuleAccess(user: PortalUser, module: PortalModule): boo
   if (user.id === 'user_admin' || user.role === 'admin') return true;
   const mods = getUserAllowedModules(user);
   return mods.includes(module);
+}
+
+/**
+ * Determina si el usuario tiene acceso al módulo de Evaluaciones Anuales
+ * ya sea como Gestor/Distribuidor RH ('evaluaciones_admin') o como Evaluador ('evaluaciones').
+ */
+export function userHasAnyEvaluationAccess(user: PortalUser): boolean {
+  return (
+    userHasModuleAccess(user, 'evaluaciones_admin') ||
+    userHasModuleAccess(user, 'evaluaciones')
+  );
 }
 
 /**
