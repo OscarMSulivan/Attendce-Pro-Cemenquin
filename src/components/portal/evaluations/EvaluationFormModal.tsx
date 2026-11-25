@@ -482,6 +482,25 @@ export const EvaluationFormModal: React.FC<EvaluationFormModalProps> = ({
                 );
               })}
             </div>
+
+            {record.incidenciasPersonalizadas &&
+              Object.keys(record.incidenciasPersonalizadas).length > 0 && (
+                <div className="pt-2 border-t border-white/[0.06] flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold text-[#8C8D9B]">
+                    Incidencias personalizadas (informativas):
+                  </span>
+                  {Object.entries(record.incidenciasPersonalizadas).map(
+                    ([label, qty]) => (
+                      <span
+                        key={label}
+                        className="px-2.5 py-1 rounded-lg bg-teal-500/15 border border-teal-500/30 text-[11px] font-bold text-teal-200"
+                      >
+                        ★ {label}: {qty}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
           </section>
 
           {/* Bloque 2: Evaluación por Competencias (50%) */}

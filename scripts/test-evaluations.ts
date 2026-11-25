@@ -433,3 +433,59 @@ test('7. Analizador de Excel en modo claves por fila (ej. IFNJ, RET, VAC) con si
   assert.equal(carlos.incidencias.incapacidades, 0);
 });
 
+test('8. Incidencias personalizadas para claves/columnas no reconocidas (ej. Actas Administrativas)', () => {
+  const empleadosDB = {
+    '00500': { id: '00500', nombre: 'Lucia Gomez', jefe: 'OSCAR VALENZUELA', puesto: 'Analista' },
+  };
+  const seeded = buildRecordsFromEmployeesDirectory(empleadosDB, 'camp_2026', DEFAULT_INCIDENCE_RULES);
+
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['No_Emp', 'IFNJ', 'ACTA_ADM', 'SUSP'],
+    ['500', 1, 2, 1],
+  ]);
+  XLSX.utils.book_append_sheet(wb, sheet, 'Reporte');
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+  const analysis = analyzeEvaluationsExcelBuffer(buf, undefined, {});
+  const customMapping = {
+    ...analysis.suggestedMapping,
+    columnMetricMap: {
+      ...analysis.suggestedMapping.columnMetricMap,
+      ACTA_ADM: 'custom:Actas Administrativas' as const,
+      SUSP: 'ignore' as const,
+    },
+  };
+
+  const preview = applyExcelMappingToCampaign(
+    analysis,
+    customMapping,
+    'camp_2026',
+    DEFAULT_INCIDENCE_RULES,
+    seeded.records,
+  );
+
+  assert.equal(preview.matchedCount, 1);
+  const lucia = preview.finalCampaignRecords[0];
+  assert.equal(lucia.incidencias.faltas, 1);
+  assert.equal(lucia.incidenciasPersonalizadas?.['Actas Administrativas'], 2);
+  assert.equal(lucia.incidenciasPersonalizadas?.['SUSP'], undefined);
+
+  const html = buildPrintableEvaluationHtml(
+    {
+      id: 'camp_2026',
+      nombre: 'Evaluación 2026',
+      anioEmision: 2026,
+      anioIncidencias: 2025,
+      status: 'activa',
+      rules: DEFAULT_INCIDENCE_RULES,
+      creadaPor: 'RH',
+      creadaEn: '2026-01-01T00:00:00.000Z',
+    },
+    [lucia],
+  );
+  assert.equal(html.includes('Actas Administrativas'), true);
+  assert.equal(html.includes('Informativo'), true);
+});
+
+

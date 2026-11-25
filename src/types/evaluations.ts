@@ -191,6 +191,8 @@ export interface EmployeeEvaluationRecord {
   area: string;
   justificacion: string;
   incidencias: EmployeeEvaluationIncidences;
+  /** Incidencias personalizadas adicionales detectadas y mapeadas por RH desde Excel */
+  incidenciasPersonalizadas?: Record<string, number>;
   puntajesIncidencias: EmployeeEvaluationIncidenceScores;
   competencias: Record<EvaluationCompetencyId, CompetencyScore>;
   puntajeCompetencias: number;

@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   Link2,
   ListFilter,
+  Plus,
   Sparkles,
   Upload,
   UserCheck,
@@ -30,6 +31,8 @@ import {
   applyExcelMappingToCampaign,
   downloadEvaluationTemplateExcel,
   extractUniqueCodesForColumn,
+  getCustomMappingLabel,
+  isCustomMappingTarget,
   saveIncidenceCodeDictionary,
   type ExcelImportFormatMode,
   type ExcelImportMapping,
@@ -47,7 +50,7 @@ export interface EvaluationExcelImportModalProps {
   onClose: () => void;
 }
 
-const TARGET_OPTIONS: { value: ExcelMappingTarget; label: string }[] = [
+const BASE_TARGET_OPTIONS: { value: ExcelMappingTarget; label: string }[] = [
   { value: 'ignore', label: 'Ignorar (no sumar)' },
   { value: 'faltas', label: 'Faltas Injustificadas (FI)' },
   { value: 'incapacidades', label: 'Incapacidades (INC)' },
@@ -55,13 +58,18 @@ const TARGET_OPTIONS: { value: ExcelMappingTarget; label: string }[] = [
   { value: 'permisos', label: 'Permisos (PCG / PSG)' },
 ];
 
-const TARGET_BADGE_CLASS: Record<ExcelMappingTarget, string> = {
-  ignore: 'bg-white/[0.04] text-[#87888C] border-white/[0.08]',
-  faltas: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-  incapacidades: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  retardos: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  permisos: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
-};
+const CREATE_CUSTOM_SENTINEL = '__create_custom__';
+
+function getTargetBadgeClass(target: ExcelMappingTarget): string {
+  if (target === 'faltas') return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+  if (target === 'incapacidades') return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+  if (target === 'retardos') return 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+  if (target === 'permisos') return 'bg-violet-500/15 text-violet-300 border-violet-500/30';
+  if (isCustomMappingTarget(target)) {
+    return 'bg-teal-500/15 text-teal-200 border-teal-500/35';
+  }
+  return 'bg-white/[0.04] text-[#87888C] border-white/[0.08]';
+}
 
 const TARGET_SHORT_LABEL: Record<IncidenceMetricKey, string> = {
   faltas: 'Faltas',
@@ -89,6 +97,8 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
   const [mapping, setMapping] = useState<ExcelImportMapping | null>(null);
   const [includeUnmatched, setIncludeUnmatched] = useState(existingRecords.length === 0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [customMetrics, setCustomMetrics] = useState<string[]>([]);
+  const [newCustomMetricName, setNewCustomMetricName] = useState('');
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -98,10 +108,24 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const syncCustomMetricsFromMapping = (m: ExcelImportMapping) => {
+    const found = new Set<string>();
+    Object.values(m.columnMetricMap).forEach(t => {
+      if (isCustomMappingTarget(t)) found.add(getCustomMappingLabel(t));
+    });
+    Object.values(m.codeMetricMap).forEach(t => {
+      if (isCustomMappingTarget(t)) found.add(getCustomMappingLabel(t));
+    });
+    if (found.size > 0) {
+      setCustomMetrics(prev => Array.from(new Set([...prev, ...found])));
+    }
+  };
+
   const runAnalysis = (buffer: ArrayBuffer, sheetName?: string) => {
     const res = analyzeEvaluationsExcelBuffer(buffer, sheetName);
     setAnalysis(res);
     setMapping(res.suggestedMapping);
+    syncCustomMetricsFromMapping(res.suggestedMapping);
     if (res.rows.length === 0) {
       setErrorMessage(
         res.warnings[0] || 'No se detectaron filas con datos en la hoja seleccionada.',
@@ -192,47 +216,114 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
       const upper = item.code.toUpperCase();
       nextCodeMap[upper] = mapping.codeMetricMap[upper] ?? item.suggestedMetric;
     });
-    setMapping({ ...mapping, codeColumn, codeMetricMap: nextCodeMap });
+    const nextMapping = { ...mapping, codeColumn, codeMetricMap: nextCodeMap };
+    setMapping(nextMapping);
+    syncCustomMetricsFromMapping(nextMapping);
   };
 
-  const handleColumnMetricChange = (colName: string, target: ExcelMappingTarget) => {
+  const registerCustomMetric = (rawLabel: string): ExcelMappingTarget | null => {
+    const cleaned = rawLabel.trim();
+    if (!cleaned) return null;
+    setCustomMetrics(prev => (prev.includes(cleaned) ? prev : [...prev, cleaned]));
+    return `custom:${cleaned}`;
+  };
+
+  const handleAddCustomMetricFromBar = () => {
+    if (!registerCustomMetric(newCustomMetricName)) return;
+    setNewCustomMetricName('');
+  };
+
+  const handleColumnMetricChange = (colName: string, rawValue: string) => {
     if (!mapping) return;
+    if (rawValue === CREATE_CUSTOM_SENTINEL) {
+      const entered = window.prompt(
+        `Nombre de la incidencia personalizada para "${colName}":`,
+        colName,
+      );
+      const customTarget = entered ? registerCustomMetric(entered) : null;
+      if (!customTarget) return;
+      setMapping({
+        ...mapping,
+        columnMetricMap: { ...mapping.columnMetricMap, [colName]: customTarget },
+      });
+      return;
+    }
     setMapping({
       ...mapping,
-      columnMetricMap: { ...mapping.columnMetricMap, [colName]: target },
+      columnMetricMap: {
+        ...mapping.columnMetricMap,
+        [colName]: rawValue as ExcelMappingTarget,
+      },
     });
   };
 
-  const handleCodeMetricChange = (code: string, target: ExcelMappingTarget) => {
+  const handleCodeMetricChange = (code: string, rawValue: string) => {
     if (!mapping) return;
     const upper = code.toUpperCase();
+    if (rawValue === CREATE_CUSTOM_SENTINEL) {
+      const entered = window.prompt(
+        `Nombre de la incidencia personalizada para la clave "${code}":`,
+        code,
+      );
+      const customTarget = entered ? registerCustomMetric(entered) : null;
+      if (!customTarget) return;
+      setMapping({
+        ...mapping,
+        codeMetricMap: { ...mapping.codeMetricMap, [upper]: customTarget },
+      });
+      return;
+    }
     setMapping({
       ...mapping,
-      codeMetricMap: { ...mapping.codeMetricMap, [upper]: target },
+      codeMetricMap: {
+        ...mapping.codeMetricMap,
+        [upper]: rawValue as ExcelMappingTarget,
+      },
     });
   };
 
+  const allTargetOptions = useMemo(() => {
+    const customOpts: { value: string; label: string }[] = customMetrics.map(label => ({
+      value: `custom:${label}`,
+      label: `★ Personalizada: ${label}`,
+    }));
+    return [
+      ...BASE_TARGET_OPTIONS,
+      ...customOpts,
+      { value: CREATE_CUSTOM_SENTINEL, label: '+ Crear incidencia personalizada...' },
+    ];
+  }, [customMetrics]);
+
   const activeMappedSummary = useMemo(() => {
-    if (!mapping) return { count: 0, byMetric: {} as Record<IncidenceMetricKey, string[]> };
     const byMetric: Record<IncidenceMetricKey, string[]> = {
       faltas: [],
       incapacidades: [],
       retardos: [],
       permisos: [],
     };
+    const byCustom: Record<string, string[]> = {};
+    if (!mapping) return { count: 0, byMetric, byCustom };
+
     const source =
       mapping.mode === 'columns' ? mapping.columnMetricMap : mapping.codeMetricMap;
     Object.entries(source).forEach(([key, target]) => {
-      if (target !== 'ignore') {
+      if (target === 'ignore') return;
+      if (isCustomMappingTarget(target)) {
+        const label = getCustomMappingLabel(target);
+        if (!byCustom[label]) byCustom[label] = [];
+        byCustom[label].push(key);
+      } else {
         byMetric[target].push(key);
       }
     });
+    const customCount = Object.values(byCustom).reduce((acc, arr) => acc + arr.length, 0);
     const count =
       byMetric.faltas.length +
       byMetric.incapacidades.length +
       byMetric.retardos.length +
-      byMetric.permisos.length;
-    return { count, byMetric };
+      byMetric.permisos.length +
+      customCount;
+    return { count, byMetric, byCustom };
   }, [mapping]);
 
   const previewResult = useMemo(() => {
@@ -580,6 +671,42 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                 </div>
               </div>
 
+              {/* Custom incidence quick creator bar */}
+              <div className="p-3.5 rounded-xl bg-teal-500/[0.06] border border-teal-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-teal-200">
+                    ¿Tu Excel trae incidencias adicionales no listadas?
+                  </p>
+                  <p className="text-[11px] text-[#87888C]">
+                    Crea una incidencia personalizada (ej. <span className="text-teal-200">Actas Administrativas</span>, <span className="text-teal-200">Suspensiones</span>) o selecciona <span className="text-white">Ignorar</span> en cada fila.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={newCustomMetricName}
+                    onChange={e => setNewCustomMetricName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomMetricFromBar();
+                      }
+                    }}
+                    placeholder="Ej. Actas Administrativas"
+                    className="w-48 px-3 py-1.5 rounded-xl bg-[#171821] border border-teal-500/30 text-xs text-white placeholder:text-[#87888C] focus:outline-none focus:border-teal-400"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomMetricFromBar}
+                    disabled={!newCustomMetricName.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-teal-500/20 hover:bg-teal-500/30 border border-teal-400/40 text-teal-200 disabled:opacity-40 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Agregar
+                  </button>
+                </div>
+              </div>
+
               {/* MODE A: Columns mapping table */}
               {mapping.mode === 'columns' && (
                 <div className="rounded-2xl bg-[#21222D] border border-white/[0.08] overflow-hidden">
@@ -614,14 +741,11 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                             <select
                               value={target}
                               onChange={e =>
-                                handleColumnMetricChange(
-                                  colName,
-                                  e.target.value as ExcelMappingTarget,
-                                )
+                                handleColumnMetricChange(colName, e.target.value)
                               }
-                              className={`px-3 py-1.5 rounded-xl border text-xs font-bold focus:outline-none ${TARGET_BADGE_CLASS[target]} bg-[#171821]`}
+                              className={`px-3 py-1.5 rounded-xl border text-xs font-bold focus:outline-none ${getTargetBadgeClass(target)} bg-[#171821]`}
                             >
-                              {TARGET_OPTIONS.map(opt => (
+                              {allTargetOptions.map(opt => (
                                 <option key={opt.value} value={opt.value} className="bg-[#171821] text-white">
                                   {opt.label}
                                 </option>
@@ -688,7 +812,7 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                         Claves detectadas en el Excel ({detectedCodes.length} códigos únicos)
                       </h3>
                       <p className="text-[11px] text-[#87888C]">
-                        Especifica qué significa cada clave leída (ej. <code className="text-[#A9DFD8]">IFNJ</code> → Faltas Injustificadas). El sistema recordará tus equivalencias.
+                        Especifica qué significa cada clave leída (ej. <code className="text-[#A9DFD8]">IFNJ</code> → Faltas Injustificadas), crea una personalizada o selecciona Ignorar.
                       </p>
                     </div>
 
@@ -721,14 +845,11 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                               <select
                                 value={target}
                                 onChange={e =>
-                                  handleCodeMetricChange(
-                                    item.code,
-                                    e.target.value as ExcelMappingTarget,
-                                  )
+                                  handleCodeMetricChange(item.code, e.target.value)
                                 }
-                                className={`px-3 py-1.5 rounded-xl border text-xs font-bold focus:outline-none ${TARGET_BADGE_CLASS[target]} bg-[#171821]`}
+                                className={`px-3 py-1.5 rounded-xl border text-xs font-bold focus:outline-none ${getTargetBadgeClass(target)} bg-[#171821]`}
                               >
-                                {TARGET_OPTIONS.map(opt => (
+                                {allTargetOptions.map(opt => (
                                   <option key={opt.value} value={opt.value} className="bg-[#171821] text-white">
                                     {opt.label}
                                   </option>
@@ -750,7 +871,7 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                   metric => (
                     <span
                       key={metric}
-                      className={`px-2.5 py-1 rounded-lg border font-semibold ${TARGET_BADGE_CLASS[metric]}`}
+                      className={`px-2.5 py-1 rounded-lg border font-semibold ${getTargetBadgeClass(metric)}`}
                     >
                       {TARGET_SHORT_LABEL[metric]}:{' '}
                       {activeMappedSummary.byMetric[metric].length > 0
@@ -759,6 +880,14 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                     </span>
                   ),
                 )}
+                {Object.entries(activeMappedSummary.byCustom).map(([label, keys]) => (
+                  <span
+                    key={label}
+                    className="px-2.5 py-1 rounded-lg border font-semibold bg-teal-500/15 text-teal-200 border-teal-500/35"
+                  >
+                    ★ {label}: {keys.join(' + ')}
+                  </span>
+                ))}
               </div>
             </div>
           )}
@@ -848,7 +977,22 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
                             {rec.empleadoId || '—'}
                           </td>
                           <td className="px-3 py-2 text-white font-semibold">
-                            {rec.nombre}
+                            <div>{rec.nombre}</div>
+                            {rec.incidenciasPersonalizadas &&
+                              Object.keys(rec.incidenciasPersonalizadas).length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {Object.entries(rec.incidenciasPersonalizadas).map(
+                                    ([label, qty]) => (
+                                      <span
+                                        key={label}
+                                        className="px-1.5 py-0.5 rounded bg-teal-500/15 border border-teal-500/30 text-[10px] font-bold text-teal-200"
+                                      >
+                                        ★ {label}: {qty}
+                                      </span>
+                                    ),
+                                  )}
+                                </div>
+                              )}
                           </td>
                           <td className="px-3 py-2 text-[#87888C]">{rec.supervisor}</td>
                           <td className="px-2 py-2 text-center text-rose-300 font-bold">

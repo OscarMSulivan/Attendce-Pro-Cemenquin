@@ -671,6 +671,16 @@ function renderSingleEvaluationPage(
             <td colspan="2" class="total-label">Puntaje total incidencias</td>
             <td class="num-cell">${escapeHtml(String(record.puntajesIncidencias.total))}/${escapeHtml(String(record.puntajesIncidencias.maxTotal))}</td>
           </tr>
+          ${Object.entries(record.incidenciasPersonalizadas || {})
+            .filter(([, v]) => Number.isFinite(v) && v > 0)
+            .map(
+              ([label, val]) => `<tr>
+            <td>${escapeHtml(label)}</td>
+            <td class="num-cell">${escapeHtml(String(val))}</td>
+            <td class="num-cell" style="color:#6b7280;font-size:9px;">Informativo</td>
+          </tr>`,
+            )
+            .join('\n')}
         </tbody>
       </table>
 
@@ -1047,8 +1057,16 @@ export function buildRecordsFromEmployeesDirectory(
 // Analizador y Mapeador Inteligente de Excel (por Columnas o por Claves/Filas)
 // ============================================================================
 
-export type ExcelMappingTarget = IncidenceMetricKey | 'ignore';
+export type ExcelMappingTarget = IncidenceMetricKey | 'ignore' | `custom:${string}`;
 export type ExcelImportFormatMode = 'columns' | 'codes';
+
+export function isCustomMappingTarget(target: ExcelMappingTarget): target is `custom:${string}` {
+  return typeof target === 'string' && target.startsWith('custom:') && target.length > 7;
+}
+
+export function getCustomMappingLabel(target: ExcelMappingTarget): string {
+  return isCustomMappingTarget(target) ? target.slice(7).trim() : '';
+}
 
 export interface DetectedIncidenceCode {
   code: string;
@@ -1534,9 +1552,27 @@ export function applyExcelMappingToCampaign(
     puesto: string;
     area: string;
     incidencias: EmployeeEvaluationIncidences;
+    incidenciasPersonalizadas: Record<string, number>;
   }
 
   const aggregated = new Map<string, AggregatedEmp>();
+
+  const addToTarget = (
+    entry: AggregatedEmp,
+    target: ExcelMappingTarget,
+    amount: number,
+  ) => {
+    if (target === 'ignore' || amount <= 0) return;
+    if (isCustomMappingTarget(target)) {
+      const label = getCustomMappingLabel(target);
+      if (!label) return;
+      entry.incidenciasPersonalizadas[label] = round1(
+        (entry.incidenciasPersonalizadas[label] ?? 0) + amount,
+      );
+    } else {
+      entry.incidencias[target] = round1(entry.incidencias[target] + amount);
+    }
+  };
 
   analysis.rows.forEach((row, idx) => {
     const rawId = mapping.employeeIdColumn ? String(row[mapping.employeeIdColumn] ?? '').trim() : '';
@@ -1555,6 +1591,7 @@ export function applyExcelMappingToCampaign(
         puesto: mapping.puestoColumn ? String(row[mapping.puestoColumn] ?? '').trim() : '',
         area: mapping.areaColumn ? String(row[mapping.areaColumn] ?? '').trim() : '',
         incidencias: { faltas: 0, incapacidades: 0, retardos: 0, permisos: 0 },
+        incidenciasPersonalizadas: {},
       };
       aggregated.set(key, entry);
     } else {
@@ -1577,9 +1614,7 @@ export function applyExcelMappingToCampaign(
       Object.entries(mapping.columnMetricMap).forEach(([colName, target]) => {
         if (target === 'ignore') return;
         const val = parseNonNegativeNumber(row[colName]);
-        if (val > 0) {
-          entry!.incidencias[target] = round1(entry!.incidencias[target] + val);
-        }
+        addToTarget(entry!, target, val);
       });
     } else if (mapping.mode === 'codes' && mapping.codeColumn) {
       const rawCode = String(row[mapping.codeColumn] ?? '').trim().toUpperCase();
@@ -1589,9 +1624,7 @@ export function applyExcelMappingToCampaign(
       const qty = mapping.quantityColumn
         ? parseNonNegativeNumber(row[mapping.quantityColumn])
         : 1;
-      if (qty > 0) {
-        entry.incidencias[target] = round1(entry.incidencias[target] + qty);
-      }
+      addToTarget(entry, target, qty);
     }
 
     if (idx < 0) return;
@@ -1615,11 +1648,15 @@ export function applyExcelMappingToCampaign(
 
   let unmatchedIdx = 0;
   aggregated.forEach(item => {
+    const hasCustom = Object.keys(item.incidenciasPersonalizadas).length > 0;
     const existing =
       (item.empId ? existingByEmpId.get(item.empId) : undefined) ||
       (item.nombre ? existingByName.get(normalizeSupervisorName(item.nombre)) : undefined);
 
     if (existing) {
+      const mergedCustom = hasCustom
+        ? { ...(existing.incidenciasPersonalizadas || {}), ...item.incidenciasPersonalizadas }
+        : existing.incidenciasPersonalizadas;
       const updated = recalculateRecordWithRules(
         {
           ...existing,
@@ -1628,6 +1665,9 @@ export function applyExcelMappingToCampaign(
           puesto: existing.puesto || item.puesto,
           area: item.area || existing.area,
           incidencias: { ...item.incidencias },
+          ...(mergedCustom && Object.keys(mergedCustom).length > 0
+            ? { incidenciasPersonalizadas: mergedCustom }
+            : {}),
           actualizadaEn: nowIso,
         },
         rules,
@@ -1649,6 +1689,9 @@ export function applyExcelMappingToCampaign(
         area: item.area,
         justificacion: 'Evaluación Anual.',
         incidencias: { ...item.incidencias },
+        ...(hasCustom
+          ? { incidenciasPersonalizadas: { ...item.incidenciasPersonalizadas } }
+          : {}),
         puntajesIncidencias: scores.puntajesIncidencias,
         competencias,
         puntajeCompetencias: scores.puntajeCompetencias,
