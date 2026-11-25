@@ -40,8 +40,10 @@ import {
   type IncidenceScoringRules,
 } from '../../../types/evaluations';
 import { getUserAllowedLists, type PortalUser } from '../../../types/portal';
+import type { Employee } from '../../../types/attendance';
 import { normalizeSupervisorName } from '../../../utils/calendarUtils';
 import {
+  buildRecordsFromEmployeesDirectory,
   exportEvaluationsSummaryExcel,
   getRulesMaxTotal,
   printEvaluations,
@@ -53,6 +55,7 @@ import { EvaluationFormModal } from './EvaluationFormModal';
 
 export interface EvaluationsModuleViewProps {
   currentUser: PortalUser;
+  empleadosDB: Record<string, Employee>;
   campaigns: EvaluationCampaign[];
   records: EmployeeEvaluationRecord[];
   onSaveBundle: (
@@ -156,6 +159,7 @@ function pickDefaultCampaign(
 
 export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
   currentUser,
+  empleadosDB,
   campaigns,
   records,
   onSaveBundle,
@@ -469,12 +473,50 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
       actualizadaEn: now,
     };
 
-    onSaveBundle([newCampaign, ...campaigns], records);
+    const seeded = buildRecordsFromEmployeesDirectory(
+      empleadosDB,
+      newCampaign.id,
+      newCampaign.rules,
+    );
+
+    onSaveBundle([newCampaign, ...campaigns], [...records, ...seeded.records]);
     setSelectedCampaignId(newCampaign.id);
     setActiveTab('tablero');
     resetFilters();
     setShowNewCampaignModal(false);
-    onShowToast(`Campaña "${trimmedName}" creada en modo borrador.`, 'success');
+    if (seeded.addedCount > 0) {
+      const supCount = new Set(seeded.records.map((r) => r.supervisor)).size;
+      onShowToast(
+        `Campaña "${trimmedName}" creada con ${seeded.addedCount} colaboradores distribuidos en ${supCount} supervisor(es) del padrón.`,
+        'success',
+      );
+    } else {
+      onShowToast(
+        `Campaña "${trimmedName}" creada en modo borrador (padrón sin empleados cargados aún).`,
+        'info',
+      );
+    }
+  };
+
+  const handleSyncEmployeesDirectory = () => {
+    if (!activeCampaign) return;
+    const otherCampaignRecords = records.filter(
+      (r) => r.campaignId !== activeCampaign.id,
+    );
+    const currentCampaignRecords = records.filter(
+      (r) => r.campaignId === activeCampaign.id,
+    );
+    const synced = buildRecordsFromEmployeesDirectory(
+      empleadosDB,
+      activeCampaign.id,
+      activeCampaign.rules,
+      currentCampaignRecords,
+    );
+    onSaveBundle(campaigns, [...otherCampaignRecords, ...synced.records]);
+    onShowToast(
+      `Padrón sincronizado: ${synced.addedCount} nuevo(s) y ${synced.updatedCount} actualizado(s).`,
+      'success',
+    );
   };
 
   // Cambio de estado de campaña
@@ -544,102 +586,23 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
     );
   };
 
-  // Importar Excel (merge o replace)
-  const handleImportRecords = (
-    importedRecords: EmployeeEvaluationRecord[],
-    mode: 'merge' | 'replace',
+  // Aplicar incidencias mapeadas desde el analizador inteligente de Excel
+  const handleApplyMappedRecords = (
+    finalCampaignRecords: EmployeeEvaluationRecord[],
+    summary: { matchedCount: number; untouchedCount: number; addedUnmatchedCount: number },
   ) => {
     if (!activeCampaign) return;
-    const now = new Date().toISOString();
     const otherCampaignRecords = records.filter(
       (r) => r.campaignId !== activeCampaign.id,
     );
-
-    if (mode === 'replace') {
-      const normalizedImported = importedRecords.map((rec) =>
-        recalculateRecordWithRules(
-          { ...rec, campaignId: activeCampaign.id, actualizadaEn: now },
-          activeCampaign.rules,
-        ),
-      );
-      onSaveBundle(campaigns, [
-        ...otherCampaignRecords,
-        ...normalizedImported,
-      ]);
-      setShowImportModal(false);
-      onShowToast(
-        `Padrón reemplazado con ${normalizedImported.length} colaborador(es).`,
-        'success',
-      );
-      return;
-    }
-
-    // Modo 'merge': preserva competencias y estatus ya capturados
-    const merged = records
-      .filter((r) => r.campaignId === activeCampaign.id)
-      .map((r) => ({ ...r }));
-
-    const byEmpId = new Map<string, number>();
-    const byName = new Map<string, number>();
-
-    merged.forEach((rec, idx) => {
-      const empIdKey = rec.empleadoId?.trim().toLowerCase();
-      if (empIdKey) byEmpId.set(empIdKey, idx);
-      const nameKey = normalizeSupervisorName(rec.nombre);
-      if (nameKey) byName.set(nameKey, idx);
-    });
-
-    let addedCount = 0;
-    let updatedCount = 0;
-
-    for (const imp of importedRecords) {
-      const impEmpIdKey = imp.empleadoId?.trim().toLowerCase() || '';
-      const impNameKey = normalizeSupervisorName(imp.nombre);
-
-      let matchIdx: number | undefined;
-      if (impEmpIdKey && byEmpId.has(impEmpIdKey)) {
-        matchIdx = byEmpId.get(impEmpIdKey);
-      } else if (impNameKey && byName.has(impNameKey)) {
-        matchIdx = byName.get(impNameKey);
-      }
-
-      if (matchIdx !== undefined) {
-        const existing = merged[matchIdx];
-        const updatedBase: EmployeeEvaluationRecord = {
-          ...existing,
-          empleadoId: imp.empleadoId?.trim() || existing.empleadoId,
-          fechaIngreso: imp.fechaIngreso || existing.fechaIngreso,
-          supervisor: imp.supervisor || existing.supervisor,
-          puesto: imp.puesto || existing.puesto,
-          area: imp.area || existing.area,
-          justificacion: imp.justificacion || existing.justificacion,
-          incidencias: { ...imp.incidencias },
-          actualizadaEn: now,
-        };
-        merged[matchIdx] = recalculateRecordWithRules(
-          updatedBase,
-          activeCampaign.rules,
-        );
-        if (impEmpIdKey) byEmpId.set(impEmpIdKey, matchIdx);
-        if (impNameKey) byName.set(impNameKey, matchIdx);
-        updatedCount += 1;
-      } else {
-        const newRec = recalculateRecordWithRules(
-          { ...imp, campaignId: activeCampaign.id, actualizadaEn: now },
-          activeCampaign.rules,
-        );
-        const newIdx = merged.length;
-        merged.push(newRec);
-        if (impEmpIdKey) byEmpId.set(impEmpIdKey, newIdx);
-        if (impNameKey) byName.set(impNameKey, newIdx);
-        addedCount += 1;
-      }
-    }
-
-    onSaveBundle(campaigns, [...otherCampaignRecords, ...merged]);
+    onSaveBundle(campaigns, [...otherCampaignRecords, ...finalCampaignRecords]);
     setShowImportModal(false);
+    const extraText =
+      summary.addedUnmatchedCount > 0
+        ? ` y ${summary.addedUnmatchedCount} agregado(s) fuera del padrón`
+        : '';
     onShowToast(
-      `Importación combinada: ${addedCount} agregado(s) y ${updatedCount} actualizado(s).`,
+      `Incidencias vinculadas por No. Empleado: ${summary.matchedCount} actualizado(s)${extraText}.`,
       'success',
     );
   };
@@ -1188,17 +1151,28 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
                     <div className="flex flex-wrap items-center gap-2.5">
                       <button
                         type="button"
+                        onClick={handleSyncEmployeesDirectory}
+                        disabled={activeCampaign.status === 'cerrada'}
+                        title="Jalar o actualizar empleados y supervisores desde el padrón de CemenQtime"
+                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/35 hover:bg-sky-500/25 disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        Sincronizar Padrón ({Object.keys(empleadosDB || {}).length})
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setShowImportModal(true)}
                         disabled={activeCampaign.status === 'cerrada'}
                         title={
                           activeCampaign.status === 'cerrada'
                             ? 'Reabre la campaña para importar nuevos registros'
-                            : 'Importar colaboradores e incidencias desde Excel'
+                            : 'Analizar Excel de incidencias y vincular por número de empleado'
                         }
                         className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-[#A9DFD8]/15 text-[#A9DFD8] border border-[#A9DFD8]/35 hover:bg-[#A9DFD8]/25 disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
                       >
                         <Upload className="w-3.5 h-3.5" />
-                        Importar Excel
+                        Analizar / Importar Excel
                       </button>
 
                       <button
@@ -1671,12 +1645,12 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Importación Excel */}
+      {/* Modal: Analizador e Importación Excel */}
       {showImportModal && activeCampaign && (
         <EvaluationExcelImportModal
           campaign={activeCampaign}
-          existingCount={campaignRecords.length}
-          onImport={handleImportRecords}
+          existingRecords={campaignRecords}
+          onApplyMappedRecords={handleApplyMappedRecords}
           onClose={() => setShowImportModal(false)}
         />
       )}

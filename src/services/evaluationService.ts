@@ -20,6 +20,8 @@ import {
   type IncidenceRuleBracket,
   type IncidenceScoringRules,
 } from '../types/evaluations';
+import type { Employee } from '../types/attendance';
+import { normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarUtils';
 
 const INCIDENCE_KEYS: IncidenceMetricKey[] = [
   'faltas',
@@ -944,3 +946,744 @@ export function printEvaluations(
     printWindow.print();
   }, 250);
 }
+
+// ============================================================================
+// Padrón de Empleados -> Campaña de Evaluaciones
+// ============================================================================
+
+export function buildRecordsFromEmployeesDirectory(
+  empleadosDB: Record<string, Employee>,
+  campaignId: string,
+  rules: IncidenceScoringRules,
+  existingCampaignRecords: EmployeeEvaluationRecord[] = [],
+): {
+  records: EmployeeEvaluationRecord[];
+  addedCount: number;
+  updatedCount: number;
+} {
+  const nowIso = new Date().toISOString();
+  const employees = Object.values(empleadosDB || {}).filter(
+    emp => emp && (emp.id || emp.nombre),
+  );
+
+  const byEmpId = new Map<string, EmployeeEvaluationRecord>();
+  const byName = new Map<string, EmployeeEvaluationRecord>();
+
+  existingCampaignRecords.forEach(rec => {
+    const normId = normalizeEmployeeId(rec.empleadoId);
+    if (normId) byEmpId.set(normId, rec);
+    const normName = normalizeSupervisorName(rec.nombre);
+    if (normName) byName.set(normName, rec);
+  });
+
+  const mergedMap = new Map<string, EmployeeEvaluationRecord>();
+  existingCampaignRecords.forEach(rec => mergedMap.set(rec.id, rec));
+
+  let addedCount = 0;
+  let updatedCount = 0;
+
+  employees.forEach((emp, idx) => {
+    const normId = normalizeEmployeeId(emp.id);
+    const normName = normalizeSupervisorName(emp.nombre);
+    const existing =
+      (normId ? byEmpId.get(normId) : undefined) ||
+      (normName ? byName.get(normName) : undefined);
+
+    if (existing) {
+      const updated: EmployeeEvaluationRecord = {
+        ...existing,
+        empleadoId: normId || existing.empleadoId,
+        nombre: emp.nombre?.trim() || existing.nombre,
+        supervisor: emp.jefe?.trim() || existing.supervisor || 'SIN SUPERVISOR',
+        puesto: emp.puesto?.trim() || existing.puesto,
+        actualizadaEn: nowIso,
+      };
+      mergedMap.set(existing.id, updated);
+      updatedCount += 1;
+      return;
+    }
+
+    const incidencias: EmployeeEvaluationIncidences = {
+      faltas: 0,
+      incapacidades: 0,
+      retardos: 0,
+      permisos: 0,
+    };
+    const competencias = createEmptyCompetencies();
+    const scores = calculateEvaluationScores(incidencias, competencias, rules);
+
+    const newRec: EmployeeEvaluationRecord = {
+      id: `eval_${campaignId}_${normId || idx + 1}_${Date.now()}_${idx}`,
+      campaignId,
+      empleadoId: normId || undefined,
+      nombre: emp.nombre?.trim() || `Empleado ${normId || idx + 1}`,
+      fechaIngreso: '',
+      supervisor: emp.jefe?.trim() || 'SIN SUPERVISOR',
+      puesto: emp.puesto?.trim() || '',
+      area: emp.empresa?.trim() || '',
+      justificacion: 'Evaluación Anual.',
+      incidencias,
+      puntajesIncidencias: scores.puntajesIncidencias,
+      competencias,
+      puntajeCompetencias: scores.puntajeCompetencias,
+      porcentajeCompetencias: scores.porcentajeCompetencias,
+      calificacionFinal: scores.calificacionFinal,
+      status: 'pendiente',
+      actualizadaEn: nowIso,
+    };
+    mergedMap.set(newRec.id, newRec);
+    addedCount += 1;
+  });
+
+  const records = Array.from(mergedMap.values()).sort((a, b) =>
+    a.supervisor.localeCompare(b.supervisor, 'es') ||
+    a.nombre.localeCompare(b.nombre, 'es'),
+  );
+
+  return { records, addedCount, updatedCount };
+}
+
+// ============================================================================
+// Analizador y Mapeador Inteligente de Excel (por Columnas o por Claves/Filas)
+// ============================================================================
+
+export type ExcelMappingTarget = IncidenceMetricKey | 'ignore';
+export type ExcelImportFormatMode = 'columns' | 'codes';
+
+export interface DetectedIncidenceCode {
+  code: string;
+  count: number;
+  totalQty: number;
+  suggestedMetric: ExcelMappingTarget;
+}
+
+export interface ExcelImportMapping {
+  mode: ExcelImportFormatMode;
+  employeeIdColumn: string;
+  nameColumn: string;
+  hireDateColumn: string;
+  supervisorColumn: string;
+  puestoColumn: string;
+  areaColumn: string;
+  /** En modo 'columns': qué rubro suma cada columna del Excel */
+  columnMetricMap: Record<string, ExcelMappingTarget>;
+  /** En modo 'codes': columna que contiene el código/clave (ej. IFNJ, RET, PCG) */
+  codeColumn: string;
+  /** En modo 'codes': columna numérica opcional con cantidad/días (vacío = 1 por fila) */
+  quantityColumn: string;
+  /** En modo 'codes': significado asignado por RH a cada código detectado */
+  codeMetricMap: Record<string, ExcelMappingTarget>;
+}
+
+export interface ExcelSheetAnalysis {
+  sheetNames: string[];
+  selectedSheet: string;
+  headerRowIndex: number;
+  headers: string[];
+  rows: Record<string, unknown>[];
+  columnSamples: Record<string, string[]>;
+  suggestedMode: ExcelImportFormatMode;
+  suggestedMapping: ExcelImportMapping;
+  detectedCodes: DetectedIncidenceCode[];
+  warnings: string[];
+}
+
+export interface ExcelMappingPreviewResult {
+  matchedRecords: EmployeeEvaluationRecord[];
+  unmatchedRecords: EmployeeEvaluationRecord[];
+  /** Lista final lista para guardar en la campaña (incluyendo los del padrón sin cambios en el Excel) */
+  finalCampaignRecords: EmployeeEvaluationRecord[];
+  matchedCount: number;
+  untouchedCount: number;
+  unmatchedCount: number;
+  warnings: string[];
+}
+
+const CODE_DICTIONARY_STORAGE_KEY = 'cemenqtime_eval_excel_code_dict_v1';
+
+export function loadSavedIncidenceCodeDictionary(): Record<string, ExcelMappingTarget> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(CODE_DICTIONARY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveIncidenceCodeDictionary(
+  entries: Record<string, ExcelMappingTarget>,
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const prev = loadSavedIncidenceCodeDictionary();
+    const merged: Record<string, ExcelMappingTarget> = { ...prev };
+    Object.entries(entries).forEach(([k, v]) => {
+      const normKey = normalizeHeader(k);
+      if (normKey) merged[normKey] = v;
+    });
+    window.localStorage.setItem(CODE_DICTIONARY_STORAGE_KEY, JSON.stringify(merged));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function guessIncidenceMetricFromToken(
+  token: string,
+  savedDict?: Record<string, ExcelMappingTarget>,
+): ExcelMappingTarget {
+  const norm = normalizeHeader(token);
+  if (!norm) return 'ignore';
+
+  if (savedDict && savedDict[norm]) {
+    return savedDict[norm];
+  }
+
+  // Faltas Injustificadas: FI, FINJ, IFNJ, FALTA, FALTAS, INASISTENCIA
+  if (
+    norm === 'fi' ||
+    norm === 'finj' ||
+    norm === 'ifnj' ||
+    norm === 'falta' ||
+    norm === 'faltas' ||
+    norm.includes('falta') ||
+    norm.includes('ifnj') ||
+    norm.includes('finj') ||
+    norm.includes('inasistencia') ||
+    norm.includes('ausentismo')
+  ) {
+    return 'faltas';
+  }
+
+  // Incapacidades: INC, INC_INT, INCAP, ENF, MAT, RT, ST7
+  if (
+    norm === 'inc' ||
+    norm === 'incint' ||
+    norm === 'incap' ||
+    norm === 'incapacidad' ||
+    norm === 'incapacidades' ||
+    norm.startsWith('incap') ||
+    norm.includes('incapacidad') ||
+    norm === 'enfermedadgeneral' ||
+    norm === 'riesgotrabajo' ||
+    norm === 'maternidad'
+  ) {
+    return 'incapacidades';
+  }
+
+  // Retardos: RE, RET, RETARDO, RETARDOS, TARDANZA
+  if (
+    norm === 're' ||
+    norm === 'ret' ||
+    norm === 'retardo' ||
+    norm === 'retardos' ||
+    norm.includes('retardo') ||
+    norm.includes('tardanza')
+  ) {
+    return 'retardos';
+  }
+
+  // Permisos: PCG, PSG, PCGYPSG, PERM, PERMISO, PERMISOS
+  if (
+    norm === 'pcg' ||
+    norm === 'psg' ||
+    norm === 'pcgypsg' ||
+    norm === 'pcgpsg' ||
+    norm === 'perm' ||
+    norm === 'permiso' ||
+    norm === 'permisos' ||
+    norm.includes('permiso') ||
+    norm.includes('congoce') ||
+    norm.includes('singoce')
+  ) {
+    return 'permisos';
+  }
+
+  return 'ignore';
+}
+
+export function extractUniqueCodesForColumn(
+  rows: Record<string, unknown>[],
+  codeColumn: string,
+  quantityColumn = '',
+  savedDict?: Record<string, ExcelMappingTarget>,
+): DetectedIncidenceCode[] {
+  if (!codeColumn) return [];
+  const dict = savedDict ?? loadSavedIncidenceCodeDictionary();
+  const map = new Map<string, { display: string; count: number; totalQty: number }>();
+
+  for (const row of rows) {
+    const rawCode = String(row[codeColumn] ?? '').trim();
+    if (!rawCode) continue;
+    const key = rawCode.toUpperCase();
+    const qty = quantityColumn
+      ? Math.max(0, parseNonNegativeNumber(row[quantityColumn]))
+      : 1;
+    const effectiveQty = quantityColumn ? qty : 1;
+
+    const current = map.get(key);
+    if (current) {
+      current.count += 1;
+      current.totalQty += effectiveQty;
+    } else {
+      map.set(key, {
+        display: rawCode,
+        count: 1,
+        totalQty: effectiveQty,
+      });
+    }
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => b.count - a.count || a.display.localeCompare(b.display, 'es'))
+    .map(item => ({
+      code: item.display,
+      count: item.count,
+      totalQty: round1(item.totalQty),
+      suggestedMetric: guessIncidenceMetricFromToken(item.display, dict),
+    }));
+}
+
+export function analyzeEvaluationsExcelBuffer(
+  buffer: ArrayBuffer,
+  sheetName?: string,
+  savedDict?: Record<string, ExcelMappingTarget>,
+): ExcelSheetAnalysis {
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+  const sheetNames = workbook.SheetNames || [];
+  if (sheetNames.length === 0) {
+    return {
+      sheetNames: [],
+      selectedSheet: '',
+      headerRowIndex: 0,
+      headers: [],
+      rows: [],
+      columnSamples: {},
+      suggestedMode: 'columns',
+      suggestedMapping: {
+        mode: 'columns',
+        employeeIdColumn: '',
+        nameColumn: '',
+        hireDateColumn: '',
+        supervisorColumn: '',
+        puestoColumn: '',
+        areaColumn: '',
+        columnMetricMap: {},
+        codeColumn: '',
+        quantityColumn: '',
+        codeMetricMap: {},
+      },
+      detectedCodes: [],
+      warnings: ['El archivo Excel no contiene hojas de cálculo.'],
+    };
+  }
+
+  const selectedSheet =
+    sheetName && sheetNames.includes(sheetName) ? sheetName : sheetNames[0];
+  const sheet = workbook.Sheets[selectedSheet];
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: '',
+    raw: true,
+  });
+
+  // Detectar fila de encabezados dentro de las primeras 10 filas (la que tenga más celdas de texto no vacías)
+  let headerRowIndex = 0;
+  let bestScore = -1;
+  const maxScan = Math.min(matrix.length, 10);
+  for (let r = 0; r < maxScan; r++) {
+    const row = Array.isArray(matrix[r]) ? matrix[r] : [];
+    const nonEmpty = row.filter(cell => String(cell ?? '').trim() !== '');
+    const textCells = nonEmpty.filter(cell => typeof cell === 'string');
+    const score = nonEmpty.length * 2 + textCells.length;
+    if (score > bestScore && nonEmpty.length >= 2) {
+      bestScore = score;
+      headerRowIndex = r;
+    }
+  }
+
+  const rawHeaderRow = Array.isArray(matrix[headerRowIndex]) ? matrix[headerRowIndex] : [];
+  const usedHeaderNames = new Set<string>();
+  const headers: string[] = [];
+
+  rawHeaderRow.forEach((cell, idx) => {
+    let base = String(cell ?? '').trim();
+    if (!base) base = `Columna_${idx + 1}`;
+    let unique = base;
+    let suffix = 2;
+    while (usedHeaderNames.has(unique)) {
+      unique = `${base} (${suffix++})`;
+    }
+    usedHeaderNames.add(unique);
+    headers.push(unique);
+  });
+
+  const rows: Record<string, unknown>[] = [];
+  for (let r = headerRowIndex + 1; r < matrix.length; r++) {
+    const arr = Array.isArray(matrix[r]) ? matrix[r] : [];
+    const obj: Record<string, unknown> = {};
+    let hasValue = false;
+    headers.forEach((h, colIdx) => {
+      const val = arr[colIdx] ?? '';
+      obj[h] = val;
+      if (String(val).trim() !== '') hasValue = true;
+    });
+    if (hasValue) rows.push(obj);
+  }
+
+  const columnSamples: Record<string, string[]> = {};
+  headers.forEach(h => {
+    const samples: string[] = [];
+    for (const row of rows) {
+      const val = String(row[h] ?? '').trim();
+      if (val && !samples.includes(val)) {
+        samples.push(val);
+        if (samples.length >= 4) break;
+      }
+    }
+    columnSamples[h] = samples;
+  });
+
+  const findCol = (aliases: string[]): string => {
+    const normAliases = aliases.map(normalizeHeader);
+    for (const h of headers) {
+      const nh = normalizeHeader(h);
+      if (normAliases.includes(nh)) return h;
+    }
+    for (const h of headers) {
+      const nh = normalizeHeader(h);
+      if (normAliases.some(alias => alias.length >= 4 && nh.includes(alias))) return h;
+    }
+    return '';
+  };
+
+  const employeeIdColumn = findCol([
+    'codigo',
+    'codigo_empleado',
+    'codigo_del_empleado',
+    'num_empleado',
+    'numero_empleado',
+    'numero_de_empleado',
+    'no_empleado',
+    'no_emp',
+    'num_emp',
+    'clave_empleado',
+    'empleadoid',
+    'empleado_id',
+    'id_empleado',
+    'id',
+  ]);
+  const nameColumn = findCol([
+    'nombre',
+    'nombre_colaborador',
+    'nombre_del_colaborador',
+    'nombre_empleado',
+    'colaborador',
+    'empleado',
+  ]);
+  const hireDateColumn = findCol([
+    'hiredate',
+    'hire_date',
+    'fecha_ingreso',
+    'fecha_de_ingreso',
+    'ingreso',
+    'fecha_alta',
+  ]);
+  const supervisorColumn = findCol([
+    'supervisor',
+    'jefe',
+    'jefe_inmediato',
+    'evaluador',
+    'lider',
+    'lista',
+  ]);
+  const puestoColumn = findCol(['puesto', 'cargo', 'posicion', 'position']);
+  const areaColumn = findCol(['departamento', 'area', 'depto', 'department']);
+
+  const codeColumn = findCol([
+    'incidencia',
+    'tipo_incidencia',
+    'clave_incidencia',
+    'clave',
+    'concepto',
+    'tipo',
+    'codigo_incidencia',
+    'motivo',
+  ]);
+  const quantityColumn = findCol([
+    'cantidad',
+    'dias',
+    'valor',
+    'total',
+    'conteo',
+    'unidades',
+  ]);
+
+  const dict = savedDict ?? loadSavedIncidenceCodeDictionary();
+  const metadataCols = new Set(
+    [employeeIdColumn, nameColumn, hireDateColumn, supervisorColumn, puestoColumn, areaColumn].filter(Boolean),
+  );
+
+  // Construir mapa sugerido para modo columnas
+  const columnMetricMap: Record<string, ExcelMappingTarget> = {};
+  let detectedMetricColsCount = 0;
+  headers.forEach(h => {
+    if (metadataCols.has(h)) {
+      columnMetricMap[h] = 'ignore';
+      return;
+    }
+    const guess = guessIncidenceMetricFromToken(h, dict);
+    columnMetricMap[h] = guess;
+    if (guess !== 'ignore') detectedMetricColsCount += 1;
+  });
+
+  // Evaluar si el archivo parece ser de formato "claves por fila" (mismo empleado repetido + columna de claves)
+  let hasRepeatedEmployees = false;
+  if (employeeIdColumn && rows.length > 0) {
+    const seen = new Set<string>();
+    for (const row of rows) {
+      const id = normalizeEmployeeId(String(row[employeeIdColumn] ?? ''));
+      if (!id) continue;
+      if (seen.has(id)) {
+        hasRepeatedEmployees = true;
+        break;
+      }
+      seen.add(id);
+    }
+  }
+
+  const detectedCodes = codeColumn
+    ? extractUniqueCodesForColumn(rows, codeColumn, quantityColumn, dict)
+    : [];
+  const codeMetricMap: Record<string, ExcelMappingTarget> = {};
+  detectedCodes.forEach(item => {
+    codeMetricMap[item.code.toUpperCase()] = item.suggestedMetric;
+  });
+
+  const suggestedMode: ExcelImportFormatMode =
+    codeColumn && (hasRepeatedEmployees || detectedMetricColsCount === 0)
+      ? 'codes'
+      : 'columns';
+
+  const warnings: string[] = [];
+  if (rows.length === 0) {
+    warnings.push('No se detectaron filas con datos debajo de los encabezados.');
+  }
+  if (!employeeIdColumn) {
+    warnings.push(
+      'No se detectó automáticamente la columna de Número de Empleado. Selecciónala manualmente para cruzar con el padrón.',
+    );
+  }
+
+  return {
+    sheetNames,
+    selectedSheet,
+    headerRowIndex,
+    headers,
+    rows,
+    columnSamples,
+    suggestedMode,
+    suggestedMapping: {
+      mode: suggestedMode,
+      employeeIdColumn,
+      nameColumn,
+      hireDateColumn,
+      supervisorColumn,
+      puestoColumn,
+      areaColumn,
+      columnMetricMap,
+      codeColumn,
+      quantityColumn,
+      codeMetricMap,
+    },
+    detectedCodes,
+    warnings,
+  };
+}
+
+export function applyExcelMappingToCampaign(
+  analysis: ExcelSheetAnalysis,
+  mapping: ExcelImportMapping,
+  campaignId: string,
+  rules: IncidenceScoringRules,
+  existingCampaignRecords: EmployeeEvaluationRecord[],
+  options: { includeUnmatched?: boolean } = {},
+): ExcelMappingPreviewResult {
+  const nowIso = new Date().toISOString();
+  const warnings: string[] = [];
+
+  if (!mapping.employeeIdColumn && !mapping.nameColumn) {
+    return {
+      matchedRecords: [],
+      unmatchedRecords: [],
+      finalCampaignRecords: existingCampaignRecords,
+      matchedCount: 0,
+      untouchedCount: existingCampaignRecords.length,
+      unmatchedCount: 0,
+      warnings: ['Debes seleccionar al menos la columna de Número de Empleado.'],
+    };
+  }
+
+  interface AggregatedEmp {
+    empId: string;
+    nombre: string;
+    fechaIngreso: string;
+    supervisor: string;
+    puesto: string;
+    area: string;
+    incidencias: EmployeeEvaluationIncidences;
+  }
+
+  const aggregated = new Map<string, AggregatedEmp>();
+
+  analysis.rows.forEach((row, idx) => {
+    const rawId = mapping.employeeIdColumn ? String(row[mapping.employeeIdColumn] ?? '').trim() : '';
+    const normId = normalizeEmployeeId(rawId);
+    const rawName = mapping.nameColumn ? String(row[mapping.nameColumn] ?? '').trim() : '';
+    const key = normId || (rawName ? `NAME:${normalizeSupervisorName(rawName)}` : '');
+    if (!key) return;
+
+    let entry = aggregated.get(key);
+    if (!entry) {
+      entry = {
+        empId: normId,
+        nombre: rawName,
+        fechaIngreso: mapping.hireDateColumn ? formatExcelDate(row[mapping.hireDateColumn]) : '',
+        supervisor: mapping.supervisorColumn ? String(row[mapping.supervisorColumn] ?? '').trim() : '',
+        puesto: mapping.puestoColumn ? String(row[mapping.puestoColumn] ?? '').trim() : '',
+        area: mapping.areaColumn ? String(row[mapping.areaColumn] ?? '').trim() : '',
+        incidencias: { faltas: 0, incapacidades: 0, retardos: 0, permisos: 0 },
+      };
+      aggregated.set(key, entry);
+    } else {
+      if (!entry.nombre && rawName) entry.nombre = rawName;
+      if (!entry.fechaIngreso && mapping.hireDateColumn) {
+        entry.fechaIngreso = formatExcelDate(row[mapping.hireDateColumn]);
+      }
+      if (!entry.supervisor && mapping.supervisorColumn) {
+        entry.supervisor = String(row[mapping.supervisorColumn] ?? '').trim();
+      }
+      if (!entry.puesto && mapping.puestoColumn) {
+        entry.puesto = String(row[mapping.puestoColumn] ?? '').trim();
+      }
+      if (!entry.area && mapping.areaColumn) {
+        entry.area = String(row[mapping.areaColumn] ?? '').trim();
+      }
+    }
+
+    if (mapping.mode === 'columns') {
+      Object.entries(mapping.columnMetricMap).forEach(([colName, target]) => {
+        if (target === 'ignore') return;
+        const val = parseNonNegativeNumber(row[colName]);
+        if (val > 0) {
+          entry!.incidencias[target] = round1(entry!.incidencias[target] + val);
+        }
+      });
+    } else if (mapping.mode === 'codes' && mapping.codeColumn) {
+      const rawCode = String(row[mapping.codeColumn] ?? '').trim().toUpperCase();
+      if (!rawCode) return;
+      const target = mapping.codeMetricMap[rawCode] ?? 'ignore';
+      if (target === 'ignore') return;
+      const qty = mapping.quantityColumn
+        ? parseNonNegativeNumber(row[mapping.quantityColumn])
+        : 1;
+      if (qty > 0) {
+        entry.incidencias[target] = round1(entry.incidencias[target] + qty);
+      }
+    }
+
+    if (idx < 0) return;
+  });
+
+  // Índices del padrón actual de la campaña
+  const existingByEmpId = new Map<string, EmployeeEvaluationRecord>();
+  const existingByName = new Map<string, EmployeeEvaluationRecord>();
+  existingCampaignRecords.forEach(rec => {
+    const nid = normalizeEmployeeId(rec.empleadoId);
+    if (nid) existingByEmpId.set(nid, rec);
+    const nname = normalizeSupervisorName(rec.nombre);
+    if (nname) existingByName.set(nname, rec);
+  });
+
+  const matchedIds = new Set<string>();
+  const matchedRecords: EmployeeEvaluationRecord[] = [];
+  const unmatchedRecords: EmployeeEvaluationRecord[] = [];
+  const updatedById = new Map<string, EmployeeEvaluationRecord>();
+  existingCampaignRecords.forEach(rec => updatedById.set(rec.id, rec));
+
+  let unmatchedIdx = 0;
+  aggregated.forEach(item => {
+    const existing =
+      (item.empId ? existingByEmpId.get(item.empId) : undefined) ||
+      (item.nombre ? existingByName.get(normalizeSupervisorName(item.nombre)) : undefined);
+
+    if (existing) {
+      const updated = recalculateRecordWithRules(
+        {
+          ...existing,
+          empleadoId: existing.empleadoId || item.empId || undefined,
+          fechaIngreso: item.fechaIngreso || existing.fechaIngreso,
+          puesto: existing.puesto || item.puesto,
+          area: item.area || existing.area,
+          incidencias: { ...item.incidencias },
+          actualizadaEn: nowIso,
+        },
+        rules,
+      );
+      matchedIds.add(existing.id);
+      matchedRecords.push(updated);
+      updatedById.set(existing.id, updated);
+    } else {
+      const competencias = createEmptyCompetencies();
+      const scores = calculateEvaluationScores(item.incidencias, competencias, rules);
+      const created: EmployeeEvaluationRecord = {
+        id: `eval_${campaignId}_${item.empId || 'ext'}_${Date.now()}_${unmatchedIdx++}`,
+        campaignId,
+        empleadoId: item.empId || undefined,
+        nombre: item.nombre || `Empleado ${item.empId || unmatchedIdx}`,
+        fechaIngreso: item.fechaIngreso,
+        supervisor: item.supervisor || 'SIN SUPERVISOR',
+        puesto: item.puesto,
+        area: item.area,
+        justificacion: 'Evaluación Anual.',
+        incidencias: { ...item.incidencias },
+        puntajesIncidencias: scores.puntajesIncidencias,
+        competencias,
+        puntajeCompetencias: scores.puntajeCompetencias,
+        porcentajeCompetencias: scores.porcentajeCompetencias,
+        calificacionFinal: scores.calificacionFinal,
+        status: 'pendiente',
+        actualizadaEn: nowIso,
+      };
+      unmatchedRecords.push(created);
+      if (options.includeUnmatched) {
+        updatedById.set(created.id, created);
+      }
+    }
+  });
+
+  if (unmatchedRecords.length > 0 && !options.includeUnmatched) {
+    warnings.push(
+      `${unmatchedRecords.length} registro(s) del Excel no coinciden con ningún número de empleado del padrón actual.`,
+    );
+  }
+
+  const finalCampaignRecords = Array.from(updatedById.values()).sort(
+    (a, b) =>
+      a.supervisor.localeCompare(b.supervisor, 'es') ||
+      a.nombre.localeCompare(b.nombre, 'es'),
+  );
+
+  return {
+    matchedRecords,
+    unmatchedRecords,
+    finalCampaignRecords,
+    matchedCount: matchedRecords.length,
+    untouchedCount: Math.max(0, existingCampaignRecords.length - matchedIds.size),
+    unmatchedCount: unmatchedRecords.length,
+    warnings,
+  };
+}
+

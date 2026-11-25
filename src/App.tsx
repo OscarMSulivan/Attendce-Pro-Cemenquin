@@ -5242,6 +5242,7 @@ export default function App() {
               {portalTab === 'evaluaciones' && userHasModuleAccess(currentUser, 'evaluaciones') && (
                 <EvaluationsModuleView
                   currentUser={currentUser}
+                  empleadosDB={empleadosDB}
                   campaigns={evaluationCampaigns}
                   records={evaluationRecords}
                   onSaveBundle={(nextCampaigns, nextRecords) => {

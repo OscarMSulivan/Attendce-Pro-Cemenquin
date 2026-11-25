@@ -22,6 +22,9 @@ import {
   parseEvaluationsExcelBuffer,
   recalculateRecordWithRules,
   scoreIncidenceCount,
+  buildRecordsFromEmployeesDirectory,
+  analyzeEvaluationsExcelBuffer,
+  applyExcelMappingToCampaign,
 } from '../src/services/evaluationService.ts';
 
 test('1. Equivalencias de incidencias: rangos por defecto, huecos, negativos y NaN', () => {
@@ -324,3 +327,109 @@ test('5. HTML imprimible escapa XSS, marca X en competencias, muestra /20, RESUM
   assert.match(html, /Desarrollo[\s\S]*?>X</);
   assert.match(html, /Malo[\s\S]*?>X</);
 });
+
+test('6. Auto-carga de padrón (empleadosDB) a campaña y enlace por número de empleado en modo columnas', () => {
+  const empleadosDB = {
+    '00967': { id: '00967', nombre: 'Alma Aidee Schlemmer', jefe: 'ALEJANDRO GONZALEZ', puesto: 'Diseñadora' },
+    '00615': { id: '00615', nombre: 'Oscar Valenzuela', jefe: 'ADRIAN FLORES', puesto: 'Supervisor' },
+  };
+
+  const seeded = buildRecordsFromEmployeesDirectory(empleadosDB, 'camp_2026', DEFAULT_INCIDENCE_RULES);
+  assert.equal(seeded.records.length, 2);
+  assert.equal(seeded.addedCount, 2);
+
+  // Excel con columnas separadas: No_Emp (sin ceros a la izquierda), IFNJ, PCG, PSG, RET
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['No_Emp', 'IFNJ', 'PCG', 'PSG', 'RET'],
+    [967, 2, 1, 2, 3],
+    [99999, 1, 0, 0, 0], // no está en el padrón
+  ]);
+  XLSX.utils.book_append_sheet(wb, sheet, 'Resumen');
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+  const analysis = analyzeEvaluationsExcelBuffer(buf, undefined, {});
+  assert.equal(analysis.suggestedMode, 'columns');
+  assert.equal(analysis.suggestedMapping.employeeIdColumn, 'No_Emp');
+  assert.equal(analysis.suggestedMapping.columnMetricMap['IFNJ'], 'faltas');
+  assert.equal(analysis.suggestedMapping.columnMetricMap['PCG'], 'permisos');
+  assert.equal(analysis.suggestedMapping.columnMetricMap['PSG'], 'permisos');
+  assert.equal(analysis.suggestedMapping.columnMetricMap['RET'], 'retardos');
+
+  const preview = applyExcelMappingToCampaign(
+    analysis,
+    analysis.suggestedMapping,
+    'camp_2026',
+    DEFAULT_INCIDENCE_RULES,
+    seeded.records,
+    { includeUnmatched: false },
+  );
+
+  assert.equal(preview.matchedCount, 1);
+  assert.equal(preview.untouchedCount, 1);
+  assert.equal(preview.unmatchedCount, 1);
+  assert.equal(preview.finalCampaignRecords.length, 2);
+
+  const alma = preview.finalCampaignRecords.find(r => r.empleadoId === '00967')!;
+  assert.equal(alma.supervisor, 'ALEJANDRO GONZALEZ'); // conserva supervisor del padrón
+  assert.equal(alma.incidencias.faltas, 2);
+  assert.equal(alma.incidencias.permisos, 3); // PCG (1) + PSG (2) sumados
+  assert.equal(alma.incidencias.retardos, 3);
+  assert.equal(alma.puntajesIncidencias.faltas, 3); // 2 faltas -> 3 pts
+  assert.equal(alma.puntajesIncidencias.permisos, 3); // 3 permisos -> 3 pts
+  assert.equal(alma.puntajesIncidencias.retardos, 3); // 3 retardos -> 3 pts
+  assert.equal(alma.puntajesIncidencias.incapacidades, 5); // 0 incap -> 5 pts
+  assert.equal(alma.puntajesIncidencias.total, 14);
+});
+
+test('7. Analizador de Excel en modo claves por fila (ej. IFNJ, RET, VAC) con significado configurable por RH', () => {
+  const empleadosDB = {
+    '00101': { id: '00101', nombre: 'Carlos Perez', jefe: 'OSCAR VALENZUELA', puesto: 'Operador' },
+  };
+  const seeded = buildRecordsFromEmployeesDirectory(empleadosDB, 'camp_2026', DEFAULT_INCIDENCE_RULES);
+
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['Codigo', 'Clave', 'Dias'],
+    ['101', 'IFNJ', 1],
+    ['101', 'IFNJ', 2],
+    ['101', 'RET', 1],
+    ['101', 'VAC', 5], // vacaciones -> ignorar
+    ['101', 'MI_CLAVE_CUSTOM', 2], // RH la mapeará manualmente a 'permisos'
+  ]);
+  XLSX.utils.book_append_sheet(wb, sheet, 'Detalle');
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+
+  const analysis = analyzeEvaluationsExcelBuffer(buf, undefined, {});
+  assert.equal(analysis.suggestedMode, 'codes');
+  assert.equal(analysis.suggestedMapping.codeColumn, 'Clave');
+  assert.equal(analysis.suggestedMapping.quantityColumn, 'Dias');
+  assert.equal(analysis.suggestedMapping.codeMetricMap['IFNJ'], 'faltas');
+  assert.equal(analysis.suggestedMapping.codeMetricMap['RET'], 'retardos');
+  assert.equal(analysis.suggestedMapping.codeMetricMap['VAC'], 'ignore');
+
+  // RH asigna manualmente MI_CLAVE_CUSTOM -> permisos
+  const customMapping = {
+    ...analysis.suggestedMapping,
+    codeMetricMap: {
+      ...analysis.suggestedMapping.codeMetricMap,
+      MI_CLAVE_CUSTOM: 'permisos' as const,
+    },
+  };
+
+  const preview = applyExcelMappingToCampaign(
+    analysis,
+    customMapping,
+    'camp_2026',
+    DEFAULT_INCIDENCE_RULES,
+    seeded.records,
+  );
+
+  assert.equal(preview.matchedCount, 1);
+  const carlos = preview.finalCampaignRecords[0];
+  assert.equal(carlos.incidencias.faltas, 3); // 1 + 2 días de IFNJ
+  assert.equal(carlos.incidencias.retardos, 1);
+  assert.equal(carlos.incidencias.permisos, 2); // MI_CLAVE_CUSTOM
+  assert.equal(carlos.incidencias.incapacidades, 0);
+});
+
