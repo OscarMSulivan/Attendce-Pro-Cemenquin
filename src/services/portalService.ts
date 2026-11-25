@@ -456,21 +456,19 @@ export class PortalService {
       }
 
       // 6. Evaluaciones Anuales (campañas y registros)
+      // Si el servidor ya devolvió un array (incluso vacío tras eliminar una campaña), prevalece el servidor
       const localEvalCampaigns = this.getEvaluationCampaigns();
       const srvEvalCampaigns: EvaluationCampaign[] | null = Array.isArray(data.evaluationCampaigns)
         ? data.evaluationCampaigns
         : null;
       let resolvedEvalCampaigns: EvaluationCampaign[] | undefined;
       let evalCampaignsNeedSync = false;
-      if (srvEvalCampaigns && srvEvalCampaigns.length > 0) {
+      if (srvEvalCampaigns !== null) {
         this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, srvEvalCampaigns);
         resolvedEvalCampaigns = srvEvalCampaigns;
       } else if (localEvalCampaigns.length > 0) {
         resolvedEvalCampaigns = localEvalCampaigns;
         evalCampaignsNeedSync = true;
-      } else if (srvEvalCampaigns) {
-        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_CAMPAIGNS, srvEvalCampaigns);
-        resolvedEvalCampaigns = srvEvalCampaigns;
       }
       if (resolvedEvalCampaigns !== undefined) {
         data.evaluationCampaigns = resolvedEvalCampaigns;
@@ -482,15 +480,12 @@ export class PortalService {
         : null;
       let resolvedEvalRecords: EmployeeEvaluationRecord[] | undefined;
       let evalRecordsNeedSync = false;
-      if (srvEvalRecords && srvEvalRecords.length > 0) {
+      if (srvEvalRecords !== null) {
         this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, srvEvalRecords);
         resolvedEvalRecords = srvEvalRecords;
       } else if (localEvalRecords.length > 0) {
         resolvedEvalRecords = localEvalRecords;
         evalRecordsNeedSync = true;
-      } else if (srvEvalRecords) {
-        this.safeSetLocalStorage(STORAGE_KEYS.EVALUATION_RECORDS, srvEvalRecords);
-        resolvedEvalRecords = srvEvalRecords;
       }
       if (resolvedEvalRecords !== undefined) {
         data.evaluationRecords = resolvedEvalRecords;

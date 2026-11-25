@@ -212,6 +212,8 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
     useState<EmployeeEvaluationRecord | null>(null);
   const [recordToDelete, setRecordToDelete] =
     useState<EmployeeEvaluationRecord | null>(null);
+  const [campaignToDelete, setCampaignToDelete] =
+    useState<EvaluationCampaign | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
   const activeCampaign = useMemo(() => {
@@ -543,8 +545,13 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
 
     if (nextStatus === 'activa' && activeCampaign.status === 'borrador') {
       onShowToast(
-        `Campaña "${activeCampaign.nombre}" abierta a supervisores.`,
+        `Campaña "${activeCampaign.nombre}" abierta a evaluadores.`,
         'success',
+      );
+    } else if (nextStatus === 'borrador') {
+      onShowToast(
+        `Campaña "${activeCampaign.nombre}" devuelta a borrador (oculta para evaluadores). Puedes corregir y volver a lanzarla.`,
+        'info',
       );
     } else if (nextStatus === 'cerrada') {
       onShowToast(
@@ -553,10 +560,29 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
       );
     } else {
       onShowToast(
-        `Campaña "${activeCampaign.nombre}" reabierta a supervisores.`,
+        `Campaña "${activeCampaign.nombre}" reabierta a evaluadores.`,
         'success',
       );
     }
+  };
+
+  // Eliminar campaña completa (sin dejar historial)
+  const handleConfirmDeleteCampaign = () => {
+    if (!campaignToDelete) return;
+    const nextCampaigns = campaigns.filter((c) => c.id !== campaignToDelete.id);
+    const nextRecords = records.filter(
+      (r) => r.campaignId !== campaignToDelete.id,
+    );
+    const deletedName = campaignToDelete.nombre;
+    onSaveBundle(nextCampaigns, nextRecords);
+    setCampaignToDelete(null);
+    setSelectedRecord(null);
+    setSelectedCampaignId(nextCampaigns[0]?.id ?? '');
+    resetFilters();
+    onShowToast(
+      `Campaña "${deletedName}" y todos sus registros fueron eliminados sin dejar historial.`,
+      'success',
+    );
   };
 
   // Guardar reglas de equivalencias y recalcular todos los registros de la campaña
@@ -812,14 +838,25 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
                   </button>
                 )}
                 {activeCampaign.status === 'activa' && (
-                  <button
-                    type="button"
-                    onClick={() => handleChangeCampaignStatus('cerrada')}
-                    className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/35 hover:bg-amber-500/25 transition-colors cursor-pointer"
-                  >
-                    <Lock className="w-4 h-4" />
-                    Cerrar Campaña
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeCampaignStatus('borrador')}
+                      title="Retirar de evaluadores y volver a borrador para corregir y relanzar"
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold bg-white/[0.06] text-slate-200 border border-white/[0.12] hover:bg-white/[0.12] transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      Volver a Borrador
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChangeCampaignStatus('cerrada')}
+                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/35 hover:bg-amber-500/25 transition-colors cursor-pointer"
+                    >
+                      <Lock className="w-4 h-4" />
+                      Cerrar Campaña
+                    </button>
+                  </>
                 )}
                 {activeCampaign.status === 'cerrada' && (
                   <button
@@ -831,6 +868,15 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
                     Reabrir Campaña
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setCampaignToDelete(activeCampaign)}
+                  title="Cancelar y borrar completamente esta campaña y sus evaluaciones sin dejar historial"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/35 hover:bg-rose-500/25 transition-colors cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Eliminar Campaña
+                </button>
               </>
             )}
           </div>
@@ -1719,6 +1765,59 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
               >
                 <Trash2 className="w-4 h-4" />
                 Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmación de eliminación completa de campaña */}
+      {campaignToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setCampaignToDelete(null)}
+        >
+          <div
+            className="w-full max-w-md bg-[#21222D] border border-rose-500/30 rounded-2xl shadow-2xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-300 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Cancelar y eliminar campaña completa
+                </h3>
+                <p className="text-sm text-slate-300 mt-1 leading-relaxed">
+                  ¿Seguro que deseas eliminar{' '}
+                  <strong className="text-white">
+                    {campaignToDelete.nombre}
+                  </strong>
+                  ? Se borrarán permanentemente los{' '}
+                  <strong className="text-rose-300">
+                    {records.filter((r) => r.campaignId === campaignToDelete.id).length} registros
+                  </strong>{' '}
+                  asociados y no quedará en el historial para que puedas volver a lanzarla desde cero.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 mt-5">
+              <button
+                type="button"
+                onClick={() => setCampaignToDelete(null)}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-slate-300 hover:bg-white/[0.06] transition-colors cursor-pointer"
+              >
+                No, conservar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCampaign}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-rose-500 text-white hover:bg-rose-600 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+                Sí, eliminar campaña
               </button>
             </div>
           </div>
