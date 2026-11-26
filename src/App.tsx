@@ -106,6 +106,13 @@ const PixelOfficeMonitorView = React.lazy(() =>
 const EvaluationsModuleView = React.lazy(() =>
   import('./components/portal/evaluations/EvaluationsModuleView').then(m => ({ default: m.EvaluationsModuleView }))
 );
+const WhatsAppCheckinPilotView = React.lazy(() =>
+  import('./components/portal/field/WhatsAppCheckinPilotView').then(m => ({ default: m.WhatsAppCheckinPilotView }))
+);
+const MobileFieldCheckinPage = React.lazy(() =>
+  import('./components/portal/field/MobileFieldCheckinPage').then(m => ({ default: m.MobileFieldCheckinPage }))
+);
+import type { FieldCheckinRecord } from './types/fieldCheckin';
 import { PortalService } from './services/portalService';
 import { PushNotificationService } from './services/pushNotificationService';
 import {
@@ -253,6 +260,72 @@ export default function App() {
   );
   const [evaluationRecords, setEvaluationRecords] = useState<EmployeeEvaluationRecord[]>(() =>
     PortalService.getEvaluationRecords()
+  );
+  const [fieldCheckins, setFieldCheckins] = useState<FieldCheckinRecord[]>([]);
+  const mobileCheckinToken = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    return new URLSearchParams(window.location.search).get('checkin')?.trim() || '';
+  }, []);
+
+  const fetchFieldCheckins = useCallback(async () => {
+    try {
+      const res = await fetch('/api/field-checkin/records');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.ok && Array.isArray(data.records)) {
+        setFieldCheckins(data.records as FieldCheckinRecord[]);
+      }
+    } catch {
+      // ignore offline
+    }
+  }, []);
+
+  const handleInjectFieldCheckinToEvents = useCallback(
+    (rec: FieldCheckinRecord) => {
+      const normId = normalizeEmployeeId(rec.employeeId) || rec.employeeId;
+      const code = rec.tipo === 'salida' ? 'SAL' : 'ENT';
+      const desc = `WhatsApp Campo — ${rec.puntoVenta}`;
+
+      setEventosDB(prev => {
+        const empEvents = { ...(prev[normId] || {}) };
+        const dayStore = empEvents[rec.isoDate]
+          ? {
+              ...empEvents[rec.isoDate],
+              entradas: { ...empEvents[rec.isoDate].entradas },
+              salidas: { ...empEvents[rec.isoDate].salidas },
+              registrosCrudos: [...(empEvents[rec.isoDate].registrosCrudos || [])],
+              todas: [...(empEvents[rec.isoDate].todas || [])],
+            }
+          : {
+              entradas: {},
+              salidas: {},
+              rstHoras: [],
+              registrosCrudos: [],
+              isRST: false,
+              ret: false,
+              todas: [],
+            };
+
+        if (code === 'ENT') {
+          dayStore.entradas[code] = [...(dayStore.entradas[code] || []), rec.hora];
+        } else {
+          dayStore.salidas[code] = [...(dayStore.salidas[code] || []), rec.hora];
+        }
+        dayStore.registrosCrudos.push({ hora: rec.hora, codigo: code, descripcion: desc });
+        dayStore.registrosCrudos.sort((a, b) => a.hora.localeCompare(b.hora));
+        if (!dayStore.todas.includes(rec.hora)) {
+          dayStore.todas = [...dayStore.todas, rec.hora].sort();
+        }
+        empEvents[rec.isoDate] = dayStore;
+        return { ...prev, [normId]: empEvents };
+      });
+
+      showToast(
+        `Checada de ${rec.employeeName} (${rec.hora} ${code}) inyectada a Checadas Crudas (eventosDB) para demostración.`,
+        'success'
+      );
+    },
+    []
   );
   const [emailConfig, setEmailConfig] = useState<EmailServerConfig>(() => PortalService.loadEmailConfig());
   const [isNewIncidentModalOpen, setIsNewIncidentModalOpen] = useState<boolean>(false);
@@ -967,6 +1040,28 @@ export default function App() {
       // Eventos de Monitoreo en Vivo (The Office Pixel Art — Watcher de Pixel HQ)
       if (payload.type === 'presence_update') {
         applyIncomingPresence(payload.presence, payload.activityFeed);
+        return;
+      }
+
+      // Eventos en tiempo real del Piloto Checador WhatsApp (Campo)
+      if (payload.type === 'field_checkin_update') {
+        if (Array.isArray(payload.records)) {
+          setFieldCheckins(payload.records as FieldCheckinRecord[]);
+        }
+        if (
+          payload.latestRecord &&
+          isAuthenticated &&
+          currentUser &&
+          (currentUser.role === 'admin' || currentUser.id === 'user_admin')
+        ) {
+          const rec = payload.latestRecord as FieldCheckinRecord;
+          showToast(
+            `${rec.employeeName} registró ${rec.tipo.toUpperCase()} (${rec.hora}) en ${rec.puntoVenta}`,
+            'success',
+            '📱 Nueva Checada de Campo (WhatsApp)',
+            6500
+          );
+        }
         return;
       }
 
@@ -4851,6 +4946,21 @@ export default function App() {
     setDispersionMode('new');
   }, []);
 
+  // Ruta pública móvil de 1 toque para Check-in de Promotores en Campo (desde enlace WhatsApp)
+  if (mobileCheckinToken) {
+    return (
+      <React.Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center text-sm font-bold">
+            Cargando checador móvil CemenQtime...
+          </div>
+        }
+      >
+        <MobileFieldCheckinPage token={mobileCheckinToken} />
+      </React.Suspense>
+    );
+  }
+
   // Si el usuario no ha iniciado sesión, mostrar el Módulo de Login
   if (!isAuthenticated) {
     return (
@@ -4971,6 +5081,18 @@ export default function App() {
                     activityFeed={liveActivityFeed}
                     onRefreshPresence={fetchLivePresence}
                     onSendAdminPing={handleSendAdminPing}
+                  />
+                )}
+
+              {/* PILOTO: CHECADOR WHATSAPP PARA PROMOTORES EN CAMPO (EXCLUSIVO ADMINISTRADOR GENERAL) */}
+              {portalTab === 'checador_whatsapp' &&
+                (currentUser.role === 'admin' || currentUser.id === 'user_admin') && (
+                  <WhatsAppCheckinPilotView
+                    empleadosDB={empleadosDB}
+                    records={fieldCheckins}
+                    onRefreshRecords={fetchFieldCheckins}
+                    onInjectRecordToEvents={handleInjectFieldCheckinToEvents}
+                    onShowToast={(msg, type = 'info') => showToast(msg, type)}
                   />
                 )}
 

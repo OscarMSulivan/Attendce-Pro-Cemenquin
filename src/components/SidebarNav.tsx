@@ -26,6 +26,7 @@ import {
   Send,
   ListChecks,
   Radio,
+  MessageCircle,
   X,
   Award,
 } from 'lucide-react';
@@ -116,6 +117,15 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
       onClick: () => handleAction(() => onTabChange('oficina_live')),
       isActive: activeTab === 'oficina_live',
       badge: onlineUsersCount,
+      show: isAdminOnly,
+    },
+    {
+      id: 'checador_whatsapp',
+      label: 'Checador WhatsApp (Piloto)',
+      icon: MessageCircle,
+      onClick: () => handleAction(() => onTabChange('checador_whatsapp')),
+      isActive: activeTab === 'checador_whatsapp',
+      badge: 0,
       show: isAdminOnly,
     },
     {

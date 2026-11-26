@@ -85,6 +85,7 @@ interface ServerPortalDatabase {
   liveActivityFeed?: any[];
   evaluationCampaigns?: unknown[];
   evaluationRecords?: unknown[];
+  fieldCheckins?: unknown[];
   updatedAt?: string;
 }
 
@@ -93,6 +94,7 @@ const BASE64_FIELDS = new Set([
   'formatoSubidoBase64',
   'archivoFormatoBase64',
   'excelTrabajadoBase64',
+  'photoBase64',
 ]);
 
 function ensureDataDir(): void {
@@ -2211,6 +2213,207 @@ async function startServer() {
         error: err?.message || 'Error al verificar el código y restablecer la contraseña.',
       });
     }
+  });
+
+  // ============================================================================
+  // PILOTO: CHECADOR DE CAMPO / WHATSAPP (TOKENS 1-TOQUE + GPS + SELFIE + SSE)
+  // ============================================================================
+  interface ServerFieldCheckinSession {
+    token: string;
+    employeeId: string;
+    employeeName: string;
+    supervisor: string;
+    puesto?: string;
+    tipo: 'entrada' | 'salida';
+    createdAt: string;
+    expiresAt: string;
+    used: boolean;
+  }
+
+  const fieldCheckinTokens = new Map<string, ServerFieldCheckinSession>();
+
+  const cleanupExpiredFieldTokens = () => {
+    const now = Date.now();
+    for (const [k, v] of fieldCheckinTokens.entries()) {
+      if (new Date(v.expiresAt).getTime() < now) {
+        fieldCheckinTokens.delete(k);
+      }
+    }
+  };
+
+  app.post('/api/field-checkin/token', (req, res) => {
+    try {
+      cleanupExpiredFieldTokens();
+      const body = req.body || {};
+      const employeeId = String(body.employeeId || '').trim();
+      const employeeName = String(body.employeeName || '').trim();
+      const supervisor = String(body.supervisor || 'PROMOTORES CAMPO').trim();
+      const puesto = body.puesto ? String(body.puesto).trim() : undefined;
+      const tipo = body.tipo === 'salida' ? 'salida' : 'entrada';
+
+      if (!employeeName) {
+        return res.status(400).json({ ok: false, error: 'Nombre del promotor requerido.' });
+      }
+
+      const token = crypto.randomBytes(12).toString('hex');
+      const now = Date.now();
+      const session: ServerFieldCheckinSession = {
+        token,
+        employeeId: employeeId || '00000',
+        employeeName,
+        supervisor,
+        puesto,
+        tipo,
+        createdAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 30 * 60 * 1000).toISOString(), // 30 min para demo/campo
+        used: false,
+      };
+      fieldCheckinTokens.set(token, session);
+
+      return res.json({ ok: true, session });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Error al generar token.' });
+    }
+  });
+
+  app.get('/api/field-checkin/token/:token', (req, res) => {
+    cleanupExpiredFieldTokens();
+    const token = String(req.params.token || '').trim();
+    const session = fieldCheckinTokens.get(token);
+    if (!session) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Este enlace de checada expiró o no es válido. Solicita uno nuevo en WhatsApp.',
+      });
+    }
+    return res.json({ ok: true, session });
+  });
+
+  app.get('/api/field-checkin/records', (_req, res) => {
+    const db = readDatabase();
+    const records = Array.isArray(db.fieldCheckins) ? db.fieldCheckins : [];
+    return res.json({ ok: true, records });
+  });
+
+  app.post('/api/field-checkin/submit', (req, res) => {
+    try {
+      cleanupExpiredFieldTokens();
+      const body = req.body || {};
+      const token = body.token ? String(body.token).trim() : '';
+      const source = body.source === 'whatsapp_simulator' ? 'whatsapp_simulator' : 'whatsapp_mobile';
+
+      let employeeId = String(body.employeeId || '').trim();
+      let employeeName = String(body.employeeName || '').trim();
+      let supervisor = String(body.supervisor || 'PROMOTORES CAMPO').trim();
+      let puesto = body.puesto ? String(body.puesto).trim() : undefined;
+      let tipo: 'entrada' | 'salida' = body.tipo === 'salida' ? 'salida' : 'entrada';
+
+      if (source === 'whatsapp_mobile') {
+        const session = fieldCheckinTokens.get(token);
+        if (!session) {
+          return res.status(404).json({
+            ok: false,
+            error: 'El enlace expiró o no es válido. Solicita un nuevo enlace en WhatsApp.',
+          });
+        }
+        if (session.used) {
+          return res.status(409).json({
+            ok: false,
+            error: 'Este enlace ya fue utilizado para registrar una checada.',
+          });
+        }
+        employeeId = session.employeeId;
+        employeeName = session.employeeName;
+        supervisor = session.supervisor;
+        puesto = session.puesto;
+        tipo = session.tipo;
+        session.used = true;
+        fieldCheckinTokens.set(token, session);
+      }
+
+      if (!employeeName) {
+        return res.status(400).json({ ok: false, error: 'Falta el nombre del promotor.' });
+      }
+
+      const now = new Date();
+      // Fecha/hora local enviada por el dispositivo (o servidor como fallback)
+      const isoDate =
+        typeof body.isoDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.isoDate)
+          ? body.isoDate
+          : now.toISOString().slice(0, 10);
+      const hora =
+        typeof body.hora === 'string' && /^\d{2}:\d{2}$/.test(body.hora)
+          ? body.hora
+          : `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const record = {
+        id: `fc_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+        token: token || undefined,
+        employeeId: employeeId || '00000',
+        employeeName,
+        supervisor,
+        puesto,
+        tipo,
+        timestamp: now.toISOString(),
+        isoDate,
+        hora,
+        latitude: typeof body.latitude === 'number' && Number.isFinite(body.latitude) ? body.latitude : null,
+        longitude: typeof body.longitude === 'number' && Number.isFinite(body.longitude) ? body.longitude : null,
+        accuracyMeters:
+          typeof body.accuracyMeters === 'number' && Number.isFinite(body.accuracyMeters)
+            ? Math.round(body.accuracyMeters)
+            : null,
+        puntoVenta: String(body.puntoVenta || 'Punto de Venta en Campo').trim(),
+        notas: body.notas ? String(body.notas).trim() : undefined,
+        photoBase64:
+          typeof body.photoBase64 === 'string' && body.photoBase64.startsWith('data:image/')
+            ? body.photoBase64
+            : undefined,
+        source,
+        injectedToPayroll: false,
+      };
+
+      const db = readDatabase();
+      const prev = Array.isArray(db.fieldCheckins) ? db.fieldCheckins : [];
+      const next = [record, ...prev].slice(0, 200);
+      writeDatabase({ fieldCheckins: next });
+
+      broadcastRealtimeEvent({
+        type: 'field_checkin_update',
+        records: next,
+        latestRecord: record,
+      });
+
+      return res.json({ ok: true, record, records: next });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Error al registrar checada.' });
+    }
+  });
+
+  app.post('/api/field-checkin/records/:id/mark-injected', (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const db = readDatabase();
+    const prev = Array.isArray(db.fieldCheckins) ? (db.fieldCheckins as any[]) : [];
+    const next = prev.map((r) => (r?.id === id ? { ...r, injectedToPayroll: true } : r));
+    writeDatabase({ fieldCheckins: next });
+    broadcastRealtimeEvent({ type: 'field_checkin_update', records: next });
+    return res.json({ ok: true, records: next });
+  });
+
+  app.delete('/api/field-checkin/records/:id', (req, res) => {
+    const id = String(req.params.id || '').trim();
+    const db = readDatabase();
+    const prev = Array.isArray(db.fieldCheckins) ? (db.fieldCheckins as any[]) : [];
+    const next = prev.filter((r) => r?.id !== id);
+    writeDatabase({ fieldCheckins: next });
+    broadcastRealtimeEvent({ type: 'field_checkin_update', records: next });
+    return res.json({ ok: true, records: next });
+  });
+
+  app.delete('/api/field-checkin/records', (_req, res) => {
+    writeDatabase({ fieldCheckins: [] });
+    broadcastRealtimeEvent({ type: 'field_checkin_update', records: [] });
+    return res.json({ ok: true, records: [] });
   });
 
   if (process.env.NODE_ENV !== 'production') {

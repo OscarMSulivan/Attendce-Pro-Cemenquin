@@ -31,7 +31,8 @@ export interface RealtimePortalPayload {
     | 'expiring_reminder'
     | 'custom_push'
     | 'presence_update'
-    | 'admin_ping';
+    | 'admin_ping'
+    | 'field_checkin_update';
   timestamp: string;
   actorId?: string;
   actorName?: string;
@@ -39,6 +40,8 @@ export interface RealtimePortalPayload {
   targetSupervisor?: string;
   targetRole?: 'supervisor' | 'rh' | 'admin' | 'all';
   targetTab?: string;
+  records?: any[];
+  latestRecord?: any;
   state?: {
     users?: PortalUser[];
     incidents?: IncidentRequest[];
