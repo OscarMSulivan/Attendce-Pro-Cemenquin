@@ -893,7 +893,7 @@ export default function App() {
   useEffect(() => {
     if (!isServerHydrated) return;
     const hasActiveDispersalWithDeadline = dispersals.some(
-      d => !d.cancelada && Boolean(d.limiteLiberacion)
+      d => !d.cancelada && !d.cerrada && Boolean(d.limiteLiberacion)
     );
     if (!hasActiveDispersalWithDeadline) return;
 
@@ -4227,14 +4227,16 @@ export default function App() {
 
   // Verificar si la semana actual ya fue dispersada (total o parcialmente) por Nóminas/RH
   const currentWeekDispersalObj = useMemo(() => {
+    const isPayrollAdmin = userHasModuleAccess(currentUser, 'nomina');
     const exactMatch = dispersals.find(d => d.semanaNumero === currentWeekNumber);
-    if (exactMatch) return exactMatch;
-    // Para supervisores (o si la semana en pantalla no coincide aún con la última dispersión activa),
-    // resolver la dispersión activa vigente que incluya alguna de sus listas
+    if (exactMatch && (isPayrollAdmin || !exactMatch.cerrada)) return exactMatch;
+    // Para supervisores (o si la semana en pantalla no coincide aún con la última dispersión abierta),
+    // resolver la dispersión abierta vigente que incluya alguna de sus listas
     return dispersals.find(
       d =>
         !d.cancelada &&
-        (userHasModuleAccess(currentUser, 'nomina') ||
+        !d.cerrada &&
+        (isPayrollAdmin ||
           d.supervisoresNotificados.some(s =>
             workListSupervisors.includes(s.trim().toUpperCase())
           ))
@@ -4246,13 +4248,14 @@ export default function App() {
     if (
       currentWeekDispersalObj &&
       !currentWeekDispersalObj.cancelada &&
+      (userHasModuleAccess(currentUser, 'nomina') || !currentWeekDispersalObj.cerrada) &&
       Array.isArray(currentWeekDispersalObj.reportesSnapshot) &&
       currentWeekDispersalObj.reportesSnapshot.length > 0
     ) {
       return currentWeekDispersalObj.reportesSnapshot as EmployeeReport[];
     }
     return [];
-  }, [reportes, currentWeekDispersalObj]);
+  }, [reportes, currentWeekDispersalObj, currentUser]);
 
   // Si reportes está vacío pero existe un snapshot activo en la dispersión, hidratarlo en memoria local
   useEffect(() => {
@@ -4260,6 +4263,7 @@ export default function App() {
       reportes.length === 0 &&
       currentWeekDispersalObj &&
       !currentWeekDispersalObj.cancelada &&
+      !currentWeekDispersalObj.cerrada &&
       Array.isArray(currentWeekDispersalObj.reportesSnapshot) &&
       currentWeekDispersalObj.reportesSnapshot.length > 0
     ) {
@@ -4274,8 +4278,44 @@ export default function App() {
   }, [reportes.length, currentWeekDispersalObj, selectedWeek]);
 
   const isCurrentWeekDispersed = useMemo(() => {
-    return activeReportesOrSnapshot.length > 0 && Boolean(currentWeekDispersalObj && !currentWeekDispersalObj.cancelada);
+    return (
+      activeReportesOrSnapshot.length > 0 &&
+      Boolean(
+        currentWeekDispersalObj &&
+          !currentWeekDispersalObj.cancelada &&
+          !currentWeekDispersalObj.cerrada
+      )
+    );
   }, [activeReportesOrSnapshot.length, currentWeekDispersalObj]);
+
+  // Cerrar o reabrir una nómina dispersada (al cerrarla desaparece para los supervisores pero se mantiene en historial de RH)
+  const handleToggleClosePayroll = useCallback(
+    (dispersal: PayrollDispersal, shouldClose: boolean) => {
+      const now = new Date().toISOString();
+      setDispersals(prev => {
+        const updated = prev.map(d =>
+          d.id === dispersal.id
+            ? {
+                ...d,
+                cerrada: shouldClose,
+                fechaCierre: shouldClose ? now : undefined,
+                cerradaPor: shouldClose ? currentUser.name : undefined,
+              }
+            : d
+        );
+        PortalService.saveDispersals(updated);
+        return updated;
+      });
+
+      showToast(
+        shouldClose
+          ? `🔒 Nómina Semana ${dispersal.semanaNumero} cerrada. Desapareció de la vista de supervisores y se conserva en tu historial.`
+          : `🔓 Nómina Semana ${dispersal.semanaNumero} reabierta y visible nuevamente para los supervisores.`,
+        shouldClose ? 'info' : 'success'
+      );
+    },
+    [currentUser.name]
+  );
 
   const dispersedSupervisorsCount = useMemo(() => {
     if (!currentWeekDispersalObj) return 0;
@@ -5177,6 +5217,7 @@ export default function App() {
                       }
                       setPortalTab('semaforo');
                     }}
+                    onToggleClosePayroll={handleToggleClosePayroll}
                     onCancelAndDeletePayroll={(opts = {}) =>
                       handleCancelDispersal(
                         opts.semanaNumero ?? currentWeekNumber,

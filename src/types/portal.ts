@@ -422,6 +422,9 @@ export interface PayrollDispersal {
   fechaCancelacion?: string;        // ISO string
   canceladoPor?: string;            // Nombre de quien canceló
   motivoCancelacion?: string;       // Motivo (ej: "No trabajó su nómina", etc.)
+  cerrada?: boolean;                // Indica si la nómina fue cerrada por RH (se conserva en historial pero se oculta a supervisores)
+  fechaCierre?: string;             // ISO string de cierre
+  cerradaPor?: string;              // Nombre de quien cerró la nómina
   supervisoresCancelados?: string[]; // Si se cancelaron listas específicas
   empleadosCount?: number;          // Total de colaboradores incluidos en la dispersión
   totalHorasNormales?: number;      // Suma de horas normales al momento de dispersar

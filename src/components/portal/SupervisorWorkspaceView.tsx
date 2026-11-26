@@ -133,12 +133,13 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     ? selectedListForWork
     : userAssignedLists[0] || currentUser.name.toUpperCase();
 
-  // Buscar si RH dispersó la semana actual (o una dispersión activa vigente) específicamente para esta lista de supervisor
+  // Buscar si RH dispersó la semana actual (o una dispersión abierta vigente) específicamente para esta lista de supervisor
   const currentDispersal = useMemo(() => {
     const exactMatch = dispersals.find(d => d.semanaNumero === currentWeekNumber);
     if (
       exactMatch &&
       !exactMatch.cancelada &&
+      !exactMatch.cerrada &&
       exactMatch.supervisoresNotificados.some(
         s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
       )
@@ -148,11 +149,15 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     const activeForTarget = dispersals.find(
       d =>
         !d.cancelada &&
+        !d.cerrada &&
         d.supervisoresNotificados.some(
           s => s.trim().toUpperCase() === targetSupervisor.trim().toUpperCase()
         )
     );
-    return activeForTarget || exactMatch;
+    if (activeForTarget) return activeForTarget;
+    // Si la semana actual está cerrada, no mostrarla al supervisor
+    if (exactMatch?.cerrada) return undefined;
+    return exactMatch;
   }, [dispersals, currentWeekNumber, targetSupervisor]);
 
   // Filtrar empleados y reportes de la semana correspondientes a la lista seleccionada actualmente
@@ -164,6 +169,21 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
   }, [assignedEmployees, userAssignedLists.length, targetSupervisor]);
 
   const activeListWeeklyReports = useMemo(() => {
+    // Si no hay ninguna dispersión abierta para este supervisor (ej. RH cerró la nómina), ocultar los reportes
+    if (!currentDispersal || currentDispersal.cerrada || currentDispersal.cancelada) {
+      return [];
+    }
+
+    if (
+      Array.isArray(currentDispersal.reportesSnapshot) &&
+      currentDispersal.reportesSnapshot.length > 0 &&
+      currentDispersal.semanaNumero !== currentWeekNumber
+    ) {
+      return (currentDispersal.reportesSnapshot as EmployeeReport[]).filter(
+        r => (r.empleado?.jefe || '').trim().toUpperCase() === targetSupervisor
+      );
+    }
+
     const filteredPrimary =
       userAssignedLists.length <= 1
         ? weeklyReports
@@ -173,8 +193,6 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     if (filteredPrimary.length > 0) return filteredPrimary;
 
     if (
-      currentDispersal &&
-      !currentDispersal.cancelada &&
       Array.isArray(currentDispersal.reportesSnapshot) &&
       currentDispersal.reportesSnapshot.length > 0
     ) {
@@ -183,7 +201,7 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
       );
     }
     return [];
-  }, [weeklyReports, userAssignedLists.length, targetSupervisor, currentDispersal]);
+  }, [weeklyReports, userAssignedLists.length, targetSupervisor, currentDispersal, currentWeekNumber]);
 
   // Estados para el modal de liberación de nómina
   const [isWorkingOnRelease, setIsWorkingOnRelease] = useState(false);
