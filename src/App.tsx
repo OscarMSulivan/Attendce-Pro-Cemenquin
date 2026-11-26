@@ -600,6 +600,7 @@ export default function App() {
                 minutosRebote: hydratedConfig.minutosRebote,
               }
             );
+            lastSyncedEventosRef.current = reconsolidado;
             setEventosDB(reconsolidado);
 
             const [startISO, endISO] = (hydratedWeek || '').split('|');
@@ -880,12 +881,16 @@ export default function App() {
     emailConfig,
   ]);
 
-  // Sincronizar eventosDB al servidor únicamente cuando cambie el catálogo de checadas biométricas
+  const lastSyncedEventosRef = useRef<EventsDB | null>(null);
+
+  // Sincronizar eventosDB al servidor únicamente cuando cambie realmente por acción del usuario (evita re-subir al hidratar)
   useEffect(() => {
     if (!isServerHydrated || Object.keys(eventosDB).length === 0) return;
+    if (lastSyncedEventosRef.current === eventosDB) return;
+    lastSyncedEventosRef.current = eventosDB;
     const timer = setTimeout(() => {
       PortalService.pushToServer({ eventosDB });
-    }, 400);
+    }, 500);
     return () => clearTimeout(timer);
   }, [isServerHydrated, eventosDB]);
 
@@ -1037,9 +1042,11 @@ export default function App() {
     });
 
     const unsubStream = PushNotificationService.subscribe(payload => {
-      // Eventos de Monitoreo en Vivo (The Office Pixel Art — Watcher de Pixel HQ)
+      // Eventos de Monitoreo en Vivo (The Office Pixel Art — solo actualizar estado para Admin para evitar re-renders a RH/supervisores)
       if (payload.type === 'presence_update') {
-        applyIncomingPresence(payload.presence, payload.activityFeed);
+        if (currentUser && (currentUser.role === 'admin' || currentUser.id === 'user_admin')) {
+          applyIncomingPresence(payload.presence, payload.activityFeed);
+        }
         return;
       }
 

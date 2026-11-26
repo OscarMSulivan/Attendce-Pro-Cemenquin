@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import nodemailer from 'nodemailer';
 import { createServer as createViteServer } from 'vite';
 
@@ -178,19 +179,37 @@ function hydrateBase64String(ref: string): string {
   return '';
 }
 
-function transformBase64FieldsDeep(node: any, mode: 'offload' | 'hydrate'): any {
+const BASE64_CONTAINER_KEYS = new Set([
+  'incidents',
+  'releases',
+  'dispersals',
+  'reportes',
+  'fieldCheckins',
+]);
+
+function transformBase64FieldsDeep(
+  node: any,
+  mode: 'offload' | 'hydrate',
+  isRoot = true,
+): any {
   if (node === null || node === undefined || typeof node !== 'object') {
     return node;
   }
   if (Array.isArray(node)) {
-    return node.map((item) => transformBase64FieldsDeep(item, mode));
+    return node.map((item) => transformBase64FieldsDeep(item, mode, false));
   }
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(node)) {
+    // A nivel raíz solo recorrer colecciones que pueden contener adjuntos Base64
+    // (evita recorrer decenas de miles de nodos de eventosDB / empleadosDB en cada escritura)
+    if (isRoot && !BASE64_CONTAINER_KEYS.has(k)) {
+      out[k] = v;
+      continue;
+    }
     if (BASE64_FIELDS.has(k) && typeof v === 'string' && v.length > 0) {
       out[k] = mode === 'offload' ? offloadBase64String(v, k) : hydrateBase64String(v);
     } else if (v !== null && typeof v === 'object') {
-      out[k] = transformBase64FieldsDeep(v, mode);
+      out[k] = transformBase64FieldsDeep(v, mode, false);
     } else {
       out[k] = v;
     }
@@ -200,6 +219,13 @@ function transformBase64FieldsDeep(node: any, mode: 'offload' | 'hydrate'): any 
 
 let cachedMemoryDb: ServerPortalDatabase | null = null;
 let cachedDiskMtimeMs = 0;
+let cachedStateJson: string | null = null;
+let cachedStateGzip: Buffer | null = null;
+
+function invalidatePortalStateHttpCache(): void {
+  cachedStateJson = null;
+  cachedStateGzip = null;
+}
 
 function readDatabase(): ServerPortalDatabase {
   try {
@@ -687,17 +713,21 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
     updatedAt: new Date().toISOString(),
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, 'offload');
-  const serializedJson = JSON.stringify(diskSnapshot, null, 2);
+  const serializedJson = JSON.stringify(diskSnapshot);
   const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmpFile, serializedJson, 'utf-8');
   fs.renameSync(tmpFile, DB_FILE);
-  try {
-    const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
-    fs.writeFileSync(tmpBackup, serializedJson, 'utf-8');
-    fs.renameSync(tmpBackup, PERSISTENT_BACKUP_DB_FILE);
-  } catch {
-    // ignore if backup dir is not writable
-  }
+
+  // Respaldo espejo asíncrono para no bloquear el hilo principal de Node
+  const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+  fs.promises
+    .writeFile(tmpBackup, serializedJson, 'utf-8')
+    .then(() => fs.promises.rename(tmpBackup, PERSISTENT_BACKUP_DB_FILE))
+    .catch(() => {
+      // ignore if backup dir is not writable
+    });
+
+  invalidatePortalStateHttpCache();
   try {
     cachedMemoryDb = updated;
     cachedDiskMtimeMs = fs.statSync(DB_FILE).mtimeMs;
@@ -1116,17 +1146,45 @@ async function startServer() {
     });
   });
 
-  // Obtener el estado centralizado del portal
-  app.get('/api/portal/state', (_req, res) => {
+  // Obtener el estado centralizado del portal (con compresión GZIP nativa cacheada en memoria)
+  app.get('/api/portal/state', (req, res) => {
     const db = readDatabase();
-    res.json({
-      ...db,
-      serverInfo: {
-        hostname: os.hostname(),
-        uptime: Math.round(process.uptime()),
-        storagePath: DB_FILE,
-      },
-    });
+    if (!cachedStateJson) {
+      cachedStateJson = JSON.stringify({
+        ...db,
+        serverInfo: {
+          hostname: os.hostname(),
+          uptime: Math.round(process.uptime()),
+          storagePath: DB_FILE,
+        },
+      });
+      cachedStateGzip = null;
+    }
+
+    const acceptEncoding = String(req.headers['accept-encoding'] || '');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Vary', 'Accept-Encoding');
+
+    if (acceptEncoding.includes('gzip')) {
+      if (cachedStateGzip) {
+        res.setHeader('Content-Encoding', 'gzip');
+        return res.send(cachedStateGzip);
+      }
+      const payloadToCompress = cachedStateJson;
+      zlib.gzip(payloadToCompress, { level: zlib.constants.Z_BEST_SPEED }, (err, compressed) => {
+        if (err) {
+          return res.send(payloadToCompress);
+        }
+        if (cachedStateJson === payloadToCompress) {
+          cachedStateGzip = compressed;
+        }
+        res.setHeader('Content-Encoding', 'gzip');
+        return res.send(compressed);
+      });
+      return;
+    }
+
+    return res.send(cachedStateJson);
   });
 
   // Sincronizar cambios (usuarios, listas asignadas, incidencias, liberaciones, dispersiones, notificaciones y nómina activa)
@@ -2424,8 +2482,25 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(
+      '/assets',
+      express.static(path.join(distPath, 'assets'), {
+        maxAge: '1y',
+        immutable: true,
+      })
+    );
+    app.use(
+      express.static(distPath, {
+        maxAge: '1h',
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('index.html')) {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
+import zlib from "zlib";
 import nodemailer from "nodemailer";
 import { createServer as createViteServer } from "vite";
 var PORT = Number(process.env.PORT) || 3e3;
@@ -110,19 +111,30 @@ function hydrateBase64String(ref) {
   }
   return "";
 }
-function transformBase64FieldsDeep(node, mode) {
+var BASE64_CONTAINER_KEYS = /* @__PURE__ */ new Set([
+  "incidents",
+  "releases",
+  "dispersals",
+  "reportes",
+  "fieldCheckins"
+]);
+function transformBase64FieldsDeep(node, mode, isRoot = true) {
   if (node === null || node === void 0 || typeof node !== "object") {
     return node;
   }
   if (Array.isArray(node)) {
-    return node.map((item) => transformBase64FieldsDeep(item, mode));
+    return node.map((item) => transformBase64FieldsDeep(item, mode, false));
   }
   const out = {};
   for (const [k, v] of Object.entries(node)) {
+    if (isRoot && !BASE64_CONTAINER_KEYS.has(k)) {
+      out[k] = v;
+      continue;
+    }
     if (BASE64_FIELDS.has(k) && typeof v === "string" && v.length > 0) {
       out[k] = mode === "offload" ? offloadBase64String(v, k) : hydrateBase64String(v);
     } else if (v !== null && typeof v === "object") {
-      out[k] = transformBase64FieldsDeep(v, mode);
+      out[k] = transformBase64FieldsDeep(v, mode, false);
     } else {
       out[k] = v;
     }
@@ -131,6 +143,12 @@ function transformBase64FieldsDeep(node, mode) {
 }
 var cachedMemoryDb = null;
 var cachedDiskMtimeMs = 0;
+var cachedStateJson = null;
+var cachedStateGzip = null;
+function invalidatePortalStateHttpCache() {
+  cachedStateJson = null;
+  cachedStateGzip = null;
+}
 function readDatabase() {
   try {
     ensureDataDir();
@@ -475,16 +493,14 @@ function writeDatabase(partial) {
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, "offload");
-  const serializedJson = JSON.stringify(diskSnapshot, null, 2);
+  const serializedJson = JSON.stringify(diskSnapshot);
   const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
   fs.writeFileSync(tmpFile, serializedJson, "utf-8");
   fs.renameSync(tmpFile, DB_FILE);
-  try {
-    const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
-    fs.writeFileSync(tmpBackup, serializedJson, "utf-8");
-    fs.renameSync(tmpBackup, PERSISTENT_BACKUP_DB_FILE);
-  } catch {
-  }
+  const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+  fs.promises.writeFile(tmpBackup, serializedJson, "utf-8").then(() => fs.promises.rename(tmpBackup, PERSISTENT_BACKUP_DB_FILE)).catch(() => {
+  });
+  invalidatePortalStateHttpCache();
   try {
     cachedMemoryDb = updated;
     cachedDiskMtimeMs = fs.statSync(DB_FILE).mtimeMs;
@@ -824,16 +840,41 @@ async function startServer() {
       sseClients.delete(clientEntry);
     });
   });
-  app.get("/api/portal/state", (_req, res) => {
+  app.get("/api/portal/state", (req, res) => {
     const db = readDatabase();
-    res.json({
-      ...db,
-      serverInfo: {
-        hostname: os.hostname(),
-        uptime: Math.round(process.uptime()),
-        storagePath: DB_FILE
+    if (!cachedStateJson) {
+      cachedStateJson = JSON.stringify({
+        ...db,
+        serverInfo: {
+          hostname: os.hostname(),
+          uptime: Math.round(process.uptime()),
+          storagePath: DB_FILE
+        }
+      });
+      cachedStateGzip = null;
+    }
+    const acceptEncoding = String(req.headers["accept-encoding"] || "");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Vary", "Accept-Encoding");
+    if (acceptEncoding.includes("gzip")) {
+      if (cachedStateGzip) {
+        res.setHeader("Content-Encoding", "gzip");
+        return res.send(cachedStateGzip);
       }
-    });
+      const payloadToCompress = cachedStateJson;
+      zlib.gzip(payloadToCompress, { level: zlib.constants.Z_BEST_SPEED }, (err, compressed) => {
+        if (err) {
+          return res.send(payloadToCompress);
+        }
+        if (cachedStateJson === payloadToCompress) {
+          cachedStateGzip = compressed;
+        }
+        res.setHeader("Content-Encoding", "gzip");
+        return res.send(compressed);
+      });
+      return;
+    }
+    return res.send(cachedStateJson);
   });
   app.post("/api/portal/sync", (req, res) => {
     try {
@@ -1842,8 +1883,25 @@ CemenQtime \xB7 Recursos Humanos y N\xF3minas`,
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(
+      "/assets",
+      express.static(path.join(distPath, "assets"), {
+        maxAge: "1y",
+        immutable: true
+      })
+    );
+    app.use(
+      express.static(distPath, {
+        maxAge: "1h",
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith("index.html")) {
+            res.setHeader("Cache-Control", "no-cache");
+          }
+        }
+      })
+    );
     app.get("*", (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
