@@ -25,7 +25,6 @@ import {
   PortalUser,
   getUserAllowedLists,
 } from '../../types/portal';
-import { generatePayrollExcelBase64 } from '../../services/excelExportService';
 import { PortalService } from '../../services/portalService';
 
 interface SendPayrollEmailModalProps {
@@ -360,6 +359,7 @@ export const SendPayrollEmailModal: React.FC<SendPayrollEmailModalProps> = ({
         let attachmentBase64: string | undefined;
 
         if (attachExcelFile && item.reportsForAttachment.length > 0) {
+          const { generatePayrollExcelBase64 } = await import('../../services/excelExportService');
           const excelData = await generatePayrollExcelBase64(
             item.reportsForAttachment,
             semanaNumero,

@@ -55,13 +55,6 @@ import {
   resolveScheduleCodeInCatalog,
   sincronizarReportesConHorarios
 } from './core/attendanceEngine';
-import { parseEmployeesFile } from './parsers/employeeParser';
-import { parseBiometricEventsFile, mergeEventsDB } from './parsers/biometricParser';
-import { parseVacationsFile } from './parsers/vacationParser';
-import {
-  exportPayrollExcelBySupervisor,
-  exportAllSupervisorPayrollsExcel,
-} from './services/excelExportService';
 import saveAs from 'file-saver';
 
 // Importaciones del Portal RH y Supervisores (Code-Splitting con React.lazy para carga rápida)
@@ -1750,6 +1743,7 @@ export default function App() {
     setStatusType('info');
 
     try {
+      const { parseEmployeesFile } = await import('./parsers/employeeParser');
       const result = await parseEmployeesFile(file, empresaOverride);
       const savedLocal = StorageService.loadSavedEmployees()?.empleados || {};
       const baseCatalog: Record<string, Employee> = {
@@ -2077,6 +2071,7 @@ export default function App() {
     setStatusType('info');
 
     try {
+      const { parseBiometricEventsFile, mergeEventsDB } = await import('./parsers/biometricParser');
       const result = await parseBiometricEventsFile(file, empleadosDB);
       const combinedRawEvents = mergeEventsDB(eventosDB, result.eventosDB);
       const consolidado = consolidarEventosConHorarios(combinedRawEvents, empleadosDB, horarios, {
@@ -2149,6 +2144,7 @@ export default function App() {
     setStatusType('info');
 
     try {
+      const { parseVacationsFile } = await import('./parsers/vacationParser');
       const result = await parseVacationsFile(file);
       setVacacionesDB(prev => ({ ...prev, ...result.vacacionesDB }));
       setStatusMessage(`✓ ${result.totalRegistros} incidencias de vacaciones registradas`);
@@ -3141,6 +3137,7 @@ export default function App() {
       const currentWeekObj = payrollWeeks.find(w => w.value === selectedWeek);
       const weekNumber = currentWeekObj?.weekNumber || 1;
 
+      const { exportPayrollExcelBySupervisor } = await import('./services/excelExportService');
       const nombreArchivo = await exportPayrollExcelBySupervisor(
         filteredReports,
         weekNumber,
@@ -3173,6 +3170,7 @@ export default function App() {
       const currentWeekObj = payrollWeeks.find(w => w.value === selectedWeek);
       const weekNumber = currentWeekObj?.weekNumber || 1;
 
+      const { exportAllSupervisorPayrollsExcel } = await import('./services/excelExportService');
       const downloadedFiles = await exportAllSupervisorPayrollsExcel(
         reportes,
         weekNumber,
@@ -4364,6 +4362,7 @@ export default function App() {
     setStatusMessage(`Generando Excel para ${supName}...`);
     setStatusType('info');
     try {
+      const { exportPayrollExcelBySupervisor } = await import('./services/excelExportService');
       const fileName = await exportPayrollExcelBySupervisor(supReports, currentWeekNumber, supName);
       setStatusMessage(`✓ Archivo descargado: ${fileName}`);
       setStatusType('success');

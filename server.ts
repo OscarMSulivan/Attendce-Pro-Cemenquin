@@ -2482,6 +2482,58 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const staticGzipCache = new Map<string, { buf: Buffer; contentType: string; isAsset: boolean }>();
+    const COMPRESSIBLE_MIME: Record<string, string> = {
+      '.js': 'application/javascript; charset=utf-8',
+      '.mjs': 'application/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.html': 'text/html; charset=utf-8',
+      '.svg': 'image/svg+xml; charset=utf-8',
+      '.json': 'application/json; charset=utf-8',
+    };
+
+    // Servir JS/CSS/HTML/SVG comprimidos con GZIP en memoria (reduce ~75% el peso en carga inicial)
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+      const acceptEnc = String(req.headers['accept-encoding'] || '');
+      if (!acceptEnc.includes('gzip')) return next();
+
+      const cleanUrl = (req.path || '/').split('?')[0];
+      const ext = path.extname(cleanUrl).toLowerCase();
+      const contentType = COMPRESSIBLE_MIME[ext];
+      if (!contentType) return next();
+
+      const resolved = path.resolve(distPath, `.${cleanUrl}`);
+      if (!resolved.startsWith(distPath)) return next();
+
+      const cached = staticGzipCache.get(resolved);
+      if (cached) {
+        res.setHeader('Content-Type', cached.contentType);
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.setHeader(
+          'Cache-Control',
+          cached.isAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
+        );
+        return res.send(cached.buf);
+      }
+
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return next();
+      const rawBuf = fs.readFileSync(resolved);
+      const gzBuf = zlib.gzipSync(rawBuf, { level: zlib.constants.Z_BEST_SPEED });
+      const isAsset = cleanUrl.startsWith('/assets/');
+      staticGzipCache.set(resolved, { buf: gzBuf, contentType, isAsset });
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.setHeader(
+        'Cache-Control',
+        isAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
+      );
+      return res.send(gzBuf);
+    });
+
     app.use(
       '/assets',
       express.static(path.join(distPath, 'assets'), {
