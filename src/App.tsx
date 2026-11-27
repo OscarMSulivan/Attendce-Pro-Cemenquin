@@ -4040,7 +4040,17 @@ export default function App() {
   };
 
   const handleDeletePortalUser = (userId: string) => {
+    if (userId === 'user_admin' || userId === currentUser.id) {
+      showToast('No es posible eliminar al Administrador General ni tu propia cuenta activa.', 'warning', 'Acción Protegida');
+      return;
+    }
     setPortalUsers(prev => {
+      const target = prev.find(u => u.id === userId);
+      const activeAdmins = prev.filter(u => u.role === 'admin' && u.active !== false);
+      if (target?.role === 'admin' && activeAdmins.length <= 1) {
+        showToast('Debe permanecer al menos un Administrador activo en el sistema.', 'warning', 'Acción Protegida');
+        return prev;
+      }
       const updated = prev.filter(u => u.id !== userId);
       PortalService.saveUsers(updated, [userId]);
       return updated;

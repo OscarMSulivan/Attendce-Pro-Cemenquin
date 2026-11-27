@@ -491,21 +491,19 @@ export class PortalService {
         data.evaluationRecords = resolvedEvalRecords;
       }
 
-      // Si el servidor tenía menos usuarios, dispersiones o evaluaciones que el almacenamiento local (ej. tras un push / redeploy),
-      // sincronizar inmediatamente al servidor los registros rescatados
+      // Si el servidor tenía menos usuarios o evaluaciones que el almacenamiento local (ej. tras un push / redeploy),
+      // sincronizar al servidor los registros rescatados (sin resucitar dispersiones/liberaciones canceladas)
       if (
         usersNeedSync ||
-        mergedDispersals.length > srvDispersals.length ||
-        Object.keys(mergedReleases).length > Object.keys(srvReleases).length ||
+        (srvDispersals.length === 0 && localDispersals.length > 0 && !data.updatedAt) ||
         evalCampaignsNeedSync ||
         evalRecordsNeedSync
       ) {
         this.pushToServer({
           users: mergedUsers,
           ...(mergedDeletedIds.length > 0 ? { deletedUserIds: mergedDeletedIds } : {}),
-          ...(mergedDispersals.length > srvDispersals.length ? { dispersals: mergedDispersals } : {}),
-          ...(Object.keys(mergedReleases).length > Object.keys(srvReleases).length
-            ? { releases: mergedReleases }
+          ...(srvDispersals.length === 0 && localDispersals.length > 0 && !data.updatedAt
+            ? { dispersals: mergedDispersals }
             : {}),
           ...(evalCampaignsNeedSync && resolvedEvalCampaigns
             ? { evaluationCampaigns: resolvedEvalCampaigns }
@@ -541,8 +539,8 @@ export class PortalService {
     }
     const isOmar =
       updatedUser.id === 'user_sup_omar' ||
-      (updatedUser.name && updatedUser.name.toUpperCase().includes('OMAR')) ||
-      (updatedUser.supervisorName && updatedUser.supervisorName.toUpperCase().includes('OMAR'));
+      (updatedUser.name && updatedUser.name.toUpperCase().includes('OMAR AVALOS')) ||
+      (updatedUser.supervisorName && updatedUser.supervisorName.toUpperCase().includes('OMAR AVALOS'));
     if (isOmar) {
       updatedUser = {
         ...updatedUser,
@@ -899,7 +897,6 @@ export class PortalService {
       ...cfg,
       updatedAt: cfg.updatedAt || new Date().toISOString(),
     };
-    console.log('[PortalService.saveEmailConfig] Persisting emailConfig payload before server sync:', payloadWithTimestamp);
     this.safeSetLocalStorage(STORAGE_KEYS.EMAIL_CONFIG, payloadWithTimestamp);
     this.pushToServer({
       emailConfig: payloadWithTimestamp,
@@ -1326,7 +1323,8 @@ export class PortalService {
       }
     });
     if (releasesChanged) {
-      this.saveReleases(releases);
+      this.safeSetLocalStorage(STORAGE_KEYS.RELEASES, releases);
+      this.pushToServer({ releases, deleteDispersal: true });
     }
 
     // Generar notificaciones en el sistema

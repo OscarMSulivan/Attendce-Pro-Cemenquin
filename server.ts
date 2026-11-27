@@ -90,7 +90,23 @@ interface ServerPortalDatabase {
   updatedAt?: string;
 }
 
+const MAX_UPLOAD_MEMORY_CACHE_ENTRIES = 150;
 const uploadMemoryCache = new Map<string, string>();
+let mirrorBackupQueue: Promise<void> = Promise.resolve();
+let isCheckingExpiringReminders = false;
+
+function setUploadMemoryCache(key: string, value: string): void {
+  if (uploadMemoryCache.has(key)) {
+    uploadMemoryCache.delete(key);
+  }
+  uploadMemoryCache.set(key, value);
+  while (uploadMemoryCache.size > MAX_UPLOAD_MEMORY_CACHE_ENTRIES) {
+    const oldestKey = uploadMemoryCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    uploadMemoryCache.delete(oldestKey);
+  }
+}
+
 const BASE64_FIELDS = new Set([
   'formatoSubidoBase64',
   'archivoFormatoBase64',
@@ -139,7 +155,7 @@ function offloadBase64String(raw: string, fieldName: string): string {
     } catch {
       // ignore backup upload error
     }
-    uploadMemoryCache.set(fileName, raw);
+    setUploadMemoryCache(fileName, raw);
     return `@upload:${fileName}`;
   } catch (err) {
     console.warn('No se pudo externalizar adjunto base64 a disco:', err);
@@ -159,7 +175,7 @@ function hydrateBase64String(ref: string): string {
     const filePath = path.join(UPLOADS_DIR, fileName);
     if (fs.existsSync(filePath)) {
       const content = fs.readFileSync(filePath, 'utf-8');
-      uploadMemoryCache.set(fileName, content);
+      setUploadMemoryCache(fileName, content);
       return content;
     }
     const backupFilePath = path.join(PERSISTENT_BACKUP_UPLOADS_DIR, fileName);
@@ -170,7 +186,7 @@ function hydrateBase64String(ref: string): string {
       } catch {
         // ignore restore write error
       }
-      uploadMemoryCache.set(fileName, content);
+      setUploadMemoryCache(fileName, content);
       return content;
     }
   } catch (err) {
@@ -257,6 +273,7 @@ function readDatabase(): ServerPortalDatabase {
     const parsed = JSON.parse(raw) as ServerPortalDatabase;
     cachedMemoryDb = transformBase64FieldsDeep(parsed, 'hydrate') as ServerPortalDatabase;
     cachedDiskMtimeMs = stat.mtimeMs;
+    invalidatePortalStateHttpCache();
     return cachedMemoryDb;
   } catch (err) {
     console.warn('Error leyendo base de datos local:', err);
@@ -714,17 +731,18 @@ function writeDatabase(partial: Partial<ServerPortalDatabase>): ServerPortalData
   };
   const diskSnapshot = transformBase64FieldsDeep(updated, 'offload');
   const serializedJson = JSON.stringify(diskSnapshot);
-  const tmpFile = `${DB_FILE}.tmp.${process.pid}.${Date.now()}`;
+  const uniqueSuffix = `${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+  const tmpFile = `${DB_FILE}.tmp.${uniqueSuffix}`;
   fs.writeFileSync(tmpFile, serializedJson, 'utf-8');
   fs.renameSync(tmpFile, DB_FILE);
 
-  // Respaldo espejo asíncrono para no bloquear el hilo principal de Node
-  const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${process.pid}.${Date.now()}`;
-  fs.promises
-    .writeFile(tmpBackup, serializedJson, 'utf-8')
+  // Respaldo espejo asíncrono serializado para evitar colisiones o sobrescritura fuera de orden
+  const tmpBackup = `${PERSISTENT_BACKUP_DB_FILE}.tmp.${uniqueSuffix}`;
+  mirrorBackupQueue = mirrorBackupQueue
+    .then(() => fs.promises.writeFile(tmpBackup, serializedJson, 'utf-8'))
     .then(() => fs.promises.rename(tmpBackup, PERSISTENT_BACKUP_DB_FILE))
     .catch(() => {
-      // ignore if backup dir is not writable
+      fs.promises.unlink(tmpBackup).catch(() => {});
     });
 
   invalidatePortalStateHttpCache();
@@ -811,6 +829,11 @@ async function checkAndSendExpiringReminders(options?: {
   smtpSent: number;
   details: string[];
 }> {
+  if (isCheckingExpiringReminders && !options?.forceTest) {
+    return { checked: false, remindersSent: 0, smtpSent: 0, details: ['Revisión ya en curso'] };
+  }
+  isCheckingExpiringReminders = true;
+  try {
   const db = readDatabase();
   const emailCfg = resolveEmailConfig(options?.overrideEmailConfig);
 
@@ -1072,6 +1095,9 @@ async function checkAndSendExpiringReminders(options?: {
     smtpSent,
     details,
   };
+  } finally {
+    isCheckingExpiringReminders = false;
+  }
 }
 
 // Clientes conectados en tiempo real mediante Server-Sent Events (SSE) para Web Push sin recargar la página
@@ -1163,6 +1189,7 @@ async function startServer() {
 
     const acceptEncoding = String(req.headers['accept-encoding'] || '');
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
     res.setHeader('Vary', 'Accept-Encoding');
 
     if (acceptEncoding.includes('gzip')) {
@@ -1327,7 +1354,8 @@ async function startServer() {
         });
       }
 
-      res.json({ ok: true, user: matched });
+      const { password: _omitted, ...safeUser } = matched;
+      res.json({ ok: true, user: safeUser });
     } catch (err: any) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -1670,13 +1698,13 @@ async function startServer() {
         });
       }
 
-      // Persistir la configuración probada en el estado del proyecto
+      await transporter.verify();
+
+      // Persistir la configuración únicamente después de verificar que conecta correctamente
       writeDatabase({
         emailConfig: activeEmailConfig,
         config: { emailServer: activeEmailConfig },
       });
-
-      await transporter.verify();
 
       // Enviar correo de prueba al mismo remitente
       const info = await transporter.sendMail({
@@ -2029,69 +2057,11 @@ async function startServer() {
     }
   });
 
-  // Almacén en memoria de códigos temporales de recuperación (expiración de 10 minutos)
+  // Almacén en memoria de códigos temporales de recuperación (expiración de 10 minutos, máx 5 intentos)
   const passwordResetTokens = new Map<
     string,
-    { code: string; userId: string; userEmail: string; expiresAt: number }
+    { code: string; userId: string; userEmail: string; expiresAt: number; attempts: number }
   >();
-
-  // Endpoint de autenticación validada en servidor
-  app.post('/api/auth/login', (req, res) => {
-    try {
-      const { identifier, password } = req.body || {};
-      const cleanId = String(identifier || '').trim().toLowerCase();
-      const rawPassword = String(password || '');
-      if (!cleanId || !rawPassword) {
-        return res.status(200).json({
-          ok: false,
-          error: 'Ingresa tus credenciales completas.',
-        });
-      }
-
-      const db = readDatabase();
-      const allUsers = Array.isArray(db.users) ? db.users : [];
-      const cleanIdNumeric = cleanId.replace(/^0+/, '');
-
-      const matchedUser: any = allUsers.find((u: any) => {
-        if (!u || u.active === false) return false;
-        const emailMatch = String(u.email || '').trim().toLowerCase() === cleanId;
-        const usernameMatch = String(u.username || '').trim().toLowerCase() === cleanId;
-        const idMatch = String(u.id || '').trim().toLowerCase() === cleanId;
-        const empIdRaw = String(u.employeeId || '').trim().toLowerCase();
-        const empIdMatch =
-          Boolean(empIdRaw) &&
-          (empIdRaw === cleanId ||
-            (Boolean(cleanIdNumeric) && empIdRaw.replace(/^0+/, '') === cleanIdNumeric));
-        return emailMatch || usernameMatch || idMatch || empIdMatch;
-      });
-
-      if (!matchedUser) {
-        return res.status(200).json({
-          ok: false,
-          error: 'No se encontró ningún usuario activo con ese identificador.',
-        });
-      }
-
-      const expectedPass = matchedUser.password || '1234';
-      if (rawPassword !== expectedPass) {
-        return res.status(200).json({
-          ok: false,
-          error: 'Contraseña incorrecta.',
-        });
-      }
-
-      const { password: _omitted, ...safeUser } = matchedUser;
-      return res.status(200).json({
-        ok: true,
-        user: safeUser,
-      });
-    } catch (err: any) {
-      return res.status(200).json({
-        ok: false,
-        error: err?.message || 'Error al autenticar en el servidor.',
-      });
-    }
-  });
 
   // Endpoint para recuperación de contraseña por correo electrónico (sin exponer el código cuando el correo fue enviado)
   app.post('/api/auth/recover-password', async (req, res) => {
@@ -2133,21 +2103,23 @@ async function startServer() {
       }
 
       const targetEmail = String(matchedUser.email || '').trim();
-      const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+      const verificationCode = String(crypto.randomInt(100000, 1000000));
       const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutos de vigencia
       passwordResetTokens.set(String(matchedUser.id), {
         code: verificationCode,
         userId: String(matchedUser.id),
         userEmail: targetEmail,
         expiresAt,
+        attempts: 0,
       });
 
       const emailCfg = resolveEmailConfig();
+      const hasSmtpConfigured = Boolean(emailCfg.smtpUser && emailCfg.smtpPass);
 
       let emailSent = false;
       let smtpErrorMsg = '';
 
-      if (emailCfg.smtpUser && emailCfg.smtpPass && targetEmail.includes('@')) {
+      if (hasSmtpConfigured && targetEmail.includes('@')) {
         try {
           const { transporter, cleanUser } = createSmtpTransporter(emailCfg, 8000);
           await transporter.sendMail({
@@ -2162,7 +2134,7 @@ async function startServer() {
                   <h2 style="margin: 6px 0 0 0; font-size: 18px; color: #ffffff;">🔐 Recuperación de Contraseña</h2>
                 </div>
                 <div style="padding: 24px; color: #334155; font-size: 14px; line-height: 1.6;">
-                  <p style="margin-top: 0;">Hola <strong>${matchedUser.name}</strong>,</p>
+                  <p style="margin-top: 0;">Hola <strong>${String(matchedUser.name || '').replace(/[<>&"]/g, '')}</strong>,</p>
                   <p>Recibimos una solicitud para restablecer tu contraseña de acceso al sistema <strong>CemenQtime</strong>. Utiliza el siguiente código de verificación de 6 dígitos (válido por 10 minutos):</p>
                   <div style="background: #f8fafc; border: 2px dashed #0f172a; border-radius: 12px; padding: 16px; text-align: center; margin: 20px 0;">
                     <div style="font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Código de Verificación</div>
@@ -2170,9 +2142,9 @@ async function startServer() {
                   </div>
                   <div style="background: #f1f5f9; border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #475569;">
                     <strong>Datos de tu cuenta:</strong><br/>
-                    Usuario: <strong>${matchedUser.username || matchedUser.email}</strong><br/>
-                    Correo registrado: <strong>${targetEmail}</strong>
-                    ${matchedUser.employeeId ? `<br/>No. de Empleado: <strong>#${matchedUser.employeeId}</strong>` : ''}
+                    Usuario: <strong>${String(matchedUser.username || matchedUser.email || '').replace(/[<>&"]/g, '')}</strong><br/>
+                    Correo registrado: <strong>${targetEmail.replace(/[<>&"]/g, '')}</strong>
+                    ${matchedUser.employeeId ? `<br/>No. de Empleado: <strong>#${String(matchedUser.employeeId).replace(/[<>&"]/g, '')}</strong>` : ''}
                   </div>
                   <p style="font-size: 12px; color: #64748b; margin-top: 18px; margin-bottom: 0;">
                     Si tú no solicitaste este cambio, puedes ignorar este mensaje.
@@ -2193,8 +2165,8 @@ async function startServer() {
         userId: matchedUser.id,
         userName: matchedUser.name,
         userEmail: targetEmail,
-        // Por seguridad, solo se envía fallbackCode cuando NO hay servidor SMTP activo (modo local/demo)
-        ...(emailSent ? {} : { fallbackCode: verificationCode }),
+        // Nunca exponer fallbackCode si el servidor SMTP está configurado (evita secuestro si SMTP falla)
+        ...(!hasSmtpConfigured && !emailSent ? { fallbackCode: verificationCode } : {}),
         smtpErrorMsg: smtpErrorMsg || undefined,
       });
     } catch (err: any) {
@@ -2237,9 +2209,17 @@ async function startServer() {
       }
 
       if (tokenEntry.code !== cleanCode) {
+        tokenEntry.attempts += 1;
+        if (tokenEntry.attempts >= 5) {
+          passwordResetTokens.delete(cleanUserId);
+          return res.status(200).json({
+            ok: false,
+            error: 'Demasiados intentos fallidos. Solicita un nuevo código de verificación.',
+          });
+        }
         return res.status(200).json({
           ok: false,
-          error: 'El código de verificación ingresado no es válido.',
+          error: `El código de verificación ingresado no es válido (intento ${tokenEntry.attempts}/5).`,
         });
       }
 
@@ -2504,7 +2484,8 @@ async function startServer() {
       if (!contentType) return next();
 
       const resolved = path.resolve(distPath, `.${cleanUrl}`);
-      if (!resolved.startsWith(distPath)) return next();
+      const normalizedDistPrefix = distPath.endsWith(path.sep) ? distPath : `${distPath}${path.sep}`;
+      if (!resolved.startsWith(normalizedDistPrefix)) return next();
 
       const cached = staticGzipCache.get(resolved);
       if (cached) {
@@ -2518,20 +2499,24 @@ async function startServer() {
         return res.send(cached.buf);
       }
 
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return next();
-      const rawBuf = fs.readFileSync(resolved);
-      const gzBuf = zlib.gzipSync(rawBuf, { level: zlib.constants.Z_BEST_SPEED });
-      const isAsset = cleanUrl.startsWith('/assets/');
-      staticGzipCache.set(resolved, { buf: gzBuf, contentType, isAsset });
+      try {
+        if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return next();
+        const rawBuf = fs.readFileSync(resolved);
+        const gzBuf = zlib.gzipSync(rawBuf, { level: zlib.constants.Z_BEST_SPEED });
+        const isAsset = cleanUrl.startsWith('/assets/');
+        staticGzipCache.set(resolved, { buf: gzBuf, contentType, isAsset });
 
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Encoding', 'gzip');
-      res.setHeader('Vary', 'Accept-Encoding');
-      res.setHeader(
-        'Cache-Control',
-        isAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
-      );
-      return res.send(gzBuf);
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Encoding', 'gzip');
+        res.setHeader('Vary', 'Accept-Encoding');
+        res.setHeader(
+          'Cache-Control',
+          isAsset ? 'public, max-age=31536000, immutable' : 'no-cache'
+        );
+        return res.send(gzBuf);
+      } catch {
+        return next();
+      }
     });
 
     app.use(

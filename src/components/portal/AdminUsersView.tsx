@@ -327,7 +327,6 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   };
 
   const handleRestoreDefaultTemplates = () => {
-    isEditingEmailRef.current = true;
     setTextoBotonCorreo(DEFAULT_EMAIL_TEMPLATES.textoBotonCorreo);
     setAsuntoDispersion(DEFAULT_EMAIL_TEMPLATES.asuntoDispersion);
     setMensajeDispersion(DEFAULT_EMAIL_TEMPLATES.mensajeDispersion);
@@ -337,7 +336,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     setMensajePorVencer(DEFAULT_EMAIL_TEMPLATES.mensajePorVencer);
     setTemplatesFeedback({
       type: 'success',
-      message: 'Plantillas restauradas a los valores por defecto. Guarda los cambios para aplicar.',
+      message: 'Plantillas restauradas a los valores por defecto. Presiona "Guardar" para aplicar.',
     });
   };
 
@@ -1330,7 +1329,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                               >
                                 Configurar
                               </button>
-                              {u.id !== 'user_admin_1' && (
+                              {u.id !== 'user_admin' && u.id !== currentUser.id && (
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -2158,11 +2157,15 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                             title: 'RH / Nóminas',
                             desc: 'Procesa checadas, dispersa nóminas y exporta layouts.',
                           },
-                          {
-                            id: 'admin' as UserRole,
-                            title: 'Administrador General',
-                            desc: 'Acceso total a todos los módulos y configuraciones.',
-                          },
+                          ...(currentUser.role === 'admin'
+                            ? [
+                                {
+                                  id: 'admin' as UserRole,
+                                  title: 'Administrador General',
+                                  desc: 'Acceso total a todos los módulos y configuraciones.',
+                                },
+                              ]
+                            : []),
                         ].map(item => (
                           <button
                             key={item.id}
