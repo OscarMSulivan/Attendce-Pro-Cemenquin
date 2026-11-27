@@ -23,6 +23,7 @@ import {
   Employee, 
   EmployeeReport, 
   EventsDB, 
+  isEmployeeActive,
   OvertimeRulesConfig,
   PayrollSummary, 
   ProcessedDay,
@@ -1736,10 +1737,10 @@ export default function App() {
     }
   };
 
-  // 1. Cargar Base de Empleados (Fusión Acumulativa Multi-Empresa: nunca borra los empleados previos)
+  // 1. Cargar Base de Empleados (Fusión Acumulativa Multi-Empresa + sincronización de Status Activo/Inactivo)
   const handleLoadEmployees = async (file: File, empresaOverride?: string) => {
     setIsLoadingEmployees(true);
-    setStatusMessage('Fusionando catálogo de empleados en el padrón permanente...');
+    setStatusMessage('Fusionando catálogo de empleados y sincronizando estatus Activo/Inactivo...');
     setStatusType('info');
 
     try {
@@ -1752,8 +1753,12 @@ export default function App() {
       };
 
       const nextAsignaciones = { ...asignaciones };
+      const nowISO = new Date().toISOString();
       let addedCount = 0;
       let updatedCount = 0;
+      let deactivatedCount = 0;
+      let reactivatedCount = 0;
+      const inactiveIdsSet = new Set<string>();
 
       Object.values(result.empleados).forEach(incEmp => {
         const normId = normalizeEmployeeId(incEmp.id) || incEmp.id;
@@ -1762,6 +1767,23 @@ export default function App() {
           addedCount++;
         } else {
           updatedCount++;
+        }
+
+        // Determinar el estatus final del colaborador
+        const prevStatus: 'activo' | 'inactivo' = existing?.status || 'activo';
+        const nextStatus: 'activo' | 'inactivo' = incEmp.status
+          ? incEmp.status
+          : result.hasStatusColumn
+          ? 'activo'
+          : prevStatus;
+
+        if (nextStatus === 'inactivo') {
+          inactiveIdsSet.add(normId);
+          if (prevStatus !== 'inactivo' || !existing) {
+            deactivatedCount++;
+          }
+        } else if (prevStatus === 'inactivo' && nextStatus === 'activo') {
+          reactivatedCount++;
         }
 
         // Si el empleado ya tenía una lista fijada manualmente en el sistema, protegerla
@@ -1792,34 +1814,111 @@ export default function App() {
           horario: resolvedHorario,
           empresa: incEmp.empresa || existing?.empresa || result.empresaDetectada,
           origenArchivo: file.name,
-          actualizadoEn: new Date().toISOString(),
+          actualizadoEn: nowISO,
+          status: nextStatus,
+          fechaBaja: nextStatus === 'inactivo' ? existing?.fechaBaja || incEmp.fechaBaja || nowISO : undefined,
         };
+      });
+
+      // Incluir todos los inactivos del catálogo resultante para limpiarlos de listas semanales vigentes
+      Object.values(baseCatalog).forEach(emp => {
+        if (!isEmployeeActive(emp)) {
+          const nid = normalizeEmployeeId(emp.id) || emp.id;
+          inactiveIdsSet.add(nid);
+        }
       });
 
       const withAssignments = mergeAsignaciones(baseCatalog, nextAsignaciones);
       const totalStored = Object.keys(withAssignments).length;
+      const totalActivos = Object.values(withAssignments).filter(isEmployeeActive).length;
+      const totalInactivos = totalStored - totalActivos;
 
       setAsignaciones(nextAsignaciones);
       StorageService.saveAsignaciones(nextAsignaciones);
       setEmpleadosDB(withAssignments);
       StorageService.saveEmployees(withAssignments);
       setSavedEmployeesInfo({
-        count: totalStored,
-        savedAt: new Date().toISOString(),
+        count: totalActivos,
+        savedAt: nowISO,
       });
+
+      // Quitar inmediatamente a los empleados inactivos de los reportes semanales activos y dispersiones abiertas
+      let removedFromWeeklyCount = 0;
+      let nextReportesPayload: EmployeeReport[] | undefined;
+      let nextResumenPayload: PayrollSummary | undefined;
+      let nextDispersalsPayload: PayrollDispersal[] | undefined;
+
+      if (inactiveIdsSet.size > 0 && reportes.length > 0) {
+        const filteredReportes = reportes.filter(r => {
+          const nid = normalizeEmployeeId(r.empleado.id) || r.empleado.id;
+          return !inactiveIdsSet.has(nid);
+        });
+        removedFromWeeklyCount = reportes.length - filteredReportes.length;
+        if (removedFromWeeklyCount > 0) {
+          const nextRes = recomputeSummaryFromReports(filteredReportes);
+          nextReportesPayload = filteredReportes;
+          nextResumenPayload = nextRes;
+          setReportes(filteredReportes);
+          setResumen(nextRes);
+          StorageService.saveReportesState({
+            reportes: filteredReportes,
+            resumen: nextRes,
+            selectedWeek,
+          });
+        }
+      }
+
+      if (inactiveIdsSet.size > 0 && dispersals.length > 0) {
+        let changedDispersals = false;
+        const cleanedDispersals = dispersals.map(disp => {
+          if (disp.cerrada || disp.cancelada || !Array.isArray(disp.reportesSnapshot)) return disp;
+          const prevLen = disp.reportesSnapshot.length;
+          const nextSnap = (disp.reportesSnapshot as EmployeeReport[]).filter(r => {
+            const nid = normalizeEmployeeId(r.empleado?.id || '') || r.empleado?.id || '';
+            return !inactiveIdsSet.has(nid);
+          });
+          if (nextSnap.length !== prevLen) {
+            changedDispersals = true;
+            return {
+              ...disp,
+              reportesSnapshot: nextSnap,
+              resumenSnapshot: recomputeSummaryFromReports(nextSnap),
+            };
+          }
+          return disp;
+        });
+        if (changedDispersals) {
+          nextDispersalsPayload = cleanedDispersals;
+          setDispersals(cleanedDispersals);
+          PortalService.saveDispersals(cleanedDispersals);
+        }
+      }
 
       PortalService.pushToServer({
         empleadosDB: withAssignments,
         asignaciones: nextAsignaciones,
+        ...(nextReportesPayload ? { reportes: nextReportesPayload, resumen: nextResumenPayload } : {}),
+        ...(nextDispersalsPayload ? { dispersals: nextDispersalsPayload } : {}),
       });
 
-      const summaryMsg = `✓ ${result.count} empleados procesados (${addedCount} nuevos, ${updatedCount} actualizados · Empresa: ${result.empresaDetectada}). Padrón total: ${totalStored} colaboradores.`;
+      const bajaSummary =
+        deactivatedCount > 0
+          ? `, ${deactivatedCount} baja(s)/inactivo(s)${
+              removedFromWeeklyCount > 0
+                ? ` (${removedFromWeeklyCount} retirado(s) de listas semanales)`
+                : ''
+            }`
+          : '';
+      const reactSummary = reactivatedCount > 0 ? `, ${reactivatedCount} reactivado(s)` : '';
+      const summaryMsg = `✓ ${result.count} empleados procesados (${addedCount} nuevos, ${updatedCount} actualizados${bajaSummary}${reactSummary} · Empresa: ${result.empresaDetectada}). Activos: ${totalActivos} · Bajas: ${totalInactivos}.`;
       setStatusMessage(summaryMsg);
       setStatusType('success');
       showToast(
         summaryMsg,
         'success',
-        'Base Fusionada en Padrón Permanente'
+        deactivatedCount > 0
+          ? 'Padrón Actualizado y Bajas Aplicadas'
+          : 'Base Fusionada en Padrón Permanente'
       );
     } catch (err: any) {
       console.error(err);
@@ -1836,6 +1935,8 @@ export default function App() {
       const normId = normalizeEmployeeId(emp.id) || emp.id;
       const cleanJefe = normalizeSupervisorName(emp.jefe || 'GENERAL');
       const cleanSchedule = (emp.horario || asignaciones[normId] || 'ADMO').trim().toUpperCase();
+      const nowISO = new Date().toISOString();
+      const nextStatus: 'activo' | 'inactivo' = emp.status || empleadosDB[normId]?.status || 'activo';
 
       const nextAsignaciones = {
         ...asignaciones,
@@ -1847,7 +1948,9 @@ export default function App() {
         id: normId,
         jefe: cleanJefe,
         horario: cleanSchedule,
-        actualizadoEn: new Date().toISOString(),
+        status: nextStatus,
+        fechaBaja: nextStatus === 'inactivo' ? emp.fechaBaja || empleadosDB[normId]?.fechaBaja || nowISO : undefined,
+        actualizadoEn: nowISO,
       };
 
       const nextEmpleadosDB = mergeAsignaciones(
@@ -1863,44 +1966,80 @@ export default function App() {
       setEmpleadosDB(nextEmpleadosDB);
       StorageService.saveEmployees(nextEmpleadosDB);
       setSavedEmployeesInfo({
-        count: Object.keys(nextEmpleadosDB).length,
-        savedAt: new Date().toISOString(),
+        count: Object.values(nextEmpleadosDB).filter(isEmployeeActive).length,
+        savedAt: nowISO,
       });
 
-      // Actualizar también la lista/horario del empleado en los reportes activos si ya estaban generados
+      // Actualizar o retirar al empleado de los reportes activos y dispersiones abiertas según su estatus
+      let nextReportesPayload: EmployeeReport[] | undefined;
+      let nextResumenPayload: PayrollSummary | null | undefined;
       if (reportes.length > 0) {
-        setReportes(prev => {
-          const nextRep = prev.map(r => {
-            if (normalizeEmployeeId(r.empleado.id) !== normId) return r;
-            return {
-              ...r,
-              empleado: {
-                ...r.empleado,
-                ...updatedEmpRecord,
-              },
-            };
-          });
-          StorageService.saveReportesState({
-            reportes: nextRep,
-            resumen,
-            selectedWeek,
-          });
-          return nextRep;
+        const nextRep =
+          nextStatus === 'inactivo'
+            ? reportes.filter(r => normalizeEmployeeId(r.empleado.id) !== normId)
+            : reportes.map(r => {
+                if (normalizeEmployeeId(r.empleado.id) !== normId) return r;
+                return {
+                  ...r,
+                  empleado: {
+                    ...r.empleado,
+                    ...updatedEmpRecord,
+                  },
+                };
+              });
+        const nextRes = nextStatus === 'inactivo' ? recomputeSummaryFromReports(nextRep) : resumen;
+        nextReportesPayload = nextRep;
+        nextResumenPayload = nextRes;
+        setReportes(nextRep);
+        if (nextStatus === 'inactivo') setResumen(nextRes);
+        StorageService.saveReportesState({
+          reportes: nextRep,
+          resumen: nextRes,
+          selectedWeek,
         });
+      }
+
+      let nextDispersalsPayload: PayrollDispersal[] | undefined;
+      if (nextStatus === 'inactivo' && dispersals.length > 0) {
+        let changed = false;
+        const cleaned = dispersals.map(disp => {
+          if (disp.cerrada || disp.cancelada || !Array.isArray(disp.reportesSnapshot)) return disp;
+          const nextSnap = (disp.reportesSnapshot as EmployeeReport[]).filter(
+            r => normalizeEmployeeId(r.empleado?.id || '') !== normId
+          );
+          if (nextSnap.length !== disp.reportesSnapshot.length) {
+            changed = true;
+            return {
+              ...disp,
+              reportesSnapshot: nextSnap,
+              resumenSnapshot: recomputeSummaryFromReports(nextSnap),
+            };
+          }
+          return disp;
+        });
+        if (changed) {
+          nextDispersalsPayload = cleaned;
+          setDispersals(cleaned);
+          PortalService.saveDispersals(cleaned);
+        }
       }
 
       PortalService.pushToServer({
         empleadosDB: nextEmpleadosDB,
         asignaciones: nextAsignaciones,
+        ...(nextReportesPayload ? { reportes: nextReportesPayload, resumen: nextResumenPayload } : {}),
+        ...(nextDispersalsPayload ? { dispersals: nextDispersalsPayload } : {}),
       });
 
       showToast(
-        `Colaborador #${normId} (${updatedEmpRecord.nombre}) guardado en Lista "${cleanJefe}".`,
-        'success',
-        'Padrón Actualizado'
+        nextStatus === 'inactivo'
+          ? `Colaborador #${normId} (${updatedEmpRecord.nombre}) dado de BAJA y retirado de las listas semanales.`
+          : `Colaborador #${normId} (${updatedEmpRecord.nombre}) guardado en Lista "${cleanJefe}".`,
+        nextStatus === 'inactivo' ? 'info' : 'success',
+        nextStatus === 'inactivo' ? 'Baja Aplicada' : 'Padrón Actualizado'
       );
     },
-    [asignaciones, empleadosDB, mergeAsignaciones, reportes.length, resumen, selectedWeek, showToast]
+    [asignaciones, dispersals, empleadosDB, mergeAsignaciones, recomputeSummaryFromReports, reportes, resumen, selectedWeek, showToast]
   );
 
   // Actualización masiva de Lista, Empresa o Turno desde el módulo "Empleados y Listas"
@@ -5213,12 +5352,17 @@ export default function App() {
                     notifications={notifications}
                     onMarkNotificationRead={handleMarkNotificationRead}
                     assignedEmployees={Object.values(empleadosDB).filter(e => {
+                      if (!isEmployeeActive(e)) return false;
                       const jefe = e.jefe?.trim().toUpperCase();
                       return Boolean(jefe && workListSupervisors.includes(jefe));
                     })}
                     weeklyReports={
                       isCurrentWeekDispersed || userHasModuleAccess(currentUser, 'nomina')
                         ? activeReportesOrSnapshot.filter(r => {
+                            const normId = normalizeEmployeeId(r.empleado.id) || r.empleado.id;
+                            const dbEmp = empleadosDB[normId] || empleadosDB[r.empleado.id];
+                            if (dbEmp && !isEmployeeActive(dbEmp)) return false;
+                            if (!isEmployeeActive(r.empleado)) return false;
                             const jefe = r.empleado.jefe?.trim().toUpperCase();
                             return Boolean(jefe && workListSupervisors.includes(jefe));
                           })

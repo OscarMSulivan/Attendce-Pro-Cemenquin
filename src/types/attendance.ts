@@ -28,6 +28,13 @@ export interface Employee {
   origenArchivo?: string; // Nombre del archivo desde el que se importó por última vez
   actualizadoEn?: string; // Fecha ISO de última actualización en el padrón permanente
   listaPersonalizada?: boolean; // Si es true, la lista (jefe) fue asignada manualmente y se protege al re-importar
+  status?: 'activo' | 'inactivo'; // Estatus laboral en la empresa (inactivo = baja, se excluye de listas semanales)
+  fechaBaja?: string; // Fecha ISO en la que el sistema detectó o registró la baja
+}
+
+export function isEmployeeActive(emp?: Pick<Employee, 'status'> | null): boolean {
+  if (!emp) return false;
+  return (emp.status || 'activo') !== 'inactivo';
 }
 
 

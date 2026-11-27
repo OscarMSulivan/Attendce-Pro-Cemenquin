@@ -61,6 +61,7 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
   const [filterList, setFilterList] = useState<string>('');
   const [filterCompany, setFilterCompany] = useState<string>('');
   const [filterSchedule, setFilterSchedule] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<'activos' | 'inactivos' | 'todos'>('activos');
   const [empresaUploadTag, setEmpresaUploadTag] = useState<string>('');
 
   // Selección múltiple para cambios en bloque
@@ -101,6 +102,12 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
     return Object.values(empleadosDB).sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [empleadosDB]);
 
+  const activeEmployeesCount = useMemo(
+    () => allEmployees.filter(e => (e.status || 'activo') !== 'inactivo').length,
+    [allEmployees]
+  );
+  const inactiveEmployeesCount = allEmployees.length - activeEmployeesCount;
+
   const allLists = useMemo(() => {
     const set = new Set<string>();
     allEmployees.forEach(e => {
@@ -131,6 +138,10 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
   const filteredEmployees = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return allEmployees.filter(emp => {
+      const isInactive = emp.status === 'inactivo';
+      if (filterStatus === 'activos' && isInactive) return false;
+      if (filterStatus === 'inactivos' && !isInactive) return false;
+
       const empList = (emp.jefe || '').trim().toUpperCase();
       const empComp = (emp.empresa || 'SIN ESPECIFICAR').trim().toUpperCase();
       const empHor = (emp.horario || '').trim().toUpperCase();
@@ -151,7 +162,7 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
         empHor.toLowerCase().includes(q)
       );
     });
-  }, [allEmployees, searchQuery, filterList, filterCompany, filterSchedule, horarios]);
+  }, [allEmployees, searchQuery, filterList, filterCompany, filterSchedule, filterStatus, horarios]);
 
   const employeesByList = useMemo(() => {
     const groups: Record<string, Employee[]> = {};
@@ -497,7 +508,7 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
           </div>
 
           {/* Buscador y Filtros */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 flex-1 max-w-4xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 flex-1 max-w-5xl">
             <div className="relative">
               <Search className="w-4 h-4 text-[#87888C] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
@@ -508,6 +519,16 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
                 className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#171821] border border-white/[0.08] text-xs text-white placeholder-[#87888C] focus:outline-none focus:border-[#A9DFD8]"
               />
             </div>
+
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value as 'activos' | 'inactivos' | 'todos')}
+              className="px-3 py-2 rounded-xl bg-[#171821] border border-white/[0.08] text-xs font-bold text-white focus:outline-none focus:border-[#A9DFD8]"
+            >
+              <option value="activos">Activos ({activeEmployeesCount})</option>
+              <option value="inactivos">Bajas / Inactivos ({inactiveEmployeesCount})</option>
+              <option value="todos">Todos ({allEmployees.length})</option>
+            </select>
 
             <select
               value={filterList}
@@ -719,7 +740,20 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
                         </td>
 
                         <td className="py-3 px-4">
-                          <div className="font-bold text-white">{emp.nombre}</div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`font-bold ${emp.status === 'inactivo' ? 'text-slate-400 line-through' : 'text-white'}`}>
+                              {emp.nombre}
+                            </span>
+                            {emp.status === 'inactivo' ? (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[9px] font-bold uppercase tracking-wider">
+                                BAJA / INACTIVO
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[9px] font-bold uppercase tracking-wider">
+                                ACTIVO
+                              </span>
+                            )}
+                          </div>
                           {emp.origenArchivo && (
                             <div className="text-[10px] text-[#87888C] font-mono truncate max-w-[220px]">
                               Archivo: {emp.origenArchivo}
@@ -808,6 +842,30 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
 
                         <td className="py-3 px-4 text-right">
                           <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nextStatus = emp.status === 'inactivo' ? 'activo' : 'inactivo';
+                                onUpsertEmployee({
+                                  ...emp,
+                                  status: nextStatus,
+                                  fechaBaja: nextStatus === 'inactivo' ? new Date().toISOString() : undefined,
+                                  actualizadoEn: new Date().toISOString(),
+                                });
+                              }}
+                              title={
+                                emp.status === 'inactivo'
+                                  ? 'Reactivar colaborador (volver a incluir en listas semanales)'
+                                  : 'Dar de baja / marcar inactivo (quitar de listas semanales)'
+                              }
+                              className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                                emp.status === 'inactivo'
+                                  ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              }`}
+                            >
+                              {emp.status === 'inactivo' ? 'Reactivar' : 'Dar baja'}
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleOpenEditModal(emp)}

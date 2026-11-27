@@ -11,9 +11,88 @@ import { normalizeEmployeeId, normalizeSupervisorName } from '../utils/calendarU
 export interface ParseEmployeesResult {
   empleados: Record<string, Employee>;
   count: number;
+  activeCount: number;
+  inactiveCount: number;
+  hasStatusColumn: boolean;
   jefes: string[];
   empresaDetectada: string;
   modo: 'excel_avanzado' | 'csv_estandar';
+}
+
+/**
+ * Normaliza el valor del campo Status / Estatus de un colaborador en el reporte de base de datos.
+ * Reconoce variantes comunes en español e inglés (Activo/Inactivo, Alta/Baja, A/B, 1/0, Sí/No, etc.).
+ */
+export function parseEmployeeStatus(raw: unknown): 'activo' | 'inactivo' | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const clean = String(raw)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  if (!clean) return undefined;
+
+  if (
+    clean === 'inactivo' ||
+    clean === 'inactiva' ||
+    clean === 'baja' ||
+    clean === 'b' ||
+    clean === 'i' ||
+    clean === '0' ||
+    clean === 'no' ||
+    clean === 'false' ||
+    clean === 'inactive' ||
+    clean === 'off' ||
+    clean.includes('inactiv') ||
+    clean.includes('baja') ||
+    clean.includes('finiquit') ||
+    clean.includes('renunc') ||
+    clean.includes('despid') ||
+    clean.includes('cesad') ||
+    clean.includes('suspend') ||
+    clean.includes('terminat')
+  ) {
+    return 'inactivo';
+  }
+
+  if (
+    clean === 'activo' ||
+    clean === 'activa' ||
+    clean === 'alta' ||
+    clean === 'a' ||
+    clean === '1' ||
+    clean === 'si' ||
+    clean === 'true' ||
+    clean === 'vigente' ||
+    clean === 'active' ||
+    clean === 'on' ||
+    clean.includes('activ') ||
+    clean.includes('alta') ||
+    clean.includes('vigente')
+  ) {
+    return 'activo';
+  }
+
+  return undefined;
+}
+
+function isStatusHeader(header: string): boolean {
+  const h = header
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return (
+    h === 'status' ||
+    h === 'estatus' ||
+    h === 'estado' ||
+    h === 'situacion' ||
+    h.includes('status') ||
+    h.includes('estatus') ||
+    h.includes('situacion') ||
+    h === 'activo' ||
+    h === 'baja'
+  );
 }
 
 function inferCompanyNameFromFilename(fileName: string): string {
@@ -31,7 +110,8 @@ function inferCompanyNameFromFilename(fileName: string): string {
 
 /**
  * Parsea el archivo de base de empleados (.xlsx, .xls o .csv)
- * con autodetección inteligente de formato (filas dobles de checador o filas estándar)
+ * con autodetección inteligente de formato (filas dobles de checador o filas estándar),
+ * soporte para columna `status` (Activo / Inactivo)
  * y etiquetado automático de empresa/origen para soporte multi-empresa.
  */
 export async function parseEmployeesFile(
@@ -42,6 +122,7 @@ export async function parseEmployeesFile(
   const empleados: Record<string, Employee> = {};
   const nowISO = new Date().toISOString();
   let detectedCompany = (empresaOverride || '').trim().toUpperCase();
+  let hasStatusColumn = false;
 
   if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
     const buffer = await file.arrayBuffer();
@@ -64,6 +145,11 @@ export async function parseEmployeesFile(
 
     if (headerRowIdx === -1) {
       throw new Error('No se detectaron los encabezados en la hoja de Excel de empleados.');
+    }
+
+    const colStatus = headerValues.findIndex(isStatusHeader);
+    if (colStatus !== -1) {
+      hasStatusColumn = true;
     }
 
     if (!detectedCompany && headerRowIdx > 0) {
@@ -107,11 +193,25 @@ export async function parseEmployeesFile(
         const nombre = String(row1[2] || '').trim();
         let supervisor = String(row1[25] || '').trim();
 
-        // Si no está en el índice fijo [25], buscar columna con nombre de supervisor
-        if (!supervisor || supervisor.includes('SEMANAL')) {
+        const parsedStatus =
+          colStatus !== -1
+            ? parseEmployeeStatus(row1[colStatus] ?? row2[colStatus])
+            : undefined;
+        if (parsedStatus) hasStatusColumn = true;
+
+        // Si no está en el índice fijo [25], buscar columna con nombre de supervisor (excluyendo columna status)
+        if (!supervisor || supervisor.includes('SEMANAL') || parseEmployeeStatus(supervisor)) {
+          supervisor = '';
           for (let col = 15; col < row1.length; col++) {
+            if (col === colStatus) continue;
             const val = String(row1[col] || '').trim();
-            if (val && !val.includes('SEMANAL') && isNaN(Number(val)) && val.length > 3) {
+            if (
+              val &&
+              !val.includes('SEMANAL') &&
+              !parseEmployeeStatus(val) &&
+              isNaN(Number(val)) &&
+              val.length > 3
+            ) {
               supervisor = val;
               break;
             }
@@ -122,16 +222,19 @@ export async function parseEmployeesFile(
         const horario = String(row2[2] || '').trim();
         const tipoHorario = String(row2[10] || '').trim();
 
-        if (id && nombre && supervisor && !supervisor.includes('SEMANAL')) {
+        const isInactive = parsedStatus === 'inactivo';
+        if (id && (isInactive || (nombre && supervisor && !supervisor.includes('SEMANAL')))) {
           empleados[id] = {
             id,
             nombre,
-            jefe: supervisor,
+            jefe: supervisor || 'GENERAL',
             horario,
             tipoHorario,
             empresa: detectedCompany,
             origenArchivo: file.name,
             actualizadoEn: nowISO,
+            ...(parsedStatus ? { status: parsedStatus } : {}),
+            ...(isInactive ? { fechaBaja: nowISO } : {}),
           };
         }
       }
@@ -150,8 +253,11 @@ export async function parseEmployeesFile(
         const supervisor = normalizeSupervisorName(String(row[colSup !== -1 ? colSup : 2] || '').trim());
         const horario = colHor !== -1 ? String(row[colHor] || '').trim() : '';
         const rowEmpresa = colEmp !== -1 ? String(row[colEmp] || '').trim().toUpperCase() : '';
+        const parsedStatus = colStatus !== -1 ? parseEmployeeStatus(row[colStatus]) : undefined;
+        if (parsedStatus) hasStatusColumn = true;
+        const isInactive = parsedStatus === 'inactivo';
 
-        if (id && nombre) {
+        if (id && (nombre || isInactive)) {
           empleados[id] = {
             id,
             nombre,
@@ -160,15 +266,23 @@ export async function parseEmployeesFile(
             empresa: rowEmpresa || detectedCompany,
             origenArchivo: file.name,
             actualizadoEn: nowISO,
+            ...(parsedStatus ? { status: parsedStatus } : {}),
+            ...(isInactive ? { fechaBaja: nowISO } : {}),
           };
         }
       }
     }
 
-    const jefes = [...new Set(Object.values(empleados).map(e => e.jefe))].filter(Boolean).sort();
+    const allList = Object.values(empleados);
+    const activeCount = allList.filter(e => (e.status || 'activo') !== 'inactivo').length;
+    const inactiveCount = allList.filter(e => e.status === 'inactivo').length;
+    const jefes = [...new Set(allList.filter(e => (e.status || 'activo') !== 'inactivo').map(e => e.jefe))].filter(Boolean).sort();
     return {
       empleados,
-      count: Object.keys(empleados).length,
+      count: allList.length,
+      activeCount,
+      inactiveCount,
+      hasStatusColumn,
       jefes,
       empresaDetectada: detectedCompany,
       modo: 'excel_avanzado'
@@ -186,6 +300,12 @@ export async function parseEmployeesFile(
         encoding: "ISO-8859-1",
         complete: (results) => {
           try {
+            const fields = results.meta?.fields || [];
+            const detectedStatusKey = fields.find(isStatusHeader);
+            if (detectedStatusKey) {
+              hasStatusColumn = true;
+            }
+
             results.data.forEach(row => {
               // Buscar IDs por columnas del checador o genéricas
               const id = normalizeEmployeeId(
@@ -199,23 +319,36 @@ export async function parseEmployeesFile(
               const jefe = normalizeSupervisorName(String(row["Text9"] || row["Supervisor"] || row["Jefe"] || row["Area"] || row["Lista"] || "").trim());
               const rowEmpresa = String(row["Empresa"] || row["empresa"] || "").trim().toUpperCase();
 
-              if (id && nombre && jefe && !jefe.includes("SEMANAL")) {
+              const statusKey = detectedStatusKey || Object.keys(row).find(isStatusHeader);
+              const parsedStatus = statusKey ? parseEmployeeStatus(row[statusKey]) : undefined;
+              if (parsedStatus) hasStatusColumn = true;
+              const isInactive = parsedStatus === 'inactivo';
+
+              if (id && (isInactive || (nombre && jefe && !jefe.includes("SEMANAL")))) {
                 empleados[id] = {
                   id,
                   nombre,
-                  jefe,
+                  jefe: jefe || 'GENERAL',
                   horario: '',
                   empresa: rowEmpresa || detectedCompany,
                   origenArchivo: file.name,
                   actualizadoEn: nowISO,
+                  ...(parsedStatus ? { status: parsedStatus } : {}),
+                  ...(isInactive ? { fechaBaja: nowISO } : {}),
                 };
               }
             });
 
-            const jefes = [...new Set(Object.values(empleados).map(e => e.jefe))].filter(Boolean).sort();
+            const allList = Object.values(empleados);
+            const activeCount = allList.filter(e => (e.status || 'activo') !== 'inactivo').length;
+            const inactiveCount = allList.filter(e => e.status === 'inactivo').length;
+            const jefes = [...new Set(allList.filter(e => (e.status || 'activo') !== 'inactivo').map(e => e.jefe))].filter(Boolean).sort();
             resolve({
               empleados,
-              count: Object.keys(empleados).length,
+              count: allList.length,
+              activeCount,
+              inactiveCount,
+              hasStatusColumn,
               jefes,
               empresaDetectada: detectedCompany,
               modo: 'csv_estandar'

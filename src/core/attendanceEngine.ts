@@ -10,6 +10,7 @@ import {
   Employee,
   EmployeeReport,
   EventsDB,
+  isEmployeeActive,
   OvertimeRulesConfig,
   PayrollSummary,
   ProcessedDay,
@@ -637,6 +638,7 @@ export function generarReporteAsistencia(
   // de un turno nocturno del día anterior para no duplicarlas al día siguiente.
   const horasConsumidasNocturnas = new Set<string>();
 
+  const empleadosActivos = empleados.filter(isEmployeeActive);
   const reportes: EmployeeReport[] = [];
   const resumen: PayrollSummary = {
     totalHoras: 0,
@@ -645,7 +647,7 @@ export function generarReporteAsistencia(
     totalVac: 0,
     totalRetardos: 0,
     totalRetardosExcesivos: 0,
-    totalEmpleados: empleados.length,
+    totalEmpleados: empleadosActivos.length,
     tasaCumplimiento: 100,
     promedioHoras: 0,
     asistenciasPerfectas: 0,
@@ -654,7 +656,7 @@ export function generarReporteAsistencia(
 
   let totalDiasAuditoria = 0;
 
-  empleados.forEach(emp => {
+  empleadosActivos.forEach(emp => {
     let sumNormal = 0;
     let sumExtra = 0;
     let countAsistencia = 0;

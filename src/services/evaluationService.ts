@@ -973,7 +973,7 @@ export function buildRecordsFromEmployeesDirectory(
 } {
   const nowIso = new Date().toISOString();
   const employees = Object.values(empleadosDB || {}).filter(
-    emp => emp && (emp.id || emp.nombre),
+    emp => emp && (emp.id || emp.nombre) && (emp.status || 'activo') !== 'inactivo',
   );
 
   const byEmpId = new Map<string, EmployeeEvaluationRecord>();
