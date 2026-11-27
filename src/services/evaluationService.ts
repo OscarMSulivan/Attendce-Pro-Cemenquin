@@ -1610,9 +1610,20 @@ export function applyExcelMappingToCampaign(
       }
     }
 
+    const metadataColsSet = new Set(
+      [
+        mapping.employeeIdColumn,
+        mapping.nameColumn,
+        mapping.hireDateColumn,
+        mapping.supervisorColumn,
+        mapping.puestoColumn,
+        mapping.areaColumn,
+      ].filter((c): c is string => Boolean(c)),
+    );
+
     if (mapping.mode === 'columns') {
       Object.entries(mapping.columnMetricMap).forEach(([colName, target]) => {
-        if (target === 'ignore') return;
+        if (target === 'ignore' || metadataColsSet.has(colName)) return;
         const val = parseNonNegativeNumber(row[colName]);
         addToTarget(entry!, target, val);
       });
@@ -1628,6 +1639,31 @@ export function applyExcelMappingToCampaign(
     }
 
     if (idx < 0) return;
+  });
+
+  // Determinar qué métricas base fueron realmente mapeadas en este archivo para no borrar rubros previos en cargas parciales
+  const mappedCoreMetrics = new Set<IncidenceMetricKey>();
+  const activeTargets =
+    mapping.mode === 'columns'
+      ? Object.entries(mapping.columnMetricMap)
+          .filter(([col]) => {
+            const metaCols = [
+              mapping.employeeIdColumn,
+              mapping.nameColumn,
+              mapping.hireDateColumn,
+              mapping.supervisorColumn,
+              mapping.puestoColumn,
+              mapping.areaColumn,
+            ];
+            return !metaCols.includes(col);
+          })
+          .map(([, target]) => target)
+      : Object.values(mapping.codeMetricMap);
+
+  activeTargets.forEach(t => {
+    if (t === 'faltas' || t === 'incapacidades' || t === 'retardos' || t === 'permisos') {
+      mappedCoreMetrics.add(t);
+    }
   });
 
   // Índices del padrón actual de la campaña
@@ -1657,6 +1693,14 @@ export function applyExcelMappingToCampaign(
       const mergedCustom = hasCustom
         ? { ...(existing.incidenciasPersonalizadas || {}), ...item.incidenciasPersonalizadas }
         : existing.incidenciasPersonalizadas;
+      const mergedIncidencias: EmployeeEvaluationIncidences = {
+        faltas: mappedCoreMetrics.has('faltas') ? item.incidencias.faltas : existing.incidencias.faltas,
+        incapacidades: mappedCoreMetrics.has('incapacidades')
+          ? item.incidencias.incapacidades
+          : existing.incidencias.incapacidades,
+        retardos: mappedCoreMetrics.has('retardos') ? item.incidencias.retardos : existing.incidencias.retardos,
+        permisos: mappedCoreMetrics.has('permisos') ? item.incidencias.permisos : existing.incidencias.permisos,
+      };
       const updated = recalculateRecordWithRules(
         {
           ...existing,
@@ -1664,7 +1708,7 @@ export function applyExcelMappingToCampaign(
           fechaIngreso: item.fechaIngreso || existing.fechaIngreso,
           puesto: existing.puesto || item.puesto,
           area: item.area || existing.area,
-          incidencias: { ...item.incidencias },
+          incidencias: mergedIncidencias,
           ...(mergedCustom && Object.keys(mergedCustom).length > 0
             ? { incidenciasPersonalizadas: mergedCustom }
             : {}),

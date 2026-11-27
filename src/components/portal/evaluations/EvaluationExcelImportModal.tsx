@@ -408,10 +408,15 @@ export const EvaluationExcelImportModal: React.FC<EvaluationExcelImportModalProp
 
   const handleConfirmApply = () => {
     if (!previewResult || !mapping) return;
-    if (mapping.mode === 'columns') {
-      saveIncidenceCodeDictionary(mapping.columnMetricMap);
-    } else {
-      saveIncidenceCodeDictionary(mapping.codeMetricMap);
+    const sourceMap = mapping.mode === 'columns' ? mapping.columnMetricMap : mapping.codeMetricMap;
+    const nonIgnored: typeof sourceMap = {};
+    Object.entries(sourceMap).forEach(([k, v]) => {
+      if (v !== 'ignore' && !metadataColsSet.has(k)) {
+        nonIgnored[k] = v;
+      }
+    });
+    if (Object.keys(nonIgnored).length > 0) {
+      saveIncidenceCodeDictionary(nonIgnored);
     }
     onApplyMappedRecords(previewResult.finalCampaignRecords, {
       matchedCount: previewResult.matchedCount,

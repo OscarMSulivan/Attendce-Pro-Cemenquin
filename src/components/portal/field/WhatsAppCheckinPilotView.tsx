@@ -68,7 +68,7 @@ export const WhatsAppCheckinPilotView: React.FC<WhatsAppCheckinPilotViewProps> =
 }) => {
   const employeesList = useMemo(() => {
     const arr = Object.values(empleadosDB || {})
-      .filter(e => e && (e.id || e.nombre))
+      .filter(e => e && (e.id || e.nombre) && (e.status || 'activo') !== 'inactivo')
       .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
     return arr.length > 0 ? arr : [DEMO_FALLBACK_PROMOTER];
   }, [empleadosDB]);

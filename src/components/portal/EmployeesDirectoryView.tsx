@@ -250,13 +250,20 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
       horario: editingEmp.horario || 'ADMO',
       puesto: editingEmp.puesto.trim() || undefined,
       listaPersonalizada: true,
+      ...(!editingEmp.isEdit ? { status: 'activo' as const, fechaBaja: undefined } : {}),
       actualizadoEn: new Date().toISOString(),
     });
     setIsModalOpen(false);
   };
 
+  const getVisibleSelectedIds = (): string[] => {
+    const visibleSet = new Set(filteredEmployees.map(e => e.id));
+    return Array.from(selectedIds).filter(id => visibleSet.has(id));
+  };
+
   const handleApplyBulkList = () => {
-    if (selectedIds.size === 0) return;
+    const visibleIds = getVisibleSelectedIds();
+    if (visibleIds.length === 0) return;
     const target = normalizeSupervisorName(
       bulkTargetList === '__NUEVA__' ? bulkCustomList : bulkTargetList
     );
@@ -264,7 +271,7 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
       alert('Selecciona o escribe el nombre de la lista destino.');
       return;
     }
-    onBulkUpdateEmployees(Array.from(selectedIds), {
+    onBulkUpdateEmployees(visibleIds, {
       jefe: target,
       listaPersonalizada: true,
     });
@@ -273,8 +280,9 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
   };
 
   const handleApplyBulkCompany = () => {
-    if (selectedIds.size === 0 || !bulkTargetCompany.trim()) return;
-    onBulkUpdateEmployees(Array.from(selectedIds), {
+    const visibleIds = getVisibleSelectedIds();
+    if (visibleIds.length === 0 || !bulkTargetCompany.trim()) return;
+    onBulkUpdateEmployees(visibleIds, {
       empresa: bulkTargetCompany.trim().toUpperCase(),
     });
     setSelectedIds(new Set());
@@ -282,17 +290,19 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
   };
 
   const handleApplyBulkSchedule = () => {
-    if (selectedIds.size === 0 || !bulkTargetSchedule) return;
-    onBulkUpdateEmployees(Array.from(selectedIds), {
+    const visibleIds = getVisibleSelectedIds();
+    if (visibleIds.length === 0 || !bulkTargetSchedule) return;
+    onBulkUpdateEmployees(visibleIds, {
       horario: bulkTargetSchedule,
     });
     setSelectedIds(new Set());
   };
 
   const handleExportDirectoryExcel = () => {
-    const rows = allEmployees.map(emp => ({
+    const rows = filteredEmployees.map(emp => ({
       Codigo_ID: emp.id,
       Nombre_Colaborador: emp.nombre,
+      Status: emp.status === 'inactivo' ? 'INACTIVO' : 'ACTIVO',
       Lista_Asignada_Supervisor: emp.jefe || 'GENERAL',
       Empresa_Origen: emp.empresa || 'SIN ESPECIFICAR',
       Horario_Turno: emp.horario || 'ADMO',

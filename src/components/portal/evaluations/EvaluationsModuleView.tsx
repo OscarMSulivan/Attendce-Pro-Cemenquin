@@ -1207,7 +1207,7 @@ export const EvaluationsModuleView: React.FC<EvaluationsModuleViewProps> = ({
                         className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-sky-500/15 text-sky-300 border border-sky-500/35 hover:bg-sky-500/25 disabled:opacity-45 disabled:cursor-not-allowed transition-colors cursor-pointer"
                       >
                         <Users className="w-3.5 h-3.5" />
-                        Sincronizar Padrón ({Object.keys(empleadosDB || {}).length})
+                        Sincronizar Padrón ({Object.values(empleadosDB || {}).filter(e => (e.status || 'activo') !== 'inactivo').length})
                       </button>
 
                       <button

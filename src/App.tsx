@@ -310,6 +310,9 @@ export default function App() {
         if (!dayStore.todas.includes(rec.hora)) {
           dayStore.todas = [...dayStore.todas, rec.hora].sort();
         }
+        // Recalcular entradaFinal/salidaFinal para que attendanceEngine tome la checada de campo inyectada
+        dayStore.entradaFinal = dayStore.todas[0] || null;
+        dayStore.salidaFinal = dayStore.todas.length > 1 ? dayStore.todas[dayStore.todas.length - 1] : null;
         empEvents[rec.isoDate] = dayStore;
         return { ...prev, [normId]: empEvents };
       });
