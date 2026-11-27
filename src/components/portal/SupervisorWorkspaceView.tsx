@@ -316,18 +316,23 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
     );
   }, [notifications, currentWeekNumber, targetSupervisor]);
 
-  // Función auxiliar para saber si un día laboral tiene checadas incompletas sin resolver
+  // Función auxiliar para saber si un día laboral (o un día de descanso con 1 checada huérfana) tiene checadas incompletas sin resolver
   const isDayMissingPunchesUnresolved = (d: ProcessedDay): boolean => {
     const isFestivo = Boolean(FESTIVOS_OFICIALES[d.isoDate]);
     const isScheduledWorkday = Boolean(d.horarioProgramado) && !isFestivo;
     const tieneEnt = d.entrada !== '--:--' && Boolean(d.entrada);
     const tieneSal = d.salida !== '--:--' && Boolean(d.salida);
+    const hasSingleOrphanPunch = tieneEnt !== tieneSal;
     const hasJustifiedIncidence =
       d.incidencia === 'Vacaciones' ||
       d.incidencia.toLowerCase().includes('permiso') ||
       d.incidencia.toLowerCase().includes('incapacidad') ||
       d.incidencia.toLowerCase().includes('pase');
-    return isScheduledWorkday && (!tieneEnt || !tieneSal) && !d.modificadoPorSupervisor && !hasJustifiedIncidence;
+    return (
+      ((isScheduledWorkday && (!tieneEnt || !tieneSal)) || hasSingleOrphanPunch) &&
+      !d.modificadoPorSupervisor &&
+      !hasJustifiedIncidence
+    );
   };
 
   // Métricas detalladas de la lista del supervisor y bloqueo cuando faltaban las 2 checadas sin archivo de respaldo

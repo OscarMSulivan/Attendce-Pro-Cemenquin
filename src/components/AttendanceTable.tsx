@@ -104,8 +104,6 @@ export function analyzeDayDataAnomalies(day: ProcessedDay): DayDataAnomalies {
   const incLower = (day.incidencia || '').toLowerCase();
   const isAbsenceIncidence =
     incLower.includes('falta') ||
-    incLower.includes('incapacidad') ||
-    incLower.includes('vacaciones') ||
     incLower.includes('permiso sin goce');
 
   // 1. Checadas imposibles o invertidas cuando existen Entrada y Salida
@@ -177,75 +175,38 @@ export function analyzeDayDataAnomalies(day: ProcessedDay): DayDataAnomalies {
       if (cruzaMedianoche && Math.abs(diffSal) > 720) {
         diffSal = diffSal > 0 ? diffSal - 1440 : diffSal + 1440;
       }
-      // Salida más de 3 horas antes (sin permiso/pase) o más de 4.5 horas después del cierre de turno
+      // Salida más de 3 horas antes (sin permiso/pase).
+      // Nota: Si salió DESPUÉS de su hora de salida (diffSal > 0) dentro de una jornada válida (<= 16h),
+      // se trata de Tiempo Extra (sujeto a "¿Autorizado? SÍ / NO"), por lo que NO debe marcarse como Dato Crítico.
       const hasEarlyExitJustification =
         incLower.includes('permiso') || incLower.includes('pase');
-      if ((!hasEarlyExitJustification && diffSal < -180) || diffSal > 270) {
-        const isCritical = Math.abs(diffSal) >= 360; // >= 6 horas de desfase
+      if (!hasEarlyExitJustification && diffSal < -180) {
+        const isCritical = Math.abs(diffSal) >= 360; // >= 6 horas antes del cierre
         salidaAnomaly = {
           severity: isCritical ? 'critical' : 'warning',
           category: 'out_of_shift',
-          shortLabel: `Fuera turno (${formatSignedHours(diffSal)})`,
-          detail: `Salida registrada a las ${day.salida} vs. fin de turno ${day.horarioProgramado.salida} (${formatSignedHours(diffSal)} de desfase).`,
+          shortLabel: `Salida anticipada (${formatSignedHours(diffSal)})`,
+          detail: `Salida registrada a las ${day.salida} vs. fin de turno ${day.horarioProgramado.salida} (${formatSignedHours(diffSal)} antes del cierre).`,
         };
         all.push(salidaAnomaly);
       }
     }
-  } else if (!day.horarioProgramado && (entMin !== null || salMin !== null)) {
-    // Checada en día de Descanso programado
-    if (entMin !== null && salMin === null && !entradaAnomaly) {
-      entradaAnomaly = {
-        severity: 'warning',
-        category: 'out_of_shift',
-        shortLabel: 'Incompleta en descanso',
-        detail: `Se registró entrada (${day.entrada}) en día de Descanso programado pero no hay checada de salida.`,
-      };
-      all.push(entradaAnomaly);
-    } else if (salMin !== null && entMin === null && !salidaAnomaly) {
-      salidaAnomaly = {
-        severity: 'warning',
-        category: 'out_of_shift',
-        shortLabel: 'Incompleta en descanso',
-        detail: `Se registró salida (${day.salida}) en día de Descanso programado pero no hay checada de entrada.`,
-      };
-      all.push(salidaAnomaly);
-    }
   }
 
-  // 3. Jornadas extremadamente largas (H. Normal / H. Extra)
-  if (totalWorkedHours >= 14) {
+  // 3. Jornadas que superan las 16 horas trabajadas (posible olvido de salida hasta el turno del día siguiente)
+  if (totalWorkedHours > 16) {
     const extremeAnomaly: CellAnomaly = {
       severity: 'critical',
       category: 'extreme_workday',
       shortLabel: `Jornada extrema (${totalWorkedHours.toFixed(1)}h)`,
-      detail: `La jornada total calculada (${totalWorkedHours.toFixed(2)}h = ${day.hNormal.toFixed(2)}h norm + ${day.hExtra.toFixed(2)}h extra) supera las 14 horas diarias. Revisa antes de exportar a nómina.`,
+      detail: `La jornada total calculada (${totalWorkedHours.toFixed(2)}h = ${day.hNormal.toFixed(2)}h norm + ${day.hExtra.toFixed(2)}h extra) supera las 16 horas diarias. Revisa antes de exportar a nómina.`,
     };
     hNormalAnomaly = extremeAnomaly;
     if (day.hExtra > 0) hExtraAnomaly = extremeAnomaly;
     all.push(extremeAnomaly);
-  } else if (totalWorkedHours > 12) {
-    const longAnomaly: CellAnomaly = {
-      severity: 'warning',
-      category: 'extreme_workday',
-      shortLabel: `Jornada >12h (${totalWorkedHours.toFixed(1)}h)`,
-      detail: `La jornada total (${totalWorkedHours.toFixed(2)}h) excede las 12 horas en un solo día. Confirma que el tiempo extra sea correcto.`,
-    };
-    hNormalAnomaly = longAnomaly;
-    if (day.hExtra > 0) hExtraAnomaly = longAnomaly;
-    all.push(longAnomaly);
   }
 
-  if (day.hExtra >= 5 && !hExtraAnomaly) {
-    hExtraAnomaly = {
-      severity: day.hExtra >= 7 ? 'critical' : 'warning',
-      category: 'extreme_workday',
-      shortLabel: `Extra alto (${day.hExtra.toFixed(1)}h)`,
-      detail: `Se calcularon ${day.hExtra.toFixed(2)} horas extras en un solo día. Verifica que no se deba a un horario programado incorrecto o checada desfasada.`,
-    };
-    all.push(hExtraAnomaly);
-  }
-
-  // 4. Inconsistencias entre Incidencia y Horas Calculadas
+  // 4. Inconsistencias entre Incidencia de Falta y Horas Calculadas
   if (isAbsenceIncidence && totalWorkedHours > 0) {
     const mismatch: CellAnomaly = {
       severity: 'critical',
@@ -261,7 +222,9 @@ export function analyzeDayDataAnomalies(day: ProcessedDay): DayDataAnomalies {
     entMin !== null &&
     salMin !== null &&
     totalWorkedHours === 0 &&
-    !isAbsenceIncidence
+    !isAbsenceIncidence &&
+    !incLower.includes('vacaciones') &&
+    !incLower.includes('incapacidad')
   ) {
     const zeroHoursMismatch: CellAnomaly = {
       severity: 'critical',
@@ -963,6 +926,20 @@ const DayRow: React.FC<DayRowProps> = ({
   const requiereFormatoObligatorioPorFaltaAmbas =
     checadaAgregadaSinArchivoFormato && sinNingunaChecadaOriginal;
 
+  const incUpperRow = (day.incidencia || '').toUpperCase();
+  const permisoSinArchivoFormato =
+    day.modificadoPorSupervisor &&
+    day.tipoModificacionSupervisor === 'formato_permiso' &&
+    !day.formatoSubidoNombre;
+  const permisoRequiereArchivoObligatorio =
+    permisoSinArchivoFormato &&
+    (incUpperRow.includes('VACACIONES') ||
+      incUpperRow.includes('CON GOCE') ||
+      incUpperRow.includes('VIAJE') ||
+      incUpperRow.includes('HOME OFFICE') ||
+      incUpperRow.startsWith('OTRA:') ||
+      incUpperRow === 'OTRO');
+
   // Clases condicionales de fila
   let rowBg = 'hover:bg-slate-800/40 transition-colors';
   if (anomalies.highestSeverity === 'critical') {
@@ -1014,16 +991,17 @@ const DayRow: React.FC<DayRowProps> = ({
   };
 
   // REGLAS DE BLOQUEO DE ENTRADA Y SALIDA:
-  // 1) Si es día de Descanso programado (horarioProgramado === null) y no tiene checadas, bloquear ambas (el empleado descansó).
-  // 2) Si el trabajador ya tiene sus entradas y salidas bien, bloquear ambas.
-  // 3) Si le falta 1, bloquear la que sí tenga y permitir hacer switch (flechas) o agregar la faltante.
+  // 1) Si es día de Descanso programado (horarioProgramado === null) y NO tiene ninguna checada, bloquear ambas (el empleado descansó).
+  // 2) Si en día de Descanso vino a trabajar Tiempo Extra y solo tiene 1 checada, bloquear la que SÍ tenga, dejar abierta la que NO tenga y permitir Switch.
+  // 3) Si el trabajador ya tiene sus entradas y salidas completas, bloquear ambas.
   const esDiaDescanso = day.horarioProgramado === null;
   const tieneEntradaValida = Boolean(day.entrada && day.entrada !== '--:--');
   const tieneSalidaValida = Boolean(day.salida && day.salida !== '--:--');
 
   const ambasCompletas = tieneEntradaValida && tieneSalidaValida;
-  const isEntradaBloqueada = (esDiaDescanso && !tieneEntradaValida) || ambasCompletas || tieneEntradaValida;
-  const isSalidaBloqueada = (esDiaDescanso && !tieneSalidaValida) || ambasCompletas || tieneSalidaValida;
+  const descansoSinChecadas = esDiaDescanso && !tieneEntradaValida && !tieneSalidaValida;
+  const isEntradaBloqueada = descansoSinChecadas || ambasCompletas || tieneEntradaValida;
+  const isSalidaBloqueada = descansoSinChecadas || ambasCompletas || tieneSalidaValida;
 
   return (
     <tr className={rowBg}>
@@ -1529,6 +1507,41 @@ const DayRow: React.FC<DayRowProps> = ({
                     <Download className="w-3 h-3" /> Descargar
                   </button>
                 </div>
+              ) : permisoSinArchivoFormato ? (
+                permisoRequiereArchivoObligatorio ? (
+                  <div className="p-2 rounded bg-blue-500/15 border border-blue-500/40 text-blue-200 flex flex-col gap-1.5">
+                    <span className="text-[10px] font-bold flex items-start gap-1 leading-snug">
+                      <Paperclip className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />
+                      <span>
+                        📋 Formato de {day.incidencia} requerido: Adjunta el formato autorizado de {day.incidencia} para respaldar esta incidencia.
+                      </span>
+                    </span>
+                    {onOpenFormatAssistant && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFormatAssistant(employee, day, 'permiso')}
+                        className="self-start px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] transition-all cursor-pointer shadow"
+                      >
+                        📎 Subir Formato de {day.incidencia}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between bg-slate-950/60 px-2 py-1 rounded border border-purple-500/20 text-[10px]">
+                    <span className="text-emerald-300 font-semibold">
+                      ✓ {day.incidencia} registrada (Formato opcional)
+                    </span>
+                    {onOpenFormatAssistant && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFormatAssistant(employee, day, 'permiso')}
+                        className="text-purple-300 hover:text-purple-200 underline cursor-pointer ml-2"
+                      >
+                        Adjuntar opcional
+                      </button>
+                    )}
+                  </div>
+                )
               ) : checadaAgregadaSinArchivoFormato ? (
                 requiereFormatoObligatorioPorFaltaAmbas ? (
                   <div className="p-2 rounded bg-rose-500/20 border border-rose-500/50 text-rose-200 flex flex-col gap-1.5">

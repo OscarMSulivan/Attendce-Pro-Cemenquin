@@ -47,6 +47,7 @@ export const FESTIVOS_OFICIALES: Record<string, string> = {
 export const OPCIONES_INCIDENCIA = [
   "",
   "Asistencia",
+  "Tiempo Extra",
   "Retardo",
   "Retardo Excesivo",
   "Falta",
@@ -67,6 +68,7 @@ export const OPCIONES_INCIDENCIA = [
 export const OPCIONES_INCIDENCIA_SUPERVISOR = [
   "",
   "Asistencia",
+  "Tiempo Extra",
   "Retardo",
   "Retardo Excesivo",
   "Falta",

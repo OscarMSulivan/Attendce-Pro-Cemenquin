@@ -2366,13 +2366,16 @@ export default function App() {
           const isFalta = incUpper.includes('FALTA');
           const isSinGoce = incUpper.includes('SIN GOCE');
           const isChecadaSinGafete = incUpper.includes('CHECAD');
+          const isVacationOrDisability =
+            incUpper.includes('VACACIONES') || incUpper.includes('INCAPACIDAD');
+          const isTiempoExtra = incUpper.includes('TIEMPO EXTRA');
           const isPaidOrJustified =
             newIncidence === 'Asistencia' ||
-            incUpper.includes('VACACIONES') ||
+            isVacationOrDisability ||
             incUpper.includes('CON GOCE') ||
             incUpper.includes('PASE') ||
-            incUpper.includes('INCAPACIDAD') ||
             isChecadaSinGafete ||
+            isTiempoExtra ||
             incUpper.includes('RETARDO') ||
             incUpper.includes('FESTIVO') ||
             incUpper.includes('HOME OFFICE') ||
@@ -2395,6 +2398,36 @@ export default function App() {
             nextHNormal = 0;
             nextHExtra = 0;
             nextHorasExtrasAut = false;
+          } else if (isVacationOrDisability) {
+            // Vacaciones o Incapacidad cuando el colaborador no asistió: no computar 8h físicas trabajadas
+            const tieneEntOrig = Boolean(origEnt && origEnt !== '--:--');
+            const tieneSalOrig = Boolean(origSal && origSal !== '--:--');
+            if (!tieneEntOrig || !tieneSalOrig) {
+              nextEntrada = '--:--';
+              nextSalida = '--:--';
+            }
+            nextHNormal = 0;
+            nextHExtra = 0;
+            nextHorasExtrasAut = false;
+          } else if (isTiempoExtra) {
+            if (nextEntrada && nextEntrada !== '--:--' && nextSalida && nextSalida !== '--:--') {
+              const isRST = Boolean(
+                eventosDB[normRepId]?.[isoDate]?.isRST || eventosDB[employeeId]?.[isoDate]?.isRST
+              );
+              const metricas = calcularMetricasDia(
+                nextEntrada,
+                nextSalida,
+                effectiveHorario,
+                config.jornadaBase,
+                isRST,
+                undefined,
+                isoDate,
+                Boolean(rawScheduleCode),
+                config.overtimeRules
+              );
+              nextHNormal = metricas.hNormal;
+              nextHExtra = metricas.hExtra;
+            }
           } else if (isChecadaSinGafete || newIncidence === 'Asistencia') {
             // Si elige Checada sin Gafete o Asistencia y faltaba alguna checada en un día con horario programado,
             // completar con el horario programado del colaborador y calcular métricas
@@ -2470,6 +2503,12 @@ export default function App() {
               ? '🚫 FALTA CONFIRMADA POR SUPERVISOR (El trabajador no se presentó)'
               : isChecadaSinGafete
               ? '🟣 CHECADA SIN GAFETE VALIDADA POR SUPERVISOR'
+              : incUpper.includes('VACACIONES')
+              ? '🏖️ VACACIONES REGISTRADAS POR SUPERVISOR (Adjunta el formato de vacaciones)'
+              : incUpper.includes('INCAPACIDAD')
+              ? '🏥 INCAPACIDAD REGISTRADA POR SUPERVISOR (Formato opcional)'
+              : isTiempoExtra
+              ? `⏰ TIEMPO EXTRA EN DÍA DE DESCANSO${nextHExtra > 0 ? ` (+${nextHExtra.toFixed(2)} HRS)` : ''}`
               : newIncidence
               ? `📋 ${newIncidence.toUpperCase()} REGISTRADO POR SUPERVISOR`
               : '',
@@ -2570,6 +2609,10 @@ export default function App() {
           const wasModified = newEntrada !== origEnt || newSalida !== origSal;
           const origBothMissing =
             (!origEnt || origEnt === '--:--') && (!origSal || origSal === '--:--');
+          const tieneAmbasNuevas =
+            Boolean(newEntrada && newEntrada !== '--:--') &&
+            Boolean(newSalida && newSalida !== '--:--');
+          const esDescansoTiempoExtra = effectiveHorario === null;
 
           sumN += metricas.hNormal;
           if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
@@ -2586,8 +2629,17 @@ export default function App() {
             salida: newSalida,
             hNormal: metricas.hNormal,
             hExtra: metricas.hExtra,
-            incidencia: metricas.incidencia === 'Falta' && wasModified ? 'Checada sin Gafete' : metricas.incidencia,
-            advertencia: wasModified
+            incidencia:
+              esDescansoTiempoExtra && (metricas.hExtra > 0 || !tieneAmbasNuevas)
+                ? 'Tiempo Extra'
+                : metricas.incidencia === 'Falta' && wasModified
+                ? 'Checada sin Gafete'
+                : metricas.incidencia,
+            advertencia: !tieneAmbasNuevas
+              ? metricas.advertencia
+              : esDescansoTiempoExtra && metricas.hExtra > 0
+              ? `⏰ Día de descanso laborado: se está generando Tiempo Extra (+${metricas.hExtra.toFixed(2)} hrs)`
+              : wasModified
               ? d.formatoSubidoNombre
                 ? `🟣 CHECADA AGREGADA POR SUPERVISOR (Formato: ${d.formatoSubidoNombre})`
                 : origBothMissing
@@ -2596,8 +2648,9 @@ export default function App() {
               : metricas.advertencia,
             huerfana: metricas.huerfana,
             rowClass: metricas.rowClass,
-            modificadoPorSupervisor: wasModified,
-            tipoModificacionSupervisor: wasModified ? ('checada_agregada' as const) : undefined,
+            modificadoPorSupervisor: wasModified && tieneAmbasNuevas,
+            tipoModificacionSupervisor:
+              wasModified && tieneAmbasNuevas ? ('checada_agregada' as const) : undefined,
           };
         });
 
@@ -2884,6 +2937,11 @@ export default function App() {
               eventosDB[normRepId]?.[payload.isoDate]?.isRST ||
                 eventosDB[payload.employeeId]?.[payload.isoDate]?.isRST
             );
+            const isNoPhysicalHoursPermiso =
+              payload.tipoIncidencia === 'Permiso sin goce' ||
+              payload.tipoIncidencia === 'Vacaciones' ||
+              payload.tipoIncidencia === 'Incapacidad';
+
             const metricas = hasValidTimes
               ? calcularMetricasDia(
                   payload.entrada,
@@ -2897,7 +2955,7 @@ export default function App() {
                   config.overtimeRules
                 )
               : {
-                  hNormal: payload.tipoIncidencia === 'Permiso sin goce' ? 0 : config.jornadaBase,
+                  hNormal: isNoPhysicalHoursPermiso ? 0 : config.jornadaBase,
                   hExtra: 0,
                   incidencia: vcaLabel,
                   advertencia: `📋 ${vcaLabel.toUpperCase()} REGISTRADO POR SUPERVISOR`,
@@ -2907,15 +2965,17 @@ export default function App() {
 
             sumN += metricas.hNormal;
             if (d.horasExtrasAutorizadas === true) sumE += metricas.hExtra;
-            if (metricas.hNormal > 0) empAsist++;
+            if (metricas.hNormal > 0 || payload.tipoIncidencia === 'Vacaciones' || payload.tipoIncidencia === 'Incapacidad') {
+              empAsist++;
+            }
 
             return {
               ...d,
               horarioProgramado: effectiveHorario,
               entradaOriginal: origEnt,
               salidaOriginal: origSal,
-              entrada: hasValidTimes ? payload.entrada : d.entrada,
-              salida: hasValidTimes ? payload.salida : d.salida,
+              entrada: hasValidTimes ? payload.entrada : isNoPhysicalHoursPermiso ? '--:--' : d.entrada,
+              salida: hasValidTimes ? payload.salida : isNoPhysicalHoursPermiso ? '--:--' : d.salida,
               hNormal: metricas.hNormal,
               hExtra: metricas.hExtra,
               incidencia: vcaLabel,

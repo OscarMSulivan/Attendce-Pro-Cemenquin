@@ -75,14 +75,31 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
 
   const [entrada, setEntrada] = useState<string>(defaultEnt);
   const [salida, setSalida] = useState<string>(defaultSal);
-  const [permisoTipo, setPermisoTipo] = useState<IncidentType>('Permiso con goce');
-  const [especificacionOtro, setEspecificacionOtro] = useState<string>('');
+  const [permisoTipo, setPermisoTipo] = useState<IncidentType>(() => {
+    const inc = (day.incidencia || '').toLowerCase();
+    if (inc.includes('vacaciones')) return 'Vacaciones';
+    if (inc.includes('incapacidad')) return 'Incapacidad';
+    if (inc.includes('sin goce')) return 'Permiso sin goce';
+    if (inc.includes('pase')) return 'Pase Médico';
+    if (inc.includes('viaje')) return 'Permiso de viaje';
+    if (inc.includes('home office')) return 'Home Office';
+    if (inc.startsWith('otra:')) return 'Otro';
+    return 'Permiso con goce';
+  });
+  const [especificacionOtro, setEspecificacionOtro] = useState<string>(() => {
+    const inc = (day.incidencia || '').trim();
+    return inc.toLowerCase().startsWith('otra:') ? inc.slice(5).trim() : '';
+  });
   const [motivo, setMotivo] = useState<string>(
     day.notaSupervisorDia ||
       (initialMode === 'checada_sin_gafete'
         ? 'Trabajador sí laboró su turno completo; omitió checar con gafete (validado por supervisor).'
         : initialMode === 'falta'
         ? 'El trabajador no se presentó a laborar en su turno programado.'
+        : (day.incidencia || '').toLowerCase().includes('vacaciones')
+        ? 'Vacaciones autorizadas del colaborador (registradas por supervisor).'
+        : (day.incidencia || '').toLowerCase().includes('incapacidad')
+        ? 'Incapacidad médica del colaborador (registrada por supervisor).'
         : '')
   );
   const [uploadedFile, setUploadedFile] = useState<{ nombre: string; base64: string } | null>(

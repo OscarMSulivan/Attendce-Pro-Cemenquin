@@ -483,11 +483,11 @@ export function calcularMetricasDia(
       const rawExtraMin = Math.max(0, Math.round(totalDelDia * 60));
       hExtra = aplicarRedondeoYTopeExtra(rawExtraMin, rules);
       hNormal = 0;
-      inc = 'Descanso';
+      inc = hExtra > 0 ? 'Tiempo Extra' : 'Descanso';
       cls = 'row-success';
       msg =
         hExtra > 0
-          ? `⭐ El empleado laboró en su día de descanso (+${hExtra.toFixed(2)} hrs)`
+          ? `⏰ Día de descanso laborado: se está generando Tiempo Extra (+${hExtra.toFixed(2)} hrs)`
           : `⭐ Checada en día de descanso (${Math.round(totalDelDia * 60)} min, menor al mínimo de ${rules.minutosMinimosParaExtra} min para extra)`;
     } else {
       const jornadaEsperada = calcularJornadaEsperadaHrs(normHorario, tiempoComida, jornadaBase);
@@ -545,11 +545,13 @@ export function calcularMetricasDia(
     }
   } else if (tieneEnt !== tieneSal) {
     if (normHorario === null) {
-      // Checada en día de descanso
-      huerfana = false;
-      inc = 'Descanso';
+      // Checada única en día de descanso (ej. Sábado de tiempo extra con 1 checada faltante)
+      huerfana = true;
+      inc = 'Tiempo Extra';
       cls = 'row-warning';
-      msg = `⭐ Checada registrada en día de descanso (${tieneEnt ? `Entrada ${ent}` : `Salida ${sal}`})`;
+      msg = !tieneEnt
+        ? `⏰ Día de descanso con Tiempo Extra: falta checada de entrada (Salida registrada: ${sal}) — captura la hora faltante o usa Switch`
+        : `⏰ Día de descanso con Tiempo Extra: falta checada de salida (Entrada registrada: ${ent}) — captura la hora faltante o usa Switch`;
     } else {
       huerfana = true;
       inc = 'Asistencia';
@@ -1033,13 +1035,18 @@ export function sincronizarReportesConHorarios(
       const tieneEntValida = Boolean(d.entrada && d.entrada !== '--:--');
       const tieneSalValida = Boolean(d.salida && d.salida !== '--:--');
       const tieneAmbasChecadas = tieneEntValida && tieneSalValida;
+      const tieneAlgunaChecada = tieneEntValida || tieneSalValida;
 
       const isExplicitSupervisorAbsence =
         Boolean(d.modificadoPorSupervisor) &&
         (d.tipoModificacionSupervisor === 'falta_confirmada' ||
           incUpper.includes('FALTA') ||
           incUpper.includes('SIN GOCE') ||
-          d.incidencia === 'Descanso');
+          (d.incidencia === 'Descanso' && !tieneAlgunaChecada));
+
+      const isVacationOrDisabilityWithoutPunches =
+        !tieneAmbasChecadas &&
+        (incUpper.includes('VACACIONES') || incUpper.includes('INCAPACIDAD'));
 
       const isExplicitSupervisorJustifiedWithoutBothPunches =
         Boolean(d.modificadoPorSupervisor) &&
@@ -1063,21 +1070,29 @@ export function sincronizarReportesConHorarios(
         nextIncidencia = d.incidencia;
         nextAdvertencia = d.advertencia;
         nextHuerfana = false;
-        nextRowClass = d.rowClass || 'row-danger';
+        nextRowClass = incUpper.includes('SIN GOCE') ? 'row-warning' : d.rowClass || 'row-danger';
       } else if (isExplicitSupervisorJustifiedWithoutBothPunches) {
-        nextHNormal = d.hNormal > 0 ? d.hNormal : expectedHorario ? jornadaBase : 0;
-        nextHExtra = d.hExtra || 0;
+        nextHNormal = isVacationOrDisabilityWithoutPunches
+          ? 0
+          : d.hNormal > 0
+          ? d.hNormal
+          : expectedHorario
+          ? jornadaBase
+          : 0;
+        nextHExtra = isVacationOrDisabilityWithoutPunches ? 0 : d.hExtra || 0;
         nextIncidencia = d.incidencia || metricas.incidencia;
         nextAdvertencia = d.advertencia;
         nextHuerfana = false;
-        nextRowClass = d.rowClass || 'row-success';
+        nextRowClass = 'row-success';
       } else if (d.modificadoPorSupervisor) {
-        // Tiene ambas checadas y fue modificado por el supervisor (ej. Checada sin Gafete o Permiso con checadas):
+        // Tiene ambas checadas y fue modificado por el supervisor (ej. Checada sin Gafete, Permiso con checadas o Tiempo Extra en descanso):
         // usamos las horas calculadas con el horario vigente y preservamos la elección del supervisor.
-        nextHNormal = metricas.hNormal > 0 ? metricas.hNormal : d.hNormal;
+        nextHNormal = expectedHorario === null ? 0 : metricas.hNormal > 0 ? metricas.hNormal : d.hNormal;
         nextHExtra = metricas.hExtra;
         nextIncidencia =
-          d.incidencia && !d.incidencia.toUpperCase().includes('FALTA')
+          expectedHorario === null && metricas.hExtra > 0
+            ? 'Tiempo Extra'
+            : d.incidencia && !d.incidencia.toUpperCase().includes('FALTA') && d.incidencia !== 'Descanso'
             ? d.incidencia
             : metricas.incidencia === 'Falta'
             ? 'Checada sin Gafete'
