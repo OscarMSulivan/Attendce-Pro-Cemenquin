@@ -32,10 +32,13 @@ export function parseEmployeeStatus(raw: unknown): 'activo' | 'inactivo' | undef
     .toLowerCase();
   if (!clean) return undefined;
 
+  // Coincidencias exactas o prefijos claros (evita falsos positivos como "PERALTA", "ALTAGRACIA" o "Baja California")
   if (
     clean === 'inactivo' ||
     clean === 'inactiva' ||
     clean === 'baja' ||
+    clean === 'dado de baja' ||
+    clean === 'baja definitiva' ||
     clean === 'b' ||
     clean === 'i' ||
     clean === '0' ||
@@ -43,14 +46,15 @@ export function parseEmployeeStatus(raw: unknown): 'activo' | 'inactivo' | undef
     clean === 'false' ||
     clean === 'inactive' ||
     clean === 'off' ||
-    clean.includes('inactiv') ||
-    clean.includes('baja') ||
-    clean.includes('finiquit') ||
-    clean.includes('renunc') ||
-    clean.includes('despid') ||
-    clean.includes('cesad') ||
-    clean.includes('suspend') ||
-    clean.includes('terminat')
+    clean === 'finiquitado' ||
+    clean === 'finiquitada' ||
+    clean === 'renuncia' ||
+    clean === 'despido' ||
+    clean === 'cesado' ||
+    clean === 'suspendido' ||
+    clean === 'terminated' ||
+    /^inactiv[oa]s?$/.test(clean) ||
+    /^baja(\b|$)/.test(clean) && !clean.includes('california')
   ) {
     return 'inactivo';
   }
@@ -66,9 +70,7 @@ export function parseEmployeeStatus(raw: unknown): 'activo' | 'inactivo' | undef
     clean === 'vigente' ||
     clean === 'active' ||
     clean === 'on' ||
-    clean.includes('activ') ||
-    clean.includes('alta') ||
-    clean.includes('vigente')
+    /^activ[oa]s?$/.test(clean)
   ) {
     return 'activo';
   }
@@ -85,7 +87,6 @@ function isStatusHeader(header: string): boolean {
   return (
     h === 'status' ||
     h === 'estatus' ||
-    h === 'estado' ||
     h === 'situacion' ||
     h.includes('status') ||
     h.includes('estatus') ||
@@ -175,10 +176,15 @@ export async function parseEmployeesFile(
     }
 
     // Comprobar si es el formato de 2 filas por empleado (típico de sistemas de checadas como ZKTeco/Timenet)
-    // donde la fila 1 tiene código, nombre y supervisor, y la fila 2 tiene el código de horario.
-    const isDoubleRowFormat = rows.length > headerRowIdx + 2 &&
-      rows[headerRowIdx + 2] &&
-      (rows[headerRowIdx + 1]?.[0] || rows[headerRowIdx + 1]?.[1]);
+    // donde la fila 1 tiene código, nombre y supervisor, y la fila 2 NO tiene código en col 0/1 (tiene el horario).
+    const firstDataRow = rows[headerRowIdx + 1] || [];
+    const secondDataRow = rows[headerRowIdx + 2] || [];
+    const firstHasCode = Boolean(String(firstDataRow[0] ?? firstDataRow[1] ?? '').trim());
+    const secondHasCode = Boolean(String(secondDataRow[0] ?? secondDataRow[1] ?? '').trim());
+    const isDoubleRowFormat =
+      rows.length > headerRowIdx + 2 &&
+      firstHasCode &&
+      !secondHasCode;
 
     if (isDoubleRowFormat) {
       for (let i = headerRowIdx + 1; i < rows.length; i += 2) {

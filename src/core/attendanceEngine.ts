@@ -138,7 +138,8 @@ export function calcularJornadaEsperadaHrs(
     diffMin += 1440; // Cruce de medianoche: suma 24 horas
   }
 
-  const horas = (diffMin / 60) - tiempoComidaHrs;
+  const rawHoras = diffMin / 60;
+  const horas = rawHoras > 6 ? rawHoras - tiempoComidaHrs : rawHoras;
   return Math.max(0, horas);
 }
 
@@ -465,8 +466,8 @@ export function calcularMetricasDia(
 
     let d = m2 - m1Efectiva;
     if (d < 0) d += 1440; // Cruce de medianoche
-    // Si el colaborador entró temprano pero también salió antes de la hora de entrada programada, evitar desborde de 24h
-    if (m1Efectiva !== m1 && d > 12 * 60 && !normHorario?.cruzaMedianoche) {
+    // Solo evitar desborde de 24h si el colaborador entró temprano Y salió antes de su hora de entrada programada
+    if (m1Efectiva !== m1 && m2 < m1Efectiva && m2 >= m1 && !normHorario?.cruzaMedianoche) {
       d = 0;
     }
 
@@ -479,6 +480,7 @@ export function calcularMetricasDia(
     }
 
     const esDiaDescanso = normHorario === null;
+    const nombreFestivo = isoDate ? FESTIVOS_OFICIALES[isoDate] : undefined;
 
     if (esDiaDescanso) {
       const rawExtraMin = Math.max(0, Math.round(totalDelDia * 60));
@@ -514,7 +516,7 @@ export function calcularMetricasDia(
         cls = 'row-warning';
         msgRetardo = `⏱️ Retardo excesivo (+${evalEnt.minutosDiff} min · Entrada prog.: ${normHorario.entrada})`;
       } else {
-        inc = 'Asistencia';
+        inc = nombreFestivo ? 'Festivo' : 'Asistencia';
         cls = 'row-success';
       }
 
@@ -538,11 +540,8 @@ export function calcularMetricasDia(
         }
       }
 
-      if (msgRetardo && msgExtra) {
-        msg = `${msgRetardo} | ${msgExtra}`;
-      } else {
-        msg = msgRetardo || msgExtra;
-      }
+      const msgFestivo = nombreFestivo ? `🎉 Día festivo oficial laborado (${nombreFestivo})` : '';
+      msg = [msgFestivo, msgRetardo, msgExtra].filter(Boolean).join(' | ');
     }
   } else if (tieneEnt !== tieneSal) {
     if (normHorario === null) {
@@ -592,6 +591,10 @@ export function calcularMetricasDia(
     cls = 'row-default';
     msg = '';
     huerfana = false;
+    if (vcaUpper.includes('VAC') || vcaUpper.includes('INCAP')) {
+      hNormal = 0;
+      hExtra = 0;
+    }
   }
 
   return {
@@ -859,7 +862,7 @@ export function generarReporteAsistencia(
         }
       );
 
-      if (vca) {
+      if (metricas.incidencia.toLowerCase().includes('vacacion')) {
         resumen.totalVac++;
       }
 
@@ -924,8 +927,8 @@ export function generarReporteAsistencia(
     });
   });
 
-  if (empleados.length > 0) {
-    resumen.promedioHoras = Number((resumen.totalHoras / empleados.length).toFixed(2));
+  if (empleadosActivos.length > 0) {
+    resumen.promedioHoras = Number((resumen.totalHoras / empleadosActivos.length).toFixed(2));
     const tasaFaltas = (resumen.totalFaltas / Math.max(1, totalDiasAuditoria)) * 100;
     resumen.tasaCumplimiento = Number(Math.max(0, 100 - tasaFaltas).toFixed(1));
   }
@@ -991,14 +994,28 @@ export function sincronizarReportesConHorarios(
   if (!Array.isArray(reportes) || reportes.length === 0) return reportes;
   const jornadaBase = options.jornadaBase ?? 8.0;
 
-  return reportes.map(rep => {
+  return reportes
+    .filter(rep => {
+      const normId = normalizeEmployeeId(rep.empleado.id);
+      const dbEmp = empleadosDB[normId] || empleadosDB[rep.empleado.id];
+      if (dbEmp && !isEmployeeActive(dbEmp)) return false;
+      return isEmployeeActive(rep.empleado);
+    })
+    .map(rep => {
     const normId = normalizeEmployeeId(rep.empleado.id);
     const dbEmp = empleadosDB[normId] || empleadosDB[rep.empleado.id];
     const effectiveCode = resolveEmployeeScheduleCode(rep.empleado, horariosDB, asignaciones, empleadosDB);
 
     const updatedEmpleado: Employee = {
       ...rep.empleado,
-      ...(dbEmp ? { nombre: dbEmp.nombre || rep.empleado.nombre, jefe: dbEmp.jefe || rep.empleado.jefe } : {}),
+      ...(dbEmp
+        ? {
+            nombre: dbEmp.nombre || rep.empleado.nombre,
+            jefe: dbEmp.jefe || rep.empleado.jefe,
+            status: dbEmp.status || rep.empleado.status,
+            fechaBaja: dbEmp.fechaBaja,
+          }
+        : {}),
       id: normId || rep.empleado.id,
       horario: effectiveCode,
     };

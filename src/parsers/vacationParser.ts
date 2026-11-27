@@ -28,6 +28,46 @@ function esFaltaInjustificada(desc: string): boolean {
   );
 }
 
+function parseVacationDateToISO(rawFecha: unknown): string | null {
+  if (rawFecha === null || rawFecha === undefined) return null;
+  if (typeof rawFecha === 'number') {
+    const d = XLSX.SSF.parse_date_code(rawFecha);
+    if (!d || !d.y || !d.m || !d.d) return null;
+    return `${String(d.y).padStart(4, '0')}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+  }
+  if (rawFecha instanceof Date && !isNaN(rawFecha.getTime())) {
+    const y = rawFecha.getFullYear();
+    const m = String(rawFecha.getMonth() + 1).padStart(2, '0');
+    const d = String(rawFecha.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const datePart = String(rawFecha).trim().split(/[\sT]/)[0];
+  const p = datePart.split(/[-/]/);
+  if (p.length !== 3) return null;
+  let year = '';
+  let month = '';
+  let day = '';
+  if (p[0].length === 4) {
+    year = p[0];
+    month = p[1].padStart(2, '0');
+    day = p[2].padStart(2, '0');
+  } else {
+    day = p[0].padStart(2, '0');
+    month = p[1].padStart(2, '0');
+    year = p[2].length === 2 ? `20${p[2]}` : p[2];
+  }
+  const mNum = Number(month);
+  const dNum = Number(day);
+  if (mNum > 12 && dNum <= 12) {
+    // Formato US MM/DD/YYYY
+    [month, day] = [day, month];
+  }
+  if (!/^\d{4}$/.test(year) || Number(month) < 1 || Number(month) > 12 || Number(day) < 1 || Number(day) > 31) {
+    return null;
+  }
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * Parsea el archivo de Vacaciones / Incidencias autorizadas (omitiendo avisos de faltas injustificadas)
  */
@@ -54,9 +94,13 @@ export async function parseVacationsFile(file: File): Promise<ParseVacationsResu
         headerRowIdx = i;
         row.forEach((cell: any, idx: number) => {
           const t = String(cell || '').toLowerCase();
-          if (t.includes('codigo') || t.includes('id')) colId = idx;
-          else if (t.includes('fecha')) colFecha = idx;
-          else if (t.includes('evento') || t.includes('descrip')) colDesc = idx;
+          if (t.includes('evento') || t.includes('descrip') || t.includes('incidencia')) {
+            if (!t.includes('codigo') || colDesc === 2) colDesc = idx;
+          } else if (t.includes('fecha')) {
+            colFecha = idx;
+          } else if (t.includes('codigo') || t.includes('código') || t.includes('empleado') || t === 'id') {
+            colId = idx;
+          }
         });
         break;
       }
@@ -81,20 +125,8 @@ export async function parseVacationsFile(file: File): Promise<ParseVacationsResu
       if (esFaltaInjustificada(desc)) continue;
 
       if (lastId && rawFecha && desc) {
-        let fStr = '';
-        if (typeof rawFecha === 'number') {
-          const d = XLSX.SSF.parse_date_code(rawFecha);
-          fStr = `${String(d.d).padStart(2, '0')}/${String(d.m).padStart(2, '0')}/${d.y}`;
-        } else {
-          fStr = String(rawFecha).trim();
-        }
-
-        const p = fStr.split(/[-/]/);
-        if (p.length === 3) {
-          const iso = p[0].length === 4
-            ? `${p[0]}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}`
-            : `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-
+        const iso = parseVacationDateToISO(rawFecha);
+        if (iso) {
           if (!vacacionesDB[lastId]) vacacionesDB[lastId] = {};
           vacacionesDB[lastId][iso] = desc;
           totalRegistros++;
@@ -127,12 +159,8 @@ export async function parseVacationsFile(file: File): Promise<ParseVacationsResu
               if (esFaltaInjustificada(desc)) return;
 
               if (lastId && f && desc) {
-                const p = f.split(/[-/]/);
-                if (p.length === 3) {
-                  const iso = p[0].length === 4
-                    ? `${p[0]}-${p[1].padStart(2, '0')}-${p[2].padStart(2, '0')}`
-                    : `${p[2]}-${p[1].padStart(2, '0')}-${p[0].padStart(2, '0')}`;
-
+                const iso = parseVacationDateToISO(f);
+                if (iso) {
                   if (!vacacionesDB[lastId]) vacacionesDB[lastId] = {};
                   vacacionesDB[lastId][iso] = desc;
                   totalRegistros++;

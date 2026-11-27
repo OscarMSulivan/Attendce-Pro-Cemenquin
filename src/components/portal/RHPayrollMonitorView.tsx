@@ -118,11 +118,12 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
     return empleados.filter((e) => (e.empresa || 'Empresa 1').trim() === filterCompany);
   }, [empleados, filterCompany]);
 
-  // Estado del Temporizador Configurable (inicializado con el límite por horas configurado por el Administrador)
+  // Estado del Temporizador Configurable (inicializado en hora local para <input type="datetime-local">)
   const [timerHoursPreset, setTimerHoursPreset] = useState<string>(() => String(defaultHorasLimite || 24));
   const [customDeadlineTime, setCustomDeadlineTime] = useState<string>(() => {
     const d = new Date(Date.now() + (defaultHorasLimite || 24) * 3600000);
-    return d.toISOString().slice(0, 16);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   });
 
   // Estado del Modal de Cancelación de Dispersión
@@ -143,11 +144,13 @@ export const RHPayrollMonitorView: React.FC<RHPayrollMonitorViewProps> = ({
   // Buscar si esta semana ya fue dispersada
   const currentDispersal = dispersals.find((d) => d.semanaNumero === semanaNumero);
   const isGlobalCancelled = Boolean(currentDispersal?.cancelada);
-  const cancelledSupervisorsSet = new Set(
-    (currentDispersal?.supervisoresCancelados || []).map((s) => s.trim().toUpperCase())
+  const cancelledSupervisorsSet = useMemo(
+    () => new Set((currentDispersal?.supervisoresCancelados || []).map((s) => s.trim().toUpperCase())),
+    [currentDispersal?.supervisoresCancelados]
   );
-  const notifiedListsSet = new Set(
-    (currentDispersal?.supervisoresNotificados || []).map((s) => s.trim().toUpperCase())
+  const notifiedListsSet = useMemo(
+    () => new Set((currentDispersal?.supervisoresNotificados || []).map((s) => s.trim().toUpperCase())),
+    [currentDispersal?.supervisoresNotificados]
   );
 
   // Calcular deadline ISO según el preset elegido

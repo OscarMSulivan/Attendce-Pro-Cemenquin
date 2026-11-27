@@ -237,7 +237,9 @@ export function calcularMinutosRetardoDia(day: ProcessedDay): number {
     if (schedMin !== null) {
       let diff = realMin - schedMin;
       if (diff < -720) diff += 1440;
+      if (diff > 720) diff -= 1440;
       if (diff > 0) return diff;
+      return 0;
     }
   }
 
@@ -304,12 +306,24 @@ function matchDayRules(
     }
   });
 
+  if (matched.length > 0) {
+    return matched;
+  }
+
+  const isJustifiedNonRetardo =
+    inc.includes('VACACIONES') ||
+    inc.includes('INCAPACIDAD') ||
+    inc.includes('CON GOCE') ||
+    inc.includes('PASE') ||
+    inc.includes('HOME OFFICE') ||
+    inc.includes('VIAJE');
+
   // 2. Clasificación de las incidencias esenciales (Falta Injustificada y Retardo)
   // Si es Asistencia o Descanso -> queda vacío ("")
   if (inc.includes('FALTA') || adv.includes('FALTA CONFIRMADA')) {
     const r = rulesMap.get('FALTA');
     if (r) matched.push({ rule: r, cantidad: 1 });
-  } else if (inc.includes('RETARDO') || adv.includes('RETARDO')) {
+  } else if (!isJustifiedNonRetardo && inc.includes('RETARDO')) {
     const rRet = rulesMap.get('RETARDO');
     if (rRet) {
       const minRet = calcularMinutosRetardoDia(day);
@@ -432,7 +446,7 @@ export function buildContpaqiPayrollData(
       // Mostrar en CONCEPTO el detalle del tiempo a descontar
       existing.conceptoColC = `${conceptoColC} (-${existing.minutosRetardoAcumulados} MIN / ${existing.horasDescuentoRetardo} HRS)`;
     } else {
-      existing.montoColF = Number(rule.montoColF || 0);
+      existing.montoColF = Number((existing.montoColF + montoEvento).toFixed(2));
     }
 
     movements.push({
@@ -462,6 +476,10 @@ export function buildContpaqiPayrollData(
   };
 
   reports.forEach(rep => {
+    if ((rep.empleado.status || 'activo') === 'inactivo') {
+      return;
+    }
+
     const supName = rep.empleado.jefe || 'SIN SUPERVISOR';
     const releaseKey = `${weekNumber}_${supName}`;
     const isReleased = releases[releaseKey]?.status === 'liberado';
@@ -471,7 +489,8 @@ export function buildContpaqiPayrollData(
       return;
     }
 
-    let horasExtrasAcumuladasSemana = 0;
+    let horasDoblesAcumuladasSemana = 0;
+    let diasConExtrasDobles = 0;
 
     rep.dias.forEach(d => {
       // 1. Evaluar incidencias de día (Falta Injustificada, Retardo con cálculo de descuento y personalizadas)
@@ -488,12 +507,9 @@ export function buildContpaqiPayrollData(
         );
       });
 
-      // 2. Evaluar Horas Extras Autorizadas (Dobles ≤ 9h y Triples > 9h)
+      // 2. Evaluar Horas Extras Autorizadas (LFT Art. 66/68: máx 3h/día, máx 3 días/semana, máx 9h/semana Dobles; resto Triples)
       if (d.hExtra > 0 && d.horasExtrasAutorizadas === true) {
-        const prevExtra = horasExtrasAcumuladasSemana;
-        const newExtraTotal = Number((prevExtra + d.hExtra).toFixed(2));
-        horasExtrasAcumuladasSemana = newExtraTotal;
-
+        const extraDia = Number(d.hExtra.toFixed(2));
         const rDobles = rulesMap.get('HORAS_EXTRAS_DOBLES');
         const rTriples = rulesMap.get('HORAS_EXTRAS_TRIPLES');
 
@@ -501,13 +517,16 @@ export function buildContpaqiPayrollData(
           let hrsDoblesDia = 0;
           let hrsTriplesDia = 0;
 
-          if (newExtraTotal <= 9) {
-            hrsDoblesDia = Number(d.hExtra.toFixed(2));
-          } else if (prevExtra >= 9) {
-            hrsTriplesDia = Number(d.hExtra.toFixed(2));
+          const cupoSemanalRestante = Math.max(0, Number((9 - horasDoblesAcumuladasSemana).toFixed(2)));
+          if (diasConExtrasDobles < 3 && cupoSemanalRestante > 0) {
+            hrsDoblesDia = Number(Math.min(extraDia, 3, cupoSemanalRestante).toFixed(2));
+            hrsTriplesDia = Number(Math.max(0, extraDia - hrsDoblesDia).toFixed(2));
+            if (hrsDoblesDia > 0) {
+              horasDoblesAcumuladasSemana = Number((horasDoblesAcumuladasSemana + hrsDoblesDia).toFixed(2));
+              diasConExtrasDobles++;
+            }
           } else {
-            hrsDoblesDia = Number((9 - prevExtra).toFixed(2));
-            hrsTriplesDia = Number((d.hExtra - hrsDoblesDia).toFixed(2));
+            hrsTriplesDia = extraDia;
           }
 
           if (hrsDoblesDia > 0 && rDobles) {
@@ -521,7 +540,7 @@ export function buildContpaqiPayrollData(
             rep,
             d,
             rDobles,
-            Number(d.hExtra.toFixed(2)),
+            extraDia,
             'HORAS',
             estatusLiberacion
           );

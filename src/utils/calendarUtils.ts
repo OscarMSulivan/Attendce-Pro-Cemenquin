@@ -137,11 +137,12 @@ export interface PayrollWeekOption {
  */
 export function generatePayrollWeeks(year = 2026): PayrollWeekOption[] {
   const weeks: PayrollWeekOption[] = [];
-  // En el sistema original: comienza en el primer jueves del año
+  // En el sistema original: comienza en el primer jueves del año y cubre todos los jueves del año (52 o 53)
   let f = new Date(year, 0, 1, 12, 0, 0);
   f.setDate(f.getDate() + ((4 - f.getDay() + 7) % 7));
 
-  for (let i = 1; i <= 52; i++) {
+  let i = 1;
+  while (f.getFullYear() === year && i <= 54) {
     const startY = f.getFullYear();
     const startM = String(f.getMonth() + 1).padStart(2, '0');
     const startD = String(f.getDate()).padStart(2, '0');
@@ -164,6 +165,7 @@ export function generatePayrollWeeks(year = 2026): PayrollWeekOption[] {
     });
 
     f.setDate(f.getDate() + 7);
+    i++;
   }
 
   return weeks;
@@ -176,8 +178,10 @@ export function normalizeEmployeeId(id: string | number | null | undefined): str
   if (id === null || id === undefined) return '';
   const str = id.toString().trim();
   if (!str) return '';
-  const parsed = parseInt(str, 10);
-  return isNaN(parsed) ? str : parsed.toString().padStart(5, '0');
+  if (/^\d+$/.test(str)) {
+    return parseInt(str, 10).toString().padStart(5, '0');
+  }
+  return str;
 }
 
 /**

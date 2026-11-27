@@ -888,13 +888,14 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [isServerHydrated, eventosDB]);
 
+  const hasActiveDispersalWithDeadline = useMemo(
+    () => dispersals.some(d => !d.cancelada && !d.cerrada && Boolean(d.limiteLiberacion)),
+    [dispersals]
+  );
+
   // Revisión periódica (cada 45s) de alertas automáticas cuando el plazo de liberación está por vencer
   useEffect(() => {
-    if (!isServerHydrated) return;
-    const hasActiveDispersalWithDeadline = dispersals.some(
-      d => !d.cancelada && !d.cerrada && Boolean(d.limiteLiberacion)
-    );
-    if (!hasActiveDispersalWithDeadline) return;
+    if (!isServerHydrated || !hasActiveDispersalWithDeadline) return;
 
     const checkExpiring = () => {
       if (typeof window === 'undefined' || window.location.protocol === 'file:') return;
@@ -927,7 +928,7 @@ export default function App() {
     checkExpiring();
     const interval = setInterval(checkExpiring, 45000);
     return () => clearInterval(interval);
-  }, [isServerHydrated, dispersals, showToast]);
+  }, [isServerHydrated, hasActiveDispersalWithDeadline, showToast]);
 
   // Sincronización automática de incidencias y vacaciones aprobadas con el motor de cálculo (solo si hay cambios reales)
   useEffect(() => {
@@ -1294,13 +1295,11 @@ export default function App() {
             setResumen(null);
             StorageService.clearReportesState();
           }
-        } else {
-          if (Date.now() - lastLocalReportEditAtRef.current < 4000) {
-            return;
-          }
+        } else if (Date.now() - lastLocalReportEditAtRef.current >= 4000) {
           const currentHorarios = StorageService.loadHorarios();
           const currentAsignaciones = StorageService.loadAsignaciones();
           const currentSavedEmps = StorageService.loadSavedEmployees()?.empleados || {};
+          const currentConfig = StorageService.loadConfig();
           setReportes(prevReportes => {
             const mergedIncoming = (incomingState.reportes as EmployeeReport[]).map(incRep => {
               const normId = normalizeEmployeeId(incRep?.empleado?.id);
@@ -1336,7 +1335,17 @@ export default function App() {
               mergedIncoming,
               currentHorarios,
               currentAsignaciones,
-              currentSavedEmps
+              currentSavedEmps,
+              vacacionesDB,
+              {
+                jornadaBase: currentConfig.jornadaBase,
+                modoLectura: currentConfig.modoLectura,
+                minutosRebote: currentConfig.minutosRebote,
+                overtimeRules: currentConfig.overtimeRules,
+                toleranciaAntes: currentConfig.toleranciaAntes,
+                toleranciaDespues: currentConfig.toleranciaDespues,
+                comidaDefault: currentConfig.comidaDefault,
+              }
             );
             // Actualizar referencia de Delta Sync para evitar rebote infinito entre clientes conectados
             lastSyncedRefs.current.reportes = synced;
@@ -2617,9 +2626,11 @@ export default function App() {
           else if (nextHNormal > 0 || isPaidOrJustified) rowClass = 'row-success';
           else rowClass = 'row-default';
 
+          const origMissingAny =
+            !origEnt || origEnt === '--:--' || !origSal || origSal === '--:--';
           const tipoMod = isFalta
             ? ('falta_confirmada' as const)
-            : isChecadaSinGafete
+            : isChecadaSinGafete || (newIncidence === 'Asistencia' && origMissingAny)
             ? ('formato_checada_sin_gafete' as const)
             : ('formato_permiso' as const);
 
@@ -2843,7 +2854,6 @@ export default function App() {
               ? {
                   ...d,
                   notaSupervisorDia: note,
-                  modificadoPorSupervisor: Boolean(d.modificadoPorSupervisor || note.trim()),
                 }
               : d
           ),
@@ -2873,7 +2883,6 @@ export default function App() {
           return {
             ...d,
             horasExtrasAutorizadas: autorizada,
-            modificadoPorSupervisor: true,
             notaSupervisorDia: d.notaSupervisorDia || (autorizada ? 'Tiempo extra autorizado por supervisor' : 'Tiempo extra NO autorizado')
           };
         });
@@ -4151,12 +4160,17 @@ export default function App() {
               inc.tipo === 'Otro' && inc.especificacionOtro
                 ? `Otra: ${inc.especificacionOtro}`
                 : inc.tipo;
-            const isSinGoce = vcaLabel.toUpperCase().includes('SIN GOCE');
-            const nextHNormal = isSinGoce ? 0 : effectiveHorario ? config.jornadaBase : d.hNormal;
+            const vcaUp = vcaLabel.toUpperCase();
+            const isSinGoce = vcaUp.includes('SIN GOCE');
+            const isNoPhysicalHours =
+              isSinGoce || vcaUp.includes('VACACIONES') || vcaUp.includes('INCAPACIDAD');
+            const nextHNormal = isNoPhysicalHours ? 0 : effectiveHorario ? config.jornadaBase : d.hNormal;
 
             sumN += nextHNormal;
-            if (d.horasExtrasAutorizadas === true) sumE += d.hExtra;
-            if (!isSinGoce && nextHNormal > 0) empAsist++;
+            if (!isNoPhysicalHours && d.horasExtrasAutorizadas === true) sumE += d.hExtra;
+            if (!isSinGoce && (nextHNormal > 0 || vcaUp.includes('VACACIONES') || vcaUp.includes('INCAPACIDAD'))) {
+              empAsist++;
+            }
 
             return {
               ...d,
@@ -4164,7 +4178,7 @@ export default function App() {
               entradaOriginal: origEnt,
               salidaOriginal: origSal,
               hNormal: nextHNormal,
-              hExtra: isSinGoce ? 0 : d.hExtra,
+              hExtra: isNoPhysicalHours ? 0 : d.hExtra,
               incidencia: vcaLabel,
               advertencia: `📋 ${vcaLabel.toUpperCase()} REGISTRADO (${inc.status === 'aprobada' ? 'APROBADO' : 'EN REVISIÓN RH'})`,
               huerfana: false,
@@ -4462,8 +4476,10 @@ export default function App() {
   }, [reportes, currentWeekDispersalObj, currentUser]);
 
   // Si reportes está vacío pero existe un snapshot activo en la dispersión, hidratarlo en memoria local
+  // (excepto cuando RH inició explícitamente una nueva dispersión en blanco)
   useEffect(() => {
     if (
+      dispersionMode !== 'new' &&
       reportes.length === 0 &&
       currentWeekDispersalObj &&
       !currentWeekDispersalObj.cancelada &&
@@ -4479,7 +4495,7 @@ export default function App() {
         setSelectedWeek(currentWeekDispersalObj.semanaPeriodo);
       }
     }
-  }, [reportes.length, currentWeekDispersalObj, selectedWeek]);
+  }, [dispersionMode, reportes.length, currentWeekDispersalObj, selectedWeek]);
 
   const isCurrentWeekDispersed = useMemo(() => {
     return (

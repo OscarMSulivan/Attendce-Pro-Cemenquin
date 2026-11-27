@@ -992,16 +992,22 @@ const DayRow: React.FC<DayRowProps> = ({
 
   // REGLAS DE BLOQUEO DE ENTRADA Y SALIDA:
   // 1) Si es día de Descanso programado (horarioProgramado === null) y NO tiene ninguna checada, bloquear ambas (el empleado descansó).
-  // 2) Si en día de Descanso vino a trabajar Tiempo Extra y solo tiene 1 checada, bloquear la que SÍ tenga, dejar abierta la que NO tenga y permitir Switch.
-  // 3) Si el trabajador ya tiene sus entradas y salidas completas, bloquear ambas.
+  // 2) Si la checada existía originalmente del reloj biométrico, bloquearla para protegerla (o si ambas existían originalmente).
+  // 3) Si una checada faltaba originalmente (o se movió con Switch), dejarla editable para permitir corregir errores de dedo.
   const esDiaDescanso = day.horarioProgramado === null;
   const tieneEntradaValida = Boolean(day.entrada && day.entrada !== '--:--');
   const tieneSalidaValida = Boolean(day.salida && day.salida !== '--:--');
 
-  const ambasCompletas = tieneEntradaValida && tieneSalidaValida;
+  const ambasOriginalesCompletas = teniaEntOriginal && teniaSalOriginal;
   const descansoSinChecadas = esDiaDescanso && !tieneEntradaValida && !tieneSalidaValida;
-  const isEntradaBloqueada = descansoSinChecadas || ambasCompletas || tieneEntradaValida;
-  const isSalidaBloqueada = descansoSinChecadas || ambasCompletas || tieneSalidaValida;
+  const isEntradaBloqueada =
+    descansoSinChecadas ||
+    ambasOriginalesCompletas ||
+    (tieneEntradaValida && (day.entrada === origEnt || day.entrada === origSal));
+  const isSalidaBloqueada =
+    descansoSinChecadas ||
+    ambasOriginalesCompletas ||
+    (tieneSalidaValida && (day.salida === origSal || day.salida === origEnt));
 
   return (
     <tr className={rowBg}>

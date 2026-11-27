@@ -126,6 +126,12 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
     setErrorMsg(null);
     if (!file) return;
 
+    const MAX_FILE_BYTES = 4 * 1024 * 1024;
+    if (file.size > MAX_FILE_BYTES) {
+      setErrorMsg('El archivo excede el límite permitido de 4 MB. Por favor comprímelo o toma una foto más ligera.');
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
       setUploadedFile({
@@ -420,12 +426,12 @@ export const MissingPunchFormatModal: React.FC<MissingPunchFormatModalProps> = (
                   <Clock className="w-3.5 h-3.5 text-purple-400" />
                   Capturar horas laboradas (se marcarán en color violeta para RH):
                 </span>
-                {day.horarioProgramado && (
+                {day.horarioProgramado && (!hadOriginalEnt || !hadOriginalSal) && (
                   <button
                     type="button"
                     onClick={() => {
-                      setEntrada(day.horarioProgramado!.entrada);
-                      setSalida(day.horarioProgramado!.salida);
+                      if (!hadOriginalEnt) setEntrada(day.horarioProgramado!.entrada);
+                      if (!hadOriginalSal) setSalida(day.horarioProgramado!.salida);
                     }}
                     className="text-[10px] font-bold px-2 py-1 rounded bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/30 cursor-pointer"
                   >

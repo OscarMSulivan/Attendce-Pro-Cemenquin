@@ -517,16 +517,16 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
 
     onLiberarNomina(
       targetSupervisor,
-      currentWeekNumber,
-      currentWeekPeriod,
+      effectiveWeekNumber,
+      currentDispersal?.semanaPeriodo || currentWeekPeriod,
       releaseComments,
       workedFile || undefined
     );
     setIsWorkingOnRelease(false);
   };
 
-  // Filtrado de empleados asignados en la pestaña "Mi Equipo"
-  const filteredTeam = assignedEmployees.filter(emp => {
+  // Filtrado de empleados asignados en la pestaña "Mi Equipo" (respetando la lista activa del supervisor)
+  const filteredTeam = activeListEmployees.filter(emp => {
     const query = searchEmployeeQuery.toLowerCase().trim();
     if (!query) return true;
     const queryNum = parseInt(query, 10);
@@ -1595,35 +1595,41 @@ export const SupervisorWorkspaceView: React.FC<SupervisorWorkspaceViewProps> = (
                         </div>
                       ))}
 
-                      {/* Checadas agregadas sin archivo de respaldo */}
-                      {stats.blockingNoFormatItems.map(({ employee, day }) => (
-                        <div
-                          key={`modal-fmt-${employee.id}-${day.isoDate}`}
-                          className="p-2 rounded bg-white dark:bg-slate-950/90 border border-purple-300 dark:border-purple-500/40 flex items-center justify-between gap-2 text-[11px]"
-                        >
-                          <div>
-                            <span className="font-mono font-bold text-purple-800 dark:text-purple-300">#{employee.id}</span>{' '}
-                            <span className="text-slate-900 dark:text-slate-200 font-semibold">{employee.nombre}</span>
-                            <div className="text-[10px] text-purple-700 dark:text-purple-400/90 font-mono">
-                              {day.dayName} {day.isoDate} • Agregada sin checadas originales (requiere adjunto firmado)
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIsWorkingOnRelease(false);
-                              setFormatModalTarget({
-                                employee,
-                                day,
-                                mode: 'checada_sin_gafete',
-                              });
-                            }}
-                            className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] cursor-pointer shrink-0"
+                      {/* Checadas agregadas o permisos obligatorios sin archivo de respaldo */}
+                      {stats.blockingNoFormatItems.map(({ employee, day }) => {
+                        const isPermisoFormat = day.tipoModificacionSupervisor === 'formato_permiso';
+                        return (
+                          <div
+                            key={`modal-fmt-${employee.id}-${day.isoDate}`}
+                            className="p-2 rounded bg-white dark:bg-slate-950/90 border border-purple-300 dark:border-purple-500/40 flex items-center justify-between gap-2 text-[11px]"
                           >
-                            📎 Adjuntar Respaldo
-                          </button>
-                        </div>
-                      ))}
+                            <div>
+                              <span className="font-mono font-bold text-purple-800 dark:text-purple-300">#{employee.id}</span>{' '}
+                              <span className="text-slate-900 dark:text-slate-200 font-semibold">{employee.nombre}</span>
+                              <div className="text-[10px] text-purple-700 dark:text-purple-400/90 font-mono">
+                                {day.dayName} {day.isoDate} •{' '}
+                                {isPermisoFormat
+                                  ? `Formato obligatorio de ${day.incidencia || 'Permiso'} pendiente`
+                                  : 'Agregada sin checadas originales (requiere adjunto firmado)'}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsWorkingOnRelease(false);
+                                setFormatModalTarget({
+                                  employee,
+                                  day,
+                                  mode: isPermisoFormat ? 'permiso' : 'checada_sin_gafete',
+                                });
+                              }}
+                              className="px-2.5 py-1 rounded bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] cursor-pointer shrink-0"
+                            >
+                              📎 Adjuntar Respaldo
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}

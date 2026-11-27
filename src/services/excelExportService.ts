@@ -60,10 +60,10 @@ function obtenerNotaRevisionExcel(d: ProcessedDay): string {
  */
 function limpiarIncidenciaExcel(incidencia: string, modificadoPorSupervisor?: boolean, tipoMod?: string): string {
   const clean = (incidencia || '').trim();
-  if (modificadoPorSupervisor && tipoMod === 'falta_confirmada') {
+  const upper = clean.toUpperCase();
+  if ((modificadoPorSupervisor && tipoMod === 'falta_confirmada') || upper.includes('FALTA CONFIRMADA')) {
     return 'Falta Confirmada (No asistió)';
   }
-  const upper = clean.toUpperCase();
   if (
     upper === 'FINJ' ||
     upper.includes('FALTA') ||
@@ -81,12 +81,13 @@ function limpiarIncidenciaExcel(incidencia: string, modificadoPorSupervisor?: bo
  * desde la columna A hasta la L (incluyendo ID, Colaborador y Supervisor estilizados).
  */
 export async function buildPayrollExcelFile(
-  reportes: EmployeeReport[],
+  rawReportes: EmployeeReport[],
   numeroSemana: number | string,
   selectedSupervisor?: string
 ): Promise<{ fileName: string; buffer: ExcelJS.Buffer }> {
-  if (!reportes || reportes.length === 0) {
-    throw new Error('No hay registros para exportar.');
+  const reportes = (rawReportes || []).filter(r => (r.empleado?.status || 'activo') !== 'inactivo');
+  if (reportes.length === 0) {
+    throw new Error('No hay registros activos para exportar.');
   }
 
   // Paleta de colores ejecutiva unificada (un solo color institucional en encabezados, conservando intactos los colores de alertas e inconsistencias)
@@ -512,6 +513,8 @@ export async function buildPayrollExcelFile(
   });
 
   // Fila 1: Barra de Subtotales dinámicos que se actualizan al filtrar en Excel
+  const totalFlatRows = reportes.reduce((acc, emp) => acc + emp.dias.length, 0);
+  const lastFlatRow = Math.max(3, totalFlatRows + 2);
   const subtotalRow = flatSheet.addRow([
     '',
     'TOTAL DE FILAS FILTRADAS:',
@@ -521,8 +524,8 @@ export async function buildPayrollExcelFile(
     '',
     '',
     '',
-    { formula: 'SUBTOTAL(9,I3:I5000)' },
-    { formula: 'SUBTOTAL(9,J3:J5000)' },
+    { formula: `SUBTOTAL(9,I3:I${lastFlatRow})` },
+    { formula: `SUBTOTAL(9,J3:J${lastFlatRow})` },
     '',
     '',
     ''
@@ -549,7 +552,7 @@ export async function buildPayrollExcelFile(
     'Entrada',
     'Salida',
     'H. Normal',
-    'H. Extra',
+    'H. Extra (Aut.)',
     'Incidencia',
     'Revisar',
     'Comentarios'
@@ -569,7 +572,7 @@ export async function buildPayrollExcelFile(
   let flatRowIndex = 0;
   reportes.forEach(emp => {
     const idFormatted = emp.empleado.id
-      ? (isNaN(parseInt(emp.empleado.id, 10)) ? emp.empleado.id : emp.empleado.id.padStart(5, '0'))
+      ? (/^\d+$/.test(emp.empleado.id) ? emp.empleado.id.padStart(5, '0') : emp.empleado.id)
       : '';
 
     emp.dias.forEach(d => {
@@ -582,6 +585,7 @@ export async function buildPayrollExcelFile(
         d.notaSupervisorDia || '',
         d.formatoSubidoNombre ? `[Formato adjunto: ${d.formatoSubidoNombre}]` : ''
       ].filter(Boolean).join(' ');
+      const extraAutorizada = d.horasExtrasAutorizadas === true ? d.hExtra : 0;
 
       const row = flatSheet.addRow([
         idFormatted,
@@ -593,12 +597,13 @@ export async function buildPayrollExcelFile(
         d.entrada,
         d.salida,
         d.hNormal,
-        d.hExtra,
+        extraAutorizada,
         incidenciaLimpia,
         alerta,
         comentarioDia
       ]);
       row.height = 19;
+      row.getCell(1).numFmt = '@';
 
       const inc = incidenciaLimpia.toUpperCase();
       let rowBg = isEven ? PALETTE.rowEven : PALETTE.rowOdd;
