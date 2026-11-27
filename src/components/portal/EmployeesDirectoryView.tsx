@@ -1089,35 +1089,35 @@ export const EmployeesDirectoryView: React.FC<EmployeesDirectoryViewProps> = ({
                   </select>
                 </div>
 
-                {editingEmp.jefe === '__NUEVA__' ? (
-                  <div>
-                    <label className="text-[11px] font-bold uppercase text-[#87888C] block mb-1">
-                      Nombre de la Nueva Lista
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={editingEmp.customJefe}
-                      onChange={e => setEditingEmp(p => ({ ...p, customJefe: e.target.value }))}
-                      placeholder="Ej. PLANTA CONCRETOS"
-                      className="w-full px-3 py-2 rounded-xl bg-[#171821] border border-white/10 text-xs text-white"
-                    />
-                  </div>
-                ) : (
-                  <div>
-                    <label className="text-[11px] font-bold uppercase text-[#87888C] block mb-1">
-                      Empresa / Razón Social
-                    </label>
-                    <input
-                      type="text"
-                      value={editingEmp.empresa}
-                      onChange={e => setEditingEmp(p => ({ ...p, empresa: e.target.value }))}
-                      placeholder="Ej. CEMENQUIN / EMPRESA 2"
-                      className="w-full px-3 py-2 rounded-xl bg-[#171821] border border-white/10 text-xs text-white"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-[#87888C] block mb-1">
+                    Empresa / Razón Social
+                  </label>
+                  <input
+                    type="text"
+                    value={editingEmp.empresa}
+                    onChange={e => setEditingEmp(p => ({ ...p, empresa: e.target.value }))}
+                    placeholder="Ej. CEMENQUIN / EMPRESA 2"
+                    className="w-full px-3 py-2 rounded-xl bg-[#171821] border border-white/10 text-xs text-white"
+                  />
+                </div>
               </div>
+
+              {editingEmp.jefe === '__NUEVA__' && (
+                <div>
+                  <label className="text-[11px] font-bold uppercase text-[#87888C] block mb-1">
+                    Nombre de la Nueva Lista
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingEmp.customJefe}
+                    onChange={e => setEditingEmp(p => ({ ...p, customJefe: e.target.value }))}
+                    placeholder="Ej. PLANTA CONCRETOS"
+                    className="w-full px-3 py-2 rounded-xl bg-[#171821] border border-white/10 text-xs text-white"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

@@ -344,7 +344,7 @@ export const ExecutiveSummary: React.FC<ExecutiveSummaryProps> = ({
                 }`}
               >
                 {overdueSupervisors.length > 0 ? (
-                  <AlertTriangle className="w-4 h-4 animate-bounce" />
+                  <AlertTriangle className="w-4 h-4" />
                 ) : (
                   <Clock className="w-4 h-4" />
                 )}

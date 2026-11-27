@@ -5,6 +5,7 @@
 @layer base {
   :root,
   body.light-mode {
+    color-scheme: light;
     /* Modo Claro Técnico Moderno — "Studio Alabaster & Emerald" (Predeterminado) */
     --bg-canvas: #EEF2F6;
     --bg-card: #FFFFFF;
@@ -24,6 +25,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     /* Modo Oscuro — "Obsidian Studio" */
     --bg-canvas: #0B0D13;
     --bg-card: #131722;
@@ -49,6 +51,13 @@
     color: var(--text-primary);
     transition: background-color 0.25s ease, color 0.25s ease;
     -webkit-font-smoothing: antialiased;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
   }
 
   h1, h2, h3, h4 {
@@ -387,10 +396,60 @@
   body.light-mode .bg-purple-500\/10,
   body.light-mode .bg-purple-500\/15,
   body.light-mode .bg-purple-500\/20,
-  body.light-mode .bg-purple-950\/25 {
+  body.light-mode .bg-purple-950\/20,
+  body.light-mode .bg-purple-950\/25,
+  body.light-mode .bg-purple-950\/40 {
     background-color: #E6F4F0 !important;
     color: #0B5643 !important;
     border-color: #A7DCD0 !important;
+  }
+
+  body.light-mode .text-orange-200,
+  body.light-mode .text-orange-300,
+  body.light-mode .text-orange-400 {
+    color: #9A3412 !important;
+  }
+
+  body.light-mode .bg-orange-500\/10,
+  body.light-mode .bg-orange-500\/15,
+  body.light-mode .bg-orange-500\/20,
+  body.light-mode .bg-orange-950\/20,
+  body.light-mode .bg-orange-950\/30,
+  body.light-mode .bg-orange-950\/60 {
+    background-color: #FFEDD5 !important;
+    color: #9A3412 !important;
+    border-color: #FDBA74 !important;
+  }
+
+  body.light-mode .text-sky-200,
+  body.light-mode .text-sky-300,
+  body.light-mode .text-cyan-200,
+  body.light-mode .text-cyan-300 {
+    color: #0369A1 !important;
+  }
+
+  body.light-mode .bg-sky-500\/10,
+  body.light-mode .bg-sky-500\/15,
+  body.light-mode .bg-sky-500\/20,
+  body.light-mode .bg-cyan-500\/10,
+  body.light-mode .bg-cyan-500\/15,
+  body.light-mode .bg-cyan-500\/20 {
+    background-color: #E0F2FE !important;
+    color: #0369A1 !important;
+    border-color: #7DD3FC !important;
+  }
+
+  body.light-mode .text-teal-200,
+  body.light-mode .text-teal-300 {
+    color: #0F766E !important;
+  }
+
+  body.light-mode .bg-teal-500\/10,
+  body.light-mode .bg-teal-500\/15,
+  body.light-mode .bg-teal-500\/20 {
+    background-color: #CCFBF1 !important;
+    color: #0F766E !important;
+    border-color: #5EEAD4 !important;
   }
 
   body.light-mode .text-rose-200,
@@ -402,8 +461,12 @@
   body.light-mode .bg-rose-500\/10,
   body.light-mode .bg-rose-500\/15,
   body.light-mode .bg-rose-500\/20,
+  body.light-mode .bg-rose-500\/25,
   body.light-mode .bg-rose-950\/15,
-  body.light-mode .bg-rose-950\/20 {
+  body.light-mode .bg-rose-950\/20,
+  body.light-mode .bg-rose-950\/25,
+  body.light-mode .bg-rose-950\/40,
+  body.light-mode .bg-rose-950\/70 {
     background-color: #FEE2E2 !important;
     color: #991B1B !important;
     border-color: #FCA5A5 !important;
@@ -412,8 +475,14 @@
   /* 6. Botones sólidos con texto blanco inmutable */
   body.light-mode .bg-blue-600,
   body.light-mode .bg-indigo-600,
+  body.light-mode .bg-purple-600,
+  body.light-mode .bg-amber-600,
+  body.light-mode .bg-sky-600,
+  body.light-mode .bg-cyan-600,
+  body.light-mode .bg-emerald-500,
   body.light-mode .bg-emerald-600,
   body.light-mode .bg-rose-600,
+  body.light-mode .bg-rose-600\/80,
   body.light-mode .bg-teal-600,
   body.light-mode .bg-teal-500,
   body.light-mode .bg-\[\#0F6E56\],
@@ -424,8 +493,14 @@
 
   body.light-mode .bg-blue-600 *,
   body.light-mode .bg-indigo-600 *,
+  body.light-mode .bg-purple-600 *,
+  body.light-mode .bg-amber-600 *,
+  body.light-mode .bg-sky-600 *,
+  body.light-mode .bg-cyan-600 *,
+  body.light-mode .bg-emerald-500 *,
   body.light-mode .bg-emerald-600 *,
   body.light-mode .bg-rose-600 *,
+  body.light-mode .bg-rose-600\/80 *,
   body.light-mode .bg-teal-600 *,
   body.light-mode .bg-teal-500 *,
   body.light-mode .bg-\[\#0F6E56\] *,
@@ -570,12 +645,27 @@
   .animate-scale-in,
   .animate-progress-fill,
   .animate-pipeline-pulse,
+  .animate-pulse,
+  .animate-bounce,
+  .eval-scanline,
+  .eval-orbit,
+  .eval-orbit-reverse,
   .hover-lift,
-  .card-lift {
+  .card-lift,
+  button {
     animation: none !important;
     transition: none !important;
     transform: none !important;
   }
+}
+
+/* Scrollbars estilizados y discretos para tablas de nómina y paneles */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+.dark * {
+  scrollbar-color: rgba(71, 85, 105, 0.55) transparent;
 }
 
 /* ==========================================================================

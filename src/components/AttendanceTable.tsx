@@ -1093,7 +1093,7 @@ const DayRow: React.FC<DayRowProps> = ({
                 {anomalies.entrada ? (
                   <AlertTriangle
                     className={`w-3.5 h-3.5 ml-1 shrink-0 ${
-                      anomalies.entrada.severity === 'critical' ? 'text-rose-400 animate-bounce' : 'text-orange-400'
+                      anomalies.entrada.severity === 'critical' ? 'text-rose-400' : 'text-orange-400'
                     }`}
                   />
                 ) : (
@@ -1187,7 +1187,7 @@ const DayRow: React.FC<DayRowProps> = ({
                 {anomalies.salida ? (
                   <AlertTriangle
                     className={`w-3.5 h-3.5 ml-1 shrink-0 ${
-                      anomalies.salida.severity === 'critical' ? 'text-rose-400 animate-bounce' : 'text-orange-400'
+                      anomalies.salida.severity === 'critical' ? 'text-rose-400' : 'text-orange-400'
                     }`}
                   />
                 ) : (
@@ -1325,17 +1325,17 @@ const DayRow: React.FC<DayRowProps> = ({
               </div>
 
               {day.horasExtrasAutorizadas === true && (
-                <span className="text-[8px] font-mono font-bold text-emerald-300">
+                <span className="text-[10px] font-mono font-bold text-emerald-300">
                   ✓ Para CONTPAQi
                 </span>
               )}
               {day.horasExtrasAutorizadas === false && (
-                <span className="text-[8px] font-mono font-bold text-rose-300">
+                <span className="text-[10px] font-mono font-bold text-rose-300">
                   ✕ Sin pago extra
                 </span>
               )}
               {day.horasExtrasAutorizadas === undefined && (
-                <span className="text-[8px] text-amber-300/80 animate-pulse">
+                <span className="text-[10px] font-semibold text-amber-300">
                   Pendiente validación
                 </span>
               )}
